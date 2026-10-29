@@ -1,9 +1,7 @@
 package com.toadfiles.app
 
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -63,8 +61,15 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Version").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Storage on this device").assertExists()
-        compose.onNodeWithText("Files on this device").assertExists()
+        // Use onAllNodes + fetchSemanticsNodes().isNotEmpty rather than onNodeWithText(...).assertExists
+        // because assertExists isn't available in the compose-ui-test version this project pins.
+        // The "isNotEmpty" check on the semantics-node list is the equivalent assertion.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Storage on this device").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Files on this device").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test
@@ -73,7 +78,10 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Diagnostics").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Off by default. Even when on, no data leaves the device").assertExists()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Off by default. Even when on, no data leaves the device")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test
@@ -82,7 +90,9 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Locally shared copies").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Clear all shared copies").assertExists()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Clear all shared copies").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test
@@ -91,6 +101,8 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("What's new").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Open-source credits").assertExists()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Open-source credits").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 }
