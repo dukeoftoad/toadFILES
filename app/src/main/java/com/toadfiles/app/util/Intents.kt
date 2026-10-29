@@ -114,40 +114,4 @@ object Intents {
         }
     }
 
-    fun shareFiles(context: Context, files: List<File>): Boolean {
-        if (files.isEmpty()) return false
-        val uris = ArrayList(files.map { contentUri(context, it) })
-        val single = files.size == 1
-        val intent = if (single) Intent(Intent.ACTION_SEND) else Intent(Intent.ACTION_SEND_MULTIPLE)
-        intent.apply {
-            if (single) putExtra(Intent.EXTRA_STREAM, uris[0]) else putExtra(Intent.EXTRA_STREAM, uris)
-            type = files.map { mimeOf(it) }.distinct().singleOrNull() ?: "*/*"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            // Some receivers only honour permissions via ClipData
-            clipData = android.content.ClipData.newRawUri("toadFILES", uris[0])
-            if (!single) {
-                for (u in uris.drop(1)) clipData!!.addItem(android.content.ClipData.Item(u))
-            }
-        }
-        return try {
-            context.startActivity(Intent.createChooser(intent, null))
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun shareContent(context: Context, uri: Uri, mime: String): Boolean {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            putExtra(Intent.EXTRA_STREAM, uri)
-            type = mime
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        return try {
-            context.startActivity(Intent.createChooser(intent, null))
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
 }
