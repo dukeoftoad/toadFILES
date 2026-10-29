@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
  * Coverage:
  *  - the screen renders with the app name and version label
  *  - the diagnostics toggle row is present
- *  - the "Locally shared copies" section appears
+ *  - the storage, category-count, changelog and credits sections appear
  *  - the changelog "What's new" heading renders
  *  - the OSS credits "Open-source credits" heading renders
  *
@@ -83,17 +83,6 @@ class AboutScreenTest {
         // rendered.
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Diagnostics").fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
-    @Test
-    fun `About shows the locally-shared section with a Clear button`() {
-        render()
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Locally shared copies").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Clear all shared copies").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
