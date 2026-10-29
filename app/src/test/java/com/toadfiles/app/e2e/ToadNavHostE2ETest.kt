@@ -52,10 +52,13 @@ class ToadNavHostE2ETest {
     fun `walking every bottom tab reaches the right screen`() {
         compose.setContent { ToadTheme { ToadNavHost() } }
 
-        // Browse
+        // Browse: the bottom-bar item is the only "Browse"-labelled node after a click,
+        // because the TopAppBar title shows the current dir's name, not the literal
+        // "Browse". The old >= 2 assertion only worked for Categories, where the
+        // CategoriesScreen TopAppBar title was the literal "Categories".
         compose.onNodeWithText("Browse").performClick()
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Browse").fetchSemanticsNodes().size >= 2
+            compose.onAllNodesWithText("Browse").fetchSemanticsNodes().isNotEmpty()
         }
 
         // Settings — a setting row is rendered

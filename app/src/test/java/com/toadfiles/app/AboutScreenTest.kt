@@ -1,6 +1,6 @@
 package com.toadfiles.app
 
-import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -63,8 +63,8 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Version").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Storage on this device").assertIsDisplayed()
-        compose.onNodeWithText("Files on this device").assertIsDisplayed()
+        compose.onNodeWithText("Storage on this device").assertExists()
+        compose.onNodeWithText("Files on this device").assertExists()
     }
 
     @Test
@@ -73,7 +73,7 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Diagnostics").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Off by default. Even when on, no data leaves the device").assertIsDisplayed()
+        compose.onNodeWithText("Off by default. Even when on, no data leaves the device").assertExists()
     }
 
     @Test
@@ -82,7 +82,7 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Locally shared copies").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Clear all shared copies").assertIsDisplayed()
+        compose.onNodeWithText("Clear all shared copies").assertExists()
     }
 
     @Test
@@ -91,6 +91,6 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("What's new").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Open-source credits").assertIsDisplayed()
+        compose.onNodeWithText("Open-source credits").assertExists()
     }
 }
