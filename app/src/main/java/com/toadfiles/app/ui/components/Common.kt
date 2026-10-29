@@ -52,6 +52,7 @@ import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
+import com.toadfiles.app.domain.SortOrder
 import java.io.File
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -326,7 +327,9 @@ fun ResultDialog(
 fun SortMenu(
     expanded: Boolean,
     current: SortMode,
+    currentOrder: SortOrder,
     onSelect: (SortMode) -> Unit,
+    onSelectOrder: (SortOrder) -> Unit,
     onDismiss: () -> Unit,
 ) {
     androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
@@ -334,6 +337,14 @@ fun SortMenu(
             androidx.compose.material3.DropdownMenuItem(
                 text = { Text(if (mode == current) "${mode.name.lowercase().replaceFirstChar { it.uppercase() }} ✓" else mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
                 onClick = { onSelect(mode) },
+            )
+        }
+        androidx.compose.material3.HorizontalDivider()
+        SortOrder.entries.forEach { order ->
+            val label = if (order == SortOrder.ASC) "Ascending" else "Descending"
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(if (order == currentOrder) "$label ✓" else label) },
+                onClick = { onSelectOrder(order) },
             )
         }
     }

@@ -12,6 +12,9 @@
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
+    <!-- Needed so tapping an APK can hand it to the system package installer.
+         Android still asks the user to allow installs from this app first. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".ToadApp"

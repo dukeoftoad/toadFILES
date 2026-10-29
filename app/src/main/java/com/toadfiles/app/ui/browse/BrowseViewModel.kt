@@ -217,15 +217,8 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun toggleSortOrder() {
-        val cur = _state.value.settings.sortOrder
-        viewModelScope.launch {
-            settingsRepo.setSortOrder(
-                if (cur == com.toadfiles.app.domain.SortOrder.ASC)
-                    com.toadfiles.app.domain.SortOrder.DESC
-                else com.toadfiles.app.domain.SortOrder.ASC
-            )
-        }
+    fun setSortOrder(order: com.toadfiles.app.domain.SortOrder) {
+        viewModelScope.launch { settingsRepo.setSortOrder(order) }
     }
 
     // ---------- favorites ----------
