@@ -217,8 +217,10 @@ object FileOps {
                 }
                 val children = src.listFiles()
                 if (children == null) {
-                    if (!src.canRead()) onItemFailure(src.name, IOException("not readable"))
-                    return children != null
+                    // listFiles() returns null for unreadable dirs (or IO races) — record it,
+                    // otherwise the caller counts a failure with no cause attached.
+                    onItemFailure(src.name, IOException("not readable"))
+                    return false
                 }
                 var all = true
                 for (child in children) {

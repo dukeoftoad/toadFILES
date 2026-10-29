@@ -25,7 +25,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.InstallMobile
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
@@ -64,7 +64,7 @@ import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.util.VideoThumbs
 import java.io.File
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -160,12 +160,12 @@ fun iconFor(item: FileItem): ImageVector = if (item.isDir) {
         "apk" -> Icons.Outlined.InstallMobile
         in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv") ->
             Icons.Outlined.Description
-        else -> Icons.Outlined.InsertDriveFile
+        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
     }
 }
 
 fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
-    FilterMode.ALL -> Icons.Outlined.InsertDriveFile
+    FilterMode.ALL -> Icons.AutoMirrored.Outlined.InsertDriveFile
     FilterMode.DOCS -> Icons.Outlined.Description
     FilterMode.IMAGES -> Icons.Outlined.Image
     FilterMode.VIDEOS -> Icons.Outlined.Videocam

@@ -40,7 +40,7 @@ toadFILES blends the simplicity of Fossify File Manager, the category/storage in
 
 ```bash
 ./gradlew :app:assembleDebug          # debug APK
-./gradlew :app:testDebugUnitTest      # 41 JVM unit tests
+./gradlew :app:testDebugUnitTest      # 127 JVM tests (JUnit + Robolectric + Compose E2E)
 ./gradlew :app:lintDebug              # Android lint
 ```
 
@@ -75,7 +75,7 @@ toadFILES requests no `INTERNET` permission. Favorites and preferences live in l
 
 ## CI
 
-GitHub Actions runs on every push: JDK 21 + Gradle cache + wrapper validation + unit tests + lint + debug assemble (`.github/workflows/android.yml`).
+GitHub Actions runs on every push: JDK 17 + Gradle cache + wrapper validation + unit tests + lint + debug assemble (`.github/workflows/android.yml`).
 
 ## License
 

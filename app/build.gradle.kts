@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -12,11 +11,10 @@ android {
         applicationId = "com.toadfiles.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables { useSupportLibrary = true }
     }
 
     buildTypes {
@@ -34,9 +32,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -52,8 +47,22 @@ android {
         checkReleaseBuilds = false
     }
     testOptions {
-        unitTests.isIncludeAndroidResources = false
+        // Robolectric needs the merged resources (Compose UI tests, real strings/layouts).
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.maxHeapSize = "1536m" }
+        }
     }
+}
+
+// AGP 9 built-in Kotlin auto-aligns jvmTarget with compileOptions (Java 17).
+
+// Robolectric requires a JDK whose FileDescriptor internals it knows — JDK 17 LTS is the
+// safe runtime for unit tests (JDK 21.0.13+ changed internals and crashes the shadows).
+tasks.withType<Test>().configureEach {
+    javaLauncher.set(
+        javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) }
+    )
 }
 
 dependencies {
@@ -72,12 +81,24 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.coroutines.core)
 
+    // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(libs.androidx.espresso.core)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.navigation.testing)
 
+    // ---- Instrumented tests (device/emulator) ----
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.compose.ui.test.manifest)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

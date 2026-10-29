@@ -17,6 +17,7 @@ import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
 import com.toadfiles.app.domain.ZipSupport
 import com.toadfiles.app.domain.Trash
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -63,7 +64,10 @@ enum class OpKind { COPY, MOVE, ZIP_EXTRACT }
 data class PropertiesDetail(val sizeText: String, val children: Int?)
 
 @OptIn(FlowPreview::class)
-class BrowseViewModel(private val container: AppContainer) : ViewModel() {
+class BrowseViewModel(
+    private val container: AppContainer,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     private val fileRepo = container.fileRepo
     private val settingsRepo = container.settingsRepo
@@ -110,7 +114,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
                 breadcrumbs = breadcrumbs(dir),
             )
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val s = _state.value.settings
             if (!dir.isDirectory || !dir.canRead()) {
                 // Guard against stale results: only apply if this directory is still the current one.
@@ -161,7 +165,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         searchJob?.cancel()
         val dir = _state.value.dir ?: return
         if (q.isBlank()) return
-        searchJob = viewModelScope.launch(Dispatchers.IO) {
+        searchJob = viewModelScope.launch(ioDispatcher) {
             delay(300) // debounce
             val showHidden = _state.value.settings.showHidden
             val results = searchTree(dir, q, showHidden)
@@ -255,7 +259,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
     fun requestRename(file: File) = _state.update { it.copy(pendingRename = file) }
 
     fun rename(file: File, newName: String) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val dest = FileOps.rename(file, newName)
             if (dest != null) remapFavorites(file.path, dest.path)
             _state.update {
@@ -294,7 +298,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
     fun confirmDelete() {
         val files = _state.value.pendingDelete ?: return
         _state.update { it.copy(pendingDelete = null, progress = "Deleting" to OpProgress(0, files.size, "")) }
-        opJob = viewModelScope.launch(Dispatchers.IO) {
+        opJob = viewModelScope.launch(ioDispatcher) {
             val roots = container.fileRepo.roots().map { it.dir }
             val trashed = Trash.trash(files, roots)
             val failed = files.count { it.exists() }
@@ -317,7 +321,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
     fun undoDelete() {
         val trashed = _state.value.lastTrashed ?: return
         _state.update { it.copy(lastTrashed = null) }
-        opJob = viewModelScope.launch(Dispatchers.IO) {
+        opJob = viewModelScope.launch(ioDispatcher) {
             var restored = 0
             for (t in trashed) if (Trash.restore(t) != null) restored++
             _state.update {
@@ -337,7 +341,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
     fun pasteFromClipboard() {
         val clip = _state.value.clipboard ?: return
         val dir = _state.value.dir ?: return
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val conflicts = clip.files.filter { File(dir, it.name).exists() && it.parentFile != dir }.map { it.name }
             if (conflicts.isEmpty()) {
                 startOp(clip.mode.toKind(), dir, clip.files, ConflictStrategy.RENAME)
@@ -391,7 +395,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         op: suspend (onP: (OpProgress) -> Unit) -> OpResult,
         onDone: suspend (OpResult) -> Unit = {},
     ) {
-        opJob = viewModelScope.launch(Dispatchers.IO) {
+        opJob = viewModelScope.launch(ioDispatcher) {
             val r = op { p -> _state.update { it.copy(progress = title to p) } }
             _state.update { it.copy(progress = null, result = r, resultTitle = title) }
             onDone(r)
@@ -414,7 +418,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         val outName = PathSafety.uniqueName(dir, "archive.zip")
         val out = File(dir, outName)
         _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
-        opJob = viewModelScope.launch(Dispatchers.IO) {
+        opJob = viewModelScope.launch(ioDispatcher) {
             val r = ZipSupport.zip(files, out) { p -> _state.update { it.copy(progress = "Zipping" to p) } }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }
             load(dir)
@@ -427,7 +431,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         val target = File(dir, targetName)
         val replace = target.exists()
         _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
-        opJob = viewModelScope.launch(Dispatchers.IO) {
+        opJob = viewModelScope.launch(ioDispatcher) {
             val r = ZipSupport.extract(file, target, replace) { p ->
                 _state.update { it.copy(progress = "Extracting" to p) }
             }
@@ -440,7 +444,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
 
     fun requestProperties(file: File) {
         _state.update { it.copy(properties = file, propertiesDetail = null) }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val size = FileOps.sizeOf(file)
             val children = if (file.isDirectory) fileRepo.childCount(file) else null
             _state.update {

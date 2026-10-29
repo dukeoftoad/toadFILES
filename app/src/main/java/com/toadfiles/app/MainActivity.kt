@@ -91,7 +91,13 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshPermissionState() {
         hasAllFilesAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
+            // Some ROMs/test environments can throw from this check; failing closed
+            // (showing onboarding) is always safe.
+            try {
+                Environment.isExternalStorageManager()
+            } catch (_: Exception) {
+                false
+            }
         } else {
             false
         }

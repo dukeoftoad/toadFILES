@@ -1,6 +1,7 @@
 package com.toadfiles.app
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
@@ -15,11 +16,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** Tiny hand-rolled DI container — no framework, no reflection, nothing to misconfigure. */
-class AppContainer(app: ToadApp) {
+class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val fileRepo = FileRepository(app)
-    val mediaRepo = MediaRepository(app.contentResolver)
-    val settingsRepo = SettingsRepository(app)
+    val fileRepo = FileRepository(context)
+    val mediaRepo = MediaRepository(context.contentResolver)
+    val settingsRepo = SettingsRepository(context)
     val clipboard = Clipboard()
 }
 
