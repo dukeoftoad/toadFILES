@@ -15,6 +15,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * Share/open handoff checks on the JVM: the FileProvider must resolve real paths
