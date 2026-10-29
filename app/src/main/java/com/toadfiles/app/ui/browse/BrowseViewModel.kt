@@ -169,7 +169,12 @@ class BrowseViewModel(
         _state.update { it.copy(query = q, searching = q.isNotBlank(), searchCapped = false) }
         searchJob?.cancel()
         val dir = _state.value.dir ?: return
-        if (q.isBlank()) return
+        if (q.isBlank()) {
+            // Clearing the search must restore the real folder listing — otherwise the
+            // stale search results kept masquerading as the folder contents.
+            load(dir)
+            return
+        }
         searchJob = viewModelScope.launch(ioDispatcher) {
             delay(300) // debounce
             val s = _state.value.settings
@@ -296,27 +301,20 @@ class BrowseViewModel(
     }
 
     /**
-     * Local-only share: copies the given files into the app-private shared folder and reports
-     * the result via a toast. Nothing leaves the device; the user can review or clear the
-     * snapshots from About → "Locally shared copies". This replaces the old ACTION_SEND
-     * handoff which silently failed when no receiver was installed.
+     * Real Android share: the screen hands the given files to the system share sheet via
+     * ACTION_SEND / ACTION_SEND_MULTIPLE (FileProvider URIs, see [com.toadfiles.app.util.Intents]).
+     * The user picks the target app; toadFILES itself uploads nothing (no INTERNET permission).
      */
-    fun shareLocal(files: List<File>) {
-        if (files.isEmpty()) {
-            _state.update { it.copy(toast = "Nothing selected to share") }
-            return
+    fun shareFiles(files: List<File>) {
+        if (files.none { it.isFile }) {
+            _state.update { it.copy(toast = "Nothing shareable selected") }
         }
-        viewModelScope.launch(ioDispatcher) {
-            val r = container.sharedRepo.copyIn(files)
-            _state.update {
-                it.copy(
-                    toast = when {
-                        r.copied == 0 -> "Could not share any files (${r.failures.firstOrNull() ?: "unknown"})"
-                        r.skipped == 0 -> "Shared ${r.copied} file(s) locally"
-                        else -> "Shared ${r.copied} of ${r.copied + r.skipped} file(s) locally"
-                    },
-                )
-            }
+    }
+
+    /** Quick toggle for hidden files, reachable straight from the Browse top bar. */
+    fun toggleHiddenFiles() {
+        viewModelScope.launch {
+            settingsRepo.setShowHidden(!_state.value.settings.showHidden)
         }
     }
 

@@ -110,7 +110,7 @@ fun FileActionSheet(
 
             // Primary actions: Open / Share / Rename
             SheetRow(Icons.AutoMirrored.Outlined.OpenInNew, "Open", onClick = onOpen)
-            SheetRow(Icons.Outlined.Share, "Share (copy locally)", onClick = onShare)
+            SheetRow(Icons.Outlined.Share, "Share", onClick = onShare)
             SheetRow(Icons.Outlined.DriveFileRenameOutline, "Rename", onClick = onRename)
 
             // Clipboard actions: Copy / Move

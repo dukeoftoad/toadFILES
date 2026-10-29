@@ -122,7 +122,7 @@ fun TrashScreen(
                     )
                 }
                 items(state.entries, key = { it.file.absolutePath }) { e ->
-                    TrashRow(e, onRestore = { vm.restore(e) }, onDelete = { vm.deleteForever(e) })}
+                    TrashRow(e, onRestore = { vm.restore(e) }, onDelete = { vm.requestDeleteForever(e) })}
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
@@ -136,6 +136,20 @@ fun TrashScreen(
             destructive = true,
             onConfirm = { vm.emptyNow() },
             onDismiss = { vm.dismissEmpty() },
+        )
+    }
+
+    // Permanent single-item deletion gets the same respect: confirm before destroying.
+    state.confirmingDelete?.let { e ->
+        ConfirmDialog(
+            title = "Delete forever?",
+            message = "Permanently delete \"" +
+                (e.originPath.substringAfterLast('/').ifEmpty { e.file.name }) +
+                "\"? This cannot be undone.",
+            confirmLabel = "Delete forever",
+            destructive = true,
+            onConfirm = { vm.confirmDeleteForever() },
+            onDismiss = { vm.dismissDeleteForever() },
         )
     }
 }

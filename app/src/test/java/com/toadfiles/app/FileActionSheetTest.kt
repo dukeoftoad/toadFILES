@@ -72,7 +72,7 @@ class FileActionSheetTest {
         renderSheet(fileItem("report.pdf", isDir = false))
         // Core actions every item gets
         assertRowShown("Open")
-        assertRowShown("Share (copy locally)")
+        assertRowShown("Share")
         assertRowShown("Rename")
         assertRowShown("Copy to…")
         assertRowShown("Move to…")
