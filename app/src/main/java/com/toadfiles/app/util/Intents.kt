@@ -39,6 +39,33 @@ object Intents {
         }
     }
 
+    /** Same as [openFile] but forces a chooser so the user picks the handler each time. */
+    fun openWith(context: Context, file: File): Boolean {
+        if (!file.exists()) return false
+        val uri = contentUri(context, file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeOf(file))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            // Always show the chooser so the user picks which app handles the file.
+            context.startActivity(Intent.createChooser(intent, "Open with"))
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Copies a real path to the system clipboard. Returns false if the clipboard service is unavailable. */
+    fun copyPathToClipboard(context: Context, file: File): Boolean = try {
+        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("toadFILES path", file.absolutePath))
+        true
+    } catch (_: Exception) {
+        false
+    }
+
     /** Opens a MediaStore-backed content URI owned by the OS. */
     fun openContent(context: Context, uri: Uri, mime: String): Boolean {
         val intent = Intent(Intent.ACTION_VIEW).apply {

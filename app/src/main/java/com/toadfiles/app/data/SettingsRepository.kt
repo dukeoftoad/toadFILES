@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
@@ -22,6 +23,8 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 data class ToadSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
+    /** Accent chosen by the user when dynamic color is OFF. Ignored when dynamicColor is on. */
+    val accentColor: AccentColor = AccentColor.TOAD,
     val showHidden: Boolean = false,
     val sortMode: SortMode = SortMode.NAME,
     val sortOrder: SortOrder = SortOrder.ASC,
@@ -31,6 +34,12 @@ data class ToadSettings(
     val searchResultLimit: Int = SEARCH_LIMIT_DEFAULT,
     /** When true, in-folder tree search also opens small text files and matches their contents. */
     val contentSearch: Boolean = false,
+    /**
+     * Toggle for any future diagnostic / crash-report upload. toadFILES has no internet
+     * permission so this is effectively a no-op today, but it's the user-visible knob that
+     * signals intent for the privacy promise ("no diagnostics by default").
+     */
+    val diagnosticsEnabled: Boolean = false,
 ) {
     companion object {
         const val SEARCH_LIMIT_MIN = 10
@@ -51,6 +60,7 @@ class SettingsRepository(
     private object Keys {
         val THEME = stringPreferencesKey("theme_mode")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
+        val ACCENT = stringPreferencesKey("accent_color")
         val HIDDEN = booleanPreferencesKey("show_hidden")
         val SORT_MODE = stringPreferencesKey("sort_mode")
         val SORT_ORDER = stringPreferencesKey("sort_order")
@@ -58,6 +68,7 @@ class SettingsRepository(
         val FAVORITES = stringSetPreferencesKey("favorites")
         val SEARCH_LIMIT = intPreferencesKey("search_limit")
         val CONTENT_SEARCH = booleanPreferencesKey("content_search")
+        val DIAGNOSTICS = booleanPreferencesKey("diagnostics_enabled")
     }
 
     val settings: Flow<ToadSettings> = store.data.map { p ->
@@ -65,6 +76,8 @@ class SettingsRepository(
             themeMode = p[Keys.THEME]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                 ?: ThemeMode.SYSTEM,
             dynamicColor = p[Keys.DYNAMIC] ?: true,
+            accentColor = p[Keys.ACCENT]?.let { runCatching { AccentColor.valueOf(it) }.getOrNull() }
+                ?: AccentColor.TOAD,
             showHidden = p[Keys.HIDDEN] ?: false,
             sortMode = p[Keys.SORT_MODE]?.let { runCatching { SortMode.valueOf(it) }.getOrNull() }
                 ?: SortMode.NAME,
@@ -78,11 +91,13 @@ class SettingsRepository(
                 ToadSettings.SEARCH_LIMIT_MAX,
             ) ?: ToadSettings.SEARCH_LIMIT_DEFAULT,
             contentSearch = p[Keys.CONTENT_SEARCH] ?: false,
+            diagnosticsEnabled = p[Keys.DIAGNOSTICS] ?: false,
         )
     }
 
     suspend fun setThemeMode(mode: ThemeMode) = store.edit { it[Keys.THEME] = mode.name }
     suspend fun setDynamicColor(enabled: Boolean) = store.edit { it[Keys.DYNAMIC] = enabled }
+    suspend fun setAccentColor(accent: AccentColor) = store.edit { it[Keys.ACCENT] = accent.name }
     suspend fun setShowHidden(enabled: Boolean) = store.edit { it[Keys.HIDDEN] = enabled }
     suspend fun setSortMode(mode: SortMode) = store.edit { it[Keys.SORT_MODE] = mode.name }
     suspend fun setSortOrder(order: SortOrder) = store.edit { it[Keys.SORT_ORDER] = order.name }
@@ -91,6 +106,7 @@ class SettingsRepository(
         it[Keys.SEARCH_LIMIT] = limit.coerceIn(ToadSettings.SEARCH_LIMIT_MIN, ToadSettings.SEARCH_LIMIT_MAX)
     }
     suspend fun setContentSearch(enabled: Boolean) = store.edit { it[Keys.CONTENT_SEARCH] = enabled }
+    suspend fun setDiagnosticsEnabled(enabled: Boolean) = store.edit { it[Keys.DIAGNOSTICS] = enabled }
 
     suspend fun toggleFavorite(path: String) = store.edit { p ->
         val cur = p[Keys.FAVORITES] ?: emptySet()

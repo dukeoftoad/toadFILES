@@ -69,7 +69,11 @@ class MainActivity : ComponentActivity() {
                     initialValue = com.toadfiles.app.data.ToadSettings(),
                 )
             }.collectAsStateWithLifecycle()
-            ToadTheme(themeMode = settings.value.themeMode, dynamicColor = settings.value.dynamicColor) {
+            ToadTheme(
+                themeMode = settings.value.themeMode,
+                dynamicColor = settings.value.dynamicColor,
+                accentColor = settings.value.accentColor,
+            ) {
                 if (hasFileAccess()) {
                     ToadNavHost()
                 } else {

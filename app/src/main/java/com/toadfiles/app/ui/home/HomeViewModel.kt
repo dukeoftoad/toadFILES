@@ -3,6 +3,7 @@ package com.toadfiles.app.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
+import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.StorageStats
@@ -18,6 +19,14 @@ data class HomeUiState(
     val storage: StorageStats? = null,
     val quickLinks: List<Pair<String, File>> = emptyList(),
     val favorites: List<FileItem> = emptyList(),
+    /**
+     * Smart-recent feed on Home. Replaces the old Categories section: the user wanted one
+     * unified home, with the previously-separate Recent tab folded in. We list files the
+     * OS media library reports as recently modified, newest first, capped at [RECENT_LIMIT].
+     */
+    val recentFiles: List<MediaRepository.MediaEntry> = emptyList(),
+    val loadingRecent: Boolean = false,
+    /** Kept for the Storage screen which still uses category counts; not shown on Home anymore. */
     val categories: List<CategorySummary> = emptyList(),
     val loadingCategories: Boolean = false,
 )
@@ -33,6 +42,7 @@ class HomeViewModel(
     init {
         refreshStorage()
         refreshQuickLinks()
+        refreshRecent()
         viewModelScope.launch {
             // One-shot cleanup of favorites pointing at paths that no longer exist
             // (file renamed / moved / deleted outside toadFILES, or volume unmounted).
@@ -61,6 +71,15 @@ class HomeViewModel(
         }
     }
 
+    /** Smart-recent files from the OS media library, newest first. Bounded to keep the list cheap. */
+    fun refreshRecent() {
+        _state.update { it.copy(loadingRecent = true) }
+        viewModelScope.launch(ioDispatcher) {
+            val recents = container.mediaRepo.recent(limit = RECENT_LIMIT)
+            _state.update { it.copy(recentFiles = recents, loadingRecent = false) }
+        }
+    }
+
     private fun refreshFavorites(paths: Set<String>) {
         viewModelScope.launch(ioDispatcher) {
             val items = paths.mapNotNull { p ->
@@ -83,10 +102,16 @@ class HomeViewModel(
     fun refresh() {
         refreshStorage()
         refreshQuickLinks()
+        refreshRecent()
         refreshCategories()
     }
 
     fun toggleFavorite(path: String) {
         viewModelScope.launch { container.settingsRepo.toggleFavorite(path) }
+    }
+
+    companion object {
+        /** Bounded recent list — matches the original Recent tab's cap. */
+        const val RECENT_LIMIT = 60
     }
 }
