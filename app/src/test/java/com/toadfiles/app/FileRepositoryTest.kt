@@ -1,0 +1,147 @@
+package com.toadfiles.app
+
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.FileRepository
+import com.toadfiles.app.domain.Trash
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
+
+/**
+ * Real-filesystem behaviour of FileRepository, executed on the JVM through Robolectric.
+ * Every assertion runs against actual directories and files — no mocks.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class FileRepositoryTest {
+
+    private lateinit var repo: FileRepository
+    private lateinit var base: File
+
+    @Before
+    fun setUp() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        repo = FileRepository(context)
+        base = File(context.cacheDir, "repo-test-${System.nanoTime()}").apply { mkdirs() }
+    }
+
+    @Test
+    fun `list returns items with real name size type`() {
+        File(base, "alpha.txt").apply { writeText("12345") } // 5 bytes
+        File(base, "subdir").mkdirs()
+
+        val items = repo.list(base, showHidden = false)
+
+        assertEquals(2, items.size)
+        val alpha = items.first { it.name == "alpha.txt" }
+        assertFalse(alpha.isDir)
+        assertEquals(5L, alpha.size)
+        assertTrue(alpha.lastModified > 0)
+        val dir = items.first { it.name == "subdir" }
+        assertTrue(dir.isDir)
+        assertEquals(0L, dir.size)
+    }
+
+    @Test
+    fun `list hides dotfiles unless asked otherwise`() {
+        File(base, "visible.txt").writeText("x")
+        File(base, ".hidden").writeText("x")
+
+        assertEquals(listOf("visible.txt"), repo.list(base, showHidden = false).map { it.name })
+        val withHidden = repo.list(base, showHidden = true).map { it.name }.sorted()
+        assertEquals(listOf(".hidden", "visible.txt"), withHidden)
+    }
+
+    @Test
+    fun `list keeps the app trash folder out of browse results`() {
+        File(base, "normal.txt").writeText("x")
+        File(base, Trash.DIR_NAME).mkdirs()
+        File(base, "user_file.txt").writeText("x")
+
+        val names = repo.list(base, showHidden = false).map { it.name }
+        assertFalse("trash dir must not appear in Browse", names.contains(Trash.DIR_NAME))
+        assertEquals(2, names.size)
+    }
+
+    @Test
+    fun `list on unreadable or missing dir returns empty list instead of crashing`() {
+        assertEquals(emptyList<Any>().size, repo.list(File(base, "does-not-exist"), false).size)
+        val fileNotDir = File(base, "plain.txt").apply { writeText("x") }
+        assertTrue(repo.list(fileNotDir, false).isEmpty())
+    }
+
+    @Test
+    fun `newFolder creates a real directory`() {
+        val created = repo.newFolder(base, "New Photos")
+        assertNotNull(created)
+        assertTrue(created!!.isDirectory)
+        assertEquals("New Photos", created.name)
+    }
+
+    @Test
+    fun `newFolder rejects empty and path-traversal names`() {
+        assertNull(repo.newFolder(base, ""))
+        assertNull(repo.newFolder(base, "   "))
+        assertNull(repo.newFolder(base, "a/b"))
+        assertNull(repo.newFolder(base, "a\\b"))
+        assertNull(repo.newFolder(base, ".."))
+        assertEquals(0, base.listFiles()!!.size)
+    }
+
+    @Test
+    fun `newFolder fails honestly when the name already exists`() {
+        File(base, "dupe").mkdirs()
+        assertNull(repo.newFolder(base, "dupe"))
+    }
+
+    @Test
+    fun `childCount counts entries and reports -1 for non-directories`() {
+        val dir = File(base, "counted").apply { mkdirs() }
+        File(dir, "1").writeText("x")
+        File(dir, "2").writeText("x")
+        assertEquals(2, repo.childCount(dir))
+        assertEquals(-1, repo.childCount(File(dir, "1")))
+        assertEquals(-1, repo.childCount(File(base, "missing")))
+    }
+
+    @Test
+    fun `quickLinks only lists standard folders that actually exist`() {
+        File(base, "Download").mkdirs()
+        File(base, "DCIM").mkdirs()
+        File(base, "RandomFolder").mkdirs()
+
+        val links = repo.quickLinks(root = base)
+
+        assertEquals(listOf("Download", "DCIM"), links.map { it.first })
+        assertTrue(links.all { it.second.isDirectory })
+    }
+
+    @Test
+    fun `roots falls back to at least one browsable volume`() {
+        val roots = repo.roots()
+        assertTrue("expected at least one storage root", roots.isNotEmpty())
+        assertNotNull(roots[0].dir)
+    }
+
+    @Test
+    fun `statsOf reports sane volume numbers or null without crashing`() {
+        val stats = repo.statsOf(base)
+        // StatFs behaviour depends on the mount; anything non-null must be sane.
+        if (stats != null) {
+            assertTrue(stats.totalBytes >= 0)
+            assertTrue(stats.freeBytes >= 0)
+        }
+        // Missing path must not throw.
+        repo.statsOf(File(base, "nope"))
+    }
+
+}

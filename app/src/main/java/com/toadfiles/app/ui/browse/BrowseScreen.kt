@@ -29,7 +29,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.GridView
@@ -39,10 +39,10 @@ import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material.icons.outlined.ViewList
+import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -143,7 +143,8 @@ fun BrowseScreen(
     BackHandler(enabled = !selectionMode) {
         val dir = state.dir
         val canGoUp = dir != null && state.breadcrumbs.size > 1 && dir.parentFile?.canRead() == true
-        if (canGoUp) vm.openDir(dir!!.parentFile!!) else onNavigateUp()
+        val parent = dir?.parentFile
+        if (canGoUp && parent != null) vm.openDir(parent) else onNavigateUp()
     }
     // Registered last, so it wins: while a search is active, Back first clears the search
     // instead of jumping out of the folder.
@@ -188,7 +189,7 @@ fun BrowseScreen(
                                     moreMenuOpen = false
                                     vm.copyToClipboard(Clipboard.Mode.MOVE, state.selection.toList())
                                 },
-                                leadingIcon = { Icon(Icons.Outlined.DriveFileMove, null) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) },
                             )
                             DropdownMenuItem(
                                 text = { Text("Zip ${state.selection.size} item(s)") },
@@ -265,11 +266,11 @@ fun BrowseScreen(
                         IconButton(onClick = { vm.toggleLayout() }) {
                             Icon(
                                 if (state.settings.browseLayout == BrowseLayout.GRID)
-                                    Icons.Outlined.ViewList else Icons.Outlined.GridView,
+                                    Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
                                 "Toggle list / grid view",
                             )
                         }
-                        IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Outlined.Sort, "Sort") }
+                        IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, "Sort") }
                         SortMenu(
                             expanded = sortMenuOpen,
                             current = state.settings.sortMode,

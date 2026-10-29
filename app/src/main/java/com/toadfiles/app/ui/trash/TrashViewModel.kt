@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +21,10 @@ data class TrashUiState(
 )
 
 /** Browse's trash: restore, delete forever, empty — all on real files, all on Dispatchers.IO. */
-class TrashViewModel(private val container: AppContainer) : ViewModel() {
+class TrashViewModel(
+    private val container: AppContainer,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(TrashUiState())
     val state: StateFlow<TrashUiState> = _state
@@ -34,14 +38,14 @@ class TrashViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refresh(purgeFirst: Boolean = false) {
         _state.update { it.copy(loading = true) }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             if (purgeFirst) Trash.purge(volumeRoots)
             _state.update { it.copy(entries = Trash.entries(volumeRoots), loading = false) }
         }
     }
 
     fun restore(entry: TrashEntry) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val ok = Trash.restore(entry.file) != null
             _state.update {
                 it.copy(
@@ -54,7 +58,7 @@ class TrashViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun deleteForever(entry: TrashEntry) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             Trash.deleteForever(entry.file)
             refresh()
         }
@@ -65,7 +69,7 @@ class TrashViewModel(private val container: AppContainer) : ViewModel() {
 
     fun emptyNow() {
         _state.update { it.copy(confirmingEmpty = false) }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val removed = Trash.empty(volumeRoots)
             _state.update { it.copy(toast = "Trash emptied — $removed item(s) removed forever") }
             refresh()

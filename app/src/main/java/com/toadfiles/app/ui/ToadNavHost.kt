@@ -74,7 +74,11 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     NavigationBarItem(
                         selected = currentBase == baseRoute,
                         onClick = {
-                            navController.navigate(dest.route) {
+                            // Navigate with the BASE route ("browse"), never the raw pattern
+                            // ("browse?dir={dir}") — navigating the pattern makes Navigation
+                            // parse the literal "{dir}" as the argument value, which sent the
+                            // Browse tab to a folder literally named "{dir}" (caught by E2E).
+                            navController.navigate(baseRoute) {
                                 popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
