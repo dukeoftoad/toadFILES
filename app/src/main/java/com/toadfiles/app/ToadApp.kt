@@ -15,7 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** Tiny hand-rolled DI container — no framework, no reflection, nothing to misconfigure. */
+/** Tiny hand-rolled DI container. No framework, no reflection. */
 class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val fileRepo = FileRepository(context)

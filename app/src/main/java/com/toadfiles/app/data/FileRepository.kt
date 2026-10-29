@@ -12,14 +12,15 @@ import com.toadfiles.app.domain.StorageStats
 import com.toadfiles.app.domain.Trash
 import java.io.File
 
-/** Read access to the real file system. No startup scanning — nothing is touched until a screen asks for it. */
+/** Read access to the real file system. Nothing is touched until a screen asks for it. */
 class FileRepository(private val context: Context) {
 
     fun primaryRoot(): File = Environment.getExternalStorageDirectory()
 
     /**
      * Every mounted volume: internal storage plus SD cards and USB drives when present.
-     * Unmounted/preparing volumes are skipped — only MEDIA_MOUNTED is browsable.
+     * Only MEDIA_MOUNTED volumes show up here; anything unmounted or still preparing
+     * is not browsable.
      */
     fun roots(): List<StorageRoot> {
         val out = mutableListOf<StorageRoot>()

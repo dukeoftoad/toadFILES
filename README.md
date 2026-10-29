@@ -1,82 +1,50 @@
-# toadFILES 🐸
+# toadFILES
 
-A lightweight, fast, **privacy-first file manager for Android** — no ads, no tracking, no cloud, no internet permission.
+A file manager for Android that stays out of your way. No ads, no tracking, no cloud, and no internet permission at all, so it can't phone home even if it wanted to.
 
-toadFILES blends the simplicity of Fossify File Manager, the category/storage insights of Mi File Manager, the clean navigation of iOS Files, and a Material 3 design with an original toad-in-a-folder identity.
+I built it because I wanted something that opens fast, browses real folders instead of a fake "recent files" view, and doesn't nag me. It works on actual files in actual directories and tells you honestly when something fails.
 
-## Feature status
+## What it does
 
-| Feature | Status |
-|---|---|
-| Home (storage summary, quick access, favorites, category overview) | ✅ Implemented |
-| Real filesystem browsing (any readable folder, breadcrumbs) | ✅ Implemented |
-| Search (debounced, cancellable, scoped to the current folder tree) | ✅ Implemented |
-| Sort (natural order: name / size / date / type, asc/desc, dirs first) | ✅ Implemented |
-| Filter (docs / images / videos / audio / archives / APKs) | ✅ Implemented |
-| Multi-select + Copy / Move / Rename / Delete / Share / Properties | ✅ Implemented |
-| Conflict handling (keep-both / replace / skip) with honest result reports | ✅ Implemented |
-| Self-copy / move-into-itself protection | ✅ Implemented |
-| ZIP create + safe extract (ZIP-slip guard, bomb limits, no silent overwrite) | ✅ Implemented |
-| Categories via MediaStore (images, videos, audio, docs, archives, APKs) | ✅ Implemented |
-| Recent files (MediaStore, on-demand) | ✅ Implemented |
-| Storage analyzer (top-level folder sizes, computed on demand, cancellable) | ✅ Implemented |
-| Favorites (pinned locally via DataStore, follow renames & moves) | ✅ Implemented |
-| Trash with undo — deletes move to a per-volume trash, kept 30 days, auto-purged | ✅ Implemented |
-| Browse thumbnails — images (Coil) + video frames (MediaMetadataRetriever) | ✅ Implemented |
-| Grid / list view toggle in Browse (persisted) | ✅ Implemented |
-| SD card & USB-OTG volumes (StorageManager) with per-volume stats, analyzer & trash | ✅ Implemented |
-| APK install handoff to the system package installer | ✅ Implemented |
-| Share from Recent & Categories + "Show in folder" jump from Categories | ✅ Implemented |
-| Theme: light / dark / follow system + Material You dynamic color | ✅ Implemented |
-| Privacy: no INTERNET permission, no analytics, no background scans | ✅ Implemented |
-| Encrypted Vault (Keystore + biometrics) | 🧭 Planned — omitted from v1 until it can be done safely |
+- Browse any readable folder on internal storage, SD cards and USB drives. Breadcrumbs, hidden-file toggle, list or grid.
+- Search the current folder tree. There's a settings toggle to also search inside small text files, and you can set your own result limit.
+- Copy, move, rename, share, zip/unzip, delete. Deleted items land in a per-volume trash and stay there for 30 days, with undo.
+- Sort by name, size, date or type. Filter down to documents, images, videos, audio, archives or APKs.
+- Favorites that follow renames and moves, and get cleaned up when the target is gone.
+- Storage analyzer, category counts and recent files, all computed on demand. Nothing scans in the background.
+- APK install handoff to the system installer.
+- Light / dark / follow-system theme with Material You colors.
 
-## Requirements
+Encrypted vault (Keystore plus biometrics) is on the list. It'll show up once I'm confident it can be done right.
 
-- Android 8.0+ (API 26); primary target is Android 16 (API 36)
-- "All files access" permission (standard for file managers on Android 11+); legacy storage permission on Android 8–10
+## Install
 
-## Build
+Grab the APK from the [Releases](https://github.com/dukeoftoad/toadFILES/releases) page. Android 8.0 or newer is required. On Android 11+ the app asks for "All files access", which is the standard permission for a file manager.
 
-```bash
-./gradlew :app:assembleDebug          # debug APK
-./gradlew :app:testDebugUnitTest      # 127 JVM tests (JUnit + Robolectric + Compose E2E)
-./gradlew :app:lintDebug              # Android lint
+## Building from source
+
+```
+./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest
 ```
 
-Or open the project in Android Studio (Koala or newer) and press Run.
+Android Studio (Koala or newer) works too. Tests are plain JVM tests running on Robolectric, so no emulator is needed.
 
-## Architecture
+## Project layout
 
-Small, boring, on purpose:
+Nothing clever here.
 
 ```
 app/src/main/java/com/toadfiles/app/
-├── domain/        # Pure Kotlin: models, natural sorting, path safety,
-│                  # file operations engine, safe ZIP support (all unit-tested)
-├── data/          # FileRepository (java.io), MediaRepository (MediaStore),
-│                  # SettingsRepository (DataStore), session Clipboard
-├── ui/            # Compose screens: home / browse / categories /
-│                  # recent / storage / trash / settings + shared components
-├── util/          # Real share/open intents (FileProvider), video thumbnails
-└── ToadApp.kt     # Hand-rolled DI container — no framework
+├── domain/    # pure Kotlin: models, sorting, path safety, file ops, ZIP handling
+├── data/      # java.io, MediaStore and DataStore wrappers
+├── ui/        # Compose screens and shared components
+├── util/      # share/open intents, video thumbnails
+└── ToadApp.kt # DI container, hand-rolled on purpose
 ```
 
-Design decisions:
-
-- **No startup scanning.** Nothing touches the filesystem until a screen asks for it.
-- **Honest operations.** Every copy/move/delete/extract reports real per-item results; failures are listed, never hidden.
-- **Safety first.** Copy-into-itself guard, ZIP-slip canonical-path checks, zip-bomb entry/size/ratio caps, cancellation with partial-target cleanup.
-- **Minimal dependencies.** AndroidX + Compose + DataStore + Coil for thumbnails. No Hilt, no Firebase, no network stack.
-
-## Privacy
-
-toadFILES requests no `INTERNET` permission. Favorites and preferences live in local DataStore. There is no account, no sync, no telemetry — the APK physically cannot phone home.
-
-## CI
-
-GitHub Actions runs on every push: JDK 17 + Gradle cache + wrapper validation + unit tests + lint + debug assemble (`.github/workflows/android.yml`).
+Two decisions worth knowing about: nothing touches the filesystem until a screen asks for it (no startup scan), and every copy/move/delete/extract reports what actually happened per item, failures included. No Hilt, no Firebase, no network stack. Coil pulls in thumbnails and that's about it.
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE](LICENSE).

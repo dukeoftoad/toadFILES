@@ -11,9 +11,9 @@ data class TrashEntry(
 
 /**
  * Local trash. Deleted items are moved into a hidden ".toadfiles-trash" folder on the same
- * volume (an instant rename — never a copy) with a small sidecar ".tfmeta" file that
+ * volume (just a rename, never a copy) with a small sidecar ".tfmeta" file that
  * remembers the original path. Items older than [RETENTION_DAYS] days are purged
- * automatically. Plain file IO only — pure JVM, unit-testable.
+ * automatically. Plain file IO only, so the whole thing is pure JVM and unit-testable.
  */
 object Trash {
 
