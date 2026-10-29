@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PieChart
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,7 +56,6 @@ fun HomeScreen(
     onOpenCategories: () -> Unit,
     onOpenStorage: () -> Unit,
     onOpenRecent: () -> Unit,
-    onOpenSettings: () -> Unit,
     vm: HomeViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -73,23 +71,17 @@ fun HomeScreen(
             .padding(bottom = bottomPadding),
     ) {
         item {
-            Row(
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 20.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("toadFILES", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "Lightweight · Fast · Private",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Outlined.Settings, "Settings")
-                }
+                Text("toadFILES", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    "Lightweight · Fast · Private",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

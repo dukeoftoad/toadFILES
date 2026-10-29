@@ -96,7 +96,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenCategories = { navController.navigateSingleTop(Routes.CATEGORIES) },
                     onOpenStorage = { navController.navigateSingleTop(Routes.STORAGE) },
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },
-                    onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
                 )
             }
             composable(
