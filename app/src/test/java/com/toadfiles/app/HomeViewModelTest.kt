@@ -103,4 +103,25 @@ class HomeViewModelTest {
         assertTrue(vm.state.value.categories.all { it.count == 0 })
         assertFalse(vm.state.value.loadingCategories)
     }
+
+    // ---- v1.4: smart-recent feed ----
+
+    @Test
+    fun `refreshRecent clears loadingRecent flag`() = runTest {
+        vm.refreshRecent()
+        // Robolectric's MediaStore is empty, so recentFiles is [] but loadingRecent is false.
+        await { !vm.state.value.loadingRecent }
+        assertTrue(vm.state.value.recentFiles.isEmpty())
+    }
+
+    @Test
+    fun `refresh invokes every refresh path`() = runTest {
+        // refresh() must not throw and must keep the state internally consistent.
+        vm.refresh()
+        await { !vm.state.value.loadingRecent }
+        await { !vm.state.value.loadingCategories }
+        // All four sub-refreshes set their respective flags false on completion.
+        assertFalse(vm.state.value.loadingRecent)
+        assertFalse(vm.state.value.loadingCategories)
+    }
 }

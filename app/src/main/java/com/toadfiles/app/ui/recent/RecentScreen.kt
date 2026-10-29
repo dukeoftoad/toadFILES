@@ -21,10 +21,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -50,9 +55,18 @@ fun RecentScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(state.toast) {
+        state.toast?.let {
+            snackbar.showSnackbar(it)
+            vm.consumeToast()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
+        snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
             TopAppBar(
                 title = { Text("Recent") },
@@ -93,7 +107,18 @@ fun RecentScreen(
                                 // Nothing installed can open this type; no fake feedback.
                             }
                         },
-                        onShare = { Intents.shareContent(context, e.uri, e.mime) },
+                        onShare = {
+                            // Local-only share: if the media entry has a real filesystem path
+                            // we copy it into the app-private shared folder. When the path
+                            // is unknown (older MediaStore rows may hide DATA) we tell the user
+                            // honestly instead of silently no-op'ing.
+                            val realPath = e.data
+                            if (realPath != null) {
+                                vm.shareLocal(listOf(java.io.File(realPath)))
+                            } else {
+                                vm.requestToast("Can't share this item — no on-disk path")
+                            }
+                        },
                     )
                 }
             }

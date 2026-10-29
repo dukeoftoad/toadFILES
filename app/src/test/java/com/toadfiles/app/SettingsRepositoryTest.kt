@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.toadfiles.app.data.SettingsRepository
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.data.ToadSettings
+import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
@@ -179,5 +180,64 @@ class SettingsRepositoryTest {
         }
         // The clamping in the reader should bring -7 back to SEARCH_LIMIT_MIN (50).
         assertEquals(ToadSettings.SEARCH_LIMIT_MIN, repo.settings.first().searchResultLimit)
+    }
+
+    // ---- v1.4: accent color ----
+
+    @Test
+    fun `accent color defaults to TOAD on first launch`() = runTest {
+        val s = newRepo().settings.first()
+        assertEquals(AccentColor.TOAD, s.accentColor)
+    }
+
+    @Test
+    fun `setAccentColor persists the choice and reads it back`() = runTest {
+        val repo = newRepo()
+        AccentColor.entries.forEach { accent ->
+            repo.setAccentColor(accent)
+            assertEquals(accent, repo.settings.first().accentColor)
+        }
+    }
+
+    @Test
+    fun `corrupt accent value falls back to TOAD`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit { it[stringPreferencesKey("accent_color")] = "NEVER_WAS_AN_ACCENT" }
+        assertEquals(AccentColor.TOAD, repo.settings.first().accentColor)
+    }
+
+    @Test
+    fun `accent color survives an unrelated write`() = runTest {
+        // Changing another setting must not silently reset the accent.
+        val repo = newRepo()
+        repo.setAccentColor(AccentColor.PURPLE)
+        repo.setShowHidden(true)
+        repo.setSortMode(SortMode.SIZE)
+        assertEquals(AccentColor.PURPLE, repo.settings.first().accentColor)
+    }
+
+    // ---- v1.4: diagnostics toggle ----
+
+    @Test
+    fun `diagnostics defaults off`() = runTest {
+        assertEquals(false, newRepo().settings.first().diagnosticsEnabled)
+    }
+
+    @Test
+    fun `setDiagnosticsEnabled persists and reads back`() = runTest {
+        val repo = newRepo()
+        repo.setDiagnosticsEnabled(true)
+        assertEquals(true, repo.settings.first().diagnosticsEnabled)
+        repo.setDiagnosticsEnabled(false)
+        assertEquals(false, repo.settings.first().diagnosticsEnabled)
+    }
+
+    @Test
+    fun `diagnostics toggle survives an unrelated write`() = runTest {
+        val repo = newRepo()
+        repo.setDiagnosticsEnabled(true)
+        repo.setThemeMode(ThemeMode.DARK)
+        assertEquals(true, repo.settings.first().diagnosticsEnabled)
     }
 }

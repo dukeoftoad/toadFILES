@@ -11,9 +11,12 @@ I built it because I wanted something that opens fast, browses real folders inst
 - Copy, move, rename, share, zip/unzip, delete. Deleted items land in a per-volume trash and stay there for 30 days, with undo.
 - Sort by name, size, date or type. Filter down to documents, images, videos, audio, archives or APKs.
 - Favorites that follow renames and moves, and get cleaned up when the target is gone.
-- Storage analyzer, category counts and recent files, all computed on demand. Nothing scans in the background.
+- Storage analyzer and smart-recent files on Home (computed on demand, never in the background).
+- Long-press a file for a Mi-Files-style action sheet: open, share, rename, copy, move, delete, details, zip, favorite, copy path, open with, or start a multi-select.
+- Share is local-only: a long-press "Share" copies the chosen file(s) into an app-private "shared" folder on this device. Nothing leaves the device, and the About screen shows what's there with a one-tap clear.
+- Material You dynamic color on Android 12+, or pick one of seven accent colors (toad, blue, purple, green, orange, red, pink) when dynamic color is off.
+- About page with version/build, storage stats, per-category counts, OSS credits, an inline changelog, a diagnostics toggle, and a "clear locally-shared copies" action.
 - APK install handoff to the system installer.
-- Light / dark / follow-system theme with Material You colors.
 
 Encrypted vault (Keystore plus biometrics) is on the list. It'll show up once I'm confident it can be done right.
 
@@ -36,9 +39,12 @@ Nothing clever here.
 
 ```
 app/src/main/java/com/toadfiles/app/
-├── domain/    # pure Kotlin: models, sorting, path safety, file ops, ZIP handling
-├── data/      # java.io, MediaStore and DataStore wrappers
-├── ui/        # Compose screens and shared components
+├── domain/    # pure Kotlin: models, sorting, path safety, file ops, ZIP handling, AccentColor
+├── data/      # java.io, MediaStore, DataStore wrappers, SharedRepository (local-only share)
+├── ui/        # Compose screens and shared components (FileActionSheet, EmptyState, dialogs)
+│   ├── about/ # About page (version/build, storage, credits, changelog, diagnostics, shared)
+│   ├── home/  # Home tab: storage, quick links, favorites, smart-recent
+│   └── theme/ # ToadTheme + AccentPalettes (7 hand-tuned light/dark color schemes)
 ├── util/      # share/open intents, video thumbnails
 └── ToadApp.kt # DI container, hand-rolled on purpose
 ```

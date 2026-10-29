@@ -295,6 +295,31 @@ class BrowseViewModel(
         _state.update { it.copy(toast = message) }
     }
 
+    /**
+     * Local-only share: copies the given files into the app-private shared folder and reports
+     * the result via a toast. Nothing leaves the device; the user can review or clear the
+     * snapshots from About → "Locally shared copies". This replaces the old ACTION_SEND
+     * handoff which silently failed when no receiver was installed.
+     */
+    fun shareLocal(files: List<File>) {
+        if (files.isEmpty()) {
+            _state.update { it.copy(toast = "Nothing selected to share") }
+            return
+        }
+        viewModelScope.launch(ioDispatcher) {
+            val r = container.sharedRepo.copyIn(files)
+            _state.update {
+                it.copy(
+                    toast = when {
+                        r.copied == 0 -> "Could not share any files (${r.failures.firstOrNull() ?: "unknown"})"
+                        r.skipped == 0 -> "Shared ${r.copied} file(s) locally"
+                        else -> "Shared ${r.copied} of ${r.copied + r.skipped} file(s) locally"
+                    },
+                )
+            }
+        }
+    }
+
     fun clearClipboard() {
         container.clipboard.clear()
     }

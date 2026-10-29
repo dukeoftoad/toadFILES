@@ -88,6 +88,7 @@ import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileActionSheet
 import com.toadfiles.app.ui.components.FileGridCell
 import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.NameInputDialog
@@ -121,6 +122,7 @@ fun BrowseScreen(
     LaunchedEffect(rootDir) { vm.openDir(rootDir) }
 
     var pendingInstallApk by remember { mutableStateOf<File?>(null) }
+    var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
@@ -169,8 +171,11 @@ fun BrowseScreen(
                             Icon(Icons.Outlined.SelectAll, "Select all")
                         }
                         IconButton(onClick = {
-                            val ok = Intents.shareFiles(context, state.selection.filter { it.isFile }.toList())
-                            if (!ok) vm.requestToast("No app can share these files")
+                            // Share is local-only in v1.4: copies the selection into the app-private
+                            // shared folder. Nothing leaves the device; the user reviews snapshots
+                            // in About → "Locally shared copies".
+                            vm.shareLocal(state.selection.filter { it.isFile }.toList())
+                            vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(state.selection.toList()) }) {
                             Icon(Icons.Outlined.Delete, "Delete")
@@ -384,7 +389,14 @@ fun BrowseScreen(
                     }
                 }
                 val longPressItem: (FileItem) -> Unit = { item ->
-                    if (!selectionMode) vm.toggleSelection(item)
+                    if (selectionMode) {
+                        // Already in multi-select: long-press just toggles membership.
+                        vm.toggleSelection(item)
+                    } else {
+                        // Mi Files-style: open the per-item action sheet. Selection mode is
+                        // entered explicitly via the "Select more" sheet row, not by long-press.
+                        pendingActionSheet = item
+                    }
                 }
 
                 when {
@@ -530,6 +542,89 @@ fun BrowseScreen(
             favorite = file.path in state.favoritePaths,
             onToggleFavorite = { vm.toggleFavorite(file.path) },
             onDismiss = { vm.dismissProperties() },
+        )
+    }
+
+    // Long-press per-file action sheet (Mi Files style). Each row reuses the existing vm
+    // hook so the sheet is purely UI glue, not a new behavior path. The sheet's actions
+    // dismiss it; "Select more" enters multi-select with this item pre-selected.
+    pendingActionSheet?.let { item ->
+        // "Open" mirrors the row-tap behaviour: directory navigates, apk shows the install
+        // confirm dialog, anything else is handed to ACTION_VIEW. Inlined here because the
+        // row's `openItem` lives in the Scaffold content scope, not the dialog scope.
+        val openNow: () -> Unit = {
+            when {
+                item.isDir -> vm.openDir(item.file)
+                item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
+                else -> if (!Intents.openFile(context, item.file)) {
+                    vm.requestToast("No app can open this file")
+                }
+            }
+        }
+        FileActionSheet(
+            item = item,
+            isFavorite = item.file.path in state.favoritePaths,
+            onOpen = {
+                pendingActionSheet = null
+                openNow()
+            },
+            onShare = {
+                pendingActionSheet = null
+                vm.shareLocal(listOf(item.file))
+            },
+            onRename = {
+                pendingActionSheet = null
+                vm.requestRename(item.file)
+            },
+            onCopy = {
+                pendingActionSheet = null
+                vm.copyToClipboard(Clipboard.Mode.COPY, listOf(item.file))
+            },
+            onMove = {
+                pendingActionSheet = null
+                vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(item.file))
+            },
+            onDelete = {
+                pendingActionSheet = null
+                vm.requestDelete(listOf(item.file))
+            },
+            onDetails = {
+                pendingActionSheet = null
+                vm.requestProperties(item.file)
+            },
+            onZip = {
+                pendingActionSheet = null
+                vm.zipSelected(listOf(item.file))
+            },
+            onExtract = if (item.name.lowercase().endsWith(".zip")) {
+                {
+                    pendingActionSheet = null
+                    vm.extractZip(item.file)
+                }
+            } else null,
+            onToggleFavorite = {
+                pendingActionSheet = null
+                vm.toggleFavorite(item.file.path)
+            },
+            onCopyPath = {
+                pendingActionSheet = null
+                if (!Intents.copyPathToClipboard(context, item.file)) {
+                    vm.requestToast("Could not copy the path")
+                } else {
+                    vm.requestToast("Path copied to clipboard")
+                }
+            },
+            onOpenWith = {
+                pendingActionSheet = null
+                if (!Intents.openWith(context, item.file)) {
+                    vm.requestToast("No app can open this file")
+                }
+            },
+            onSelect = {
+                pendingActionSheet = null
+                vm.toggleSelection(item)
+            },
+            onDismiss = { pendingActionSheet = null },
         )
     }
 }

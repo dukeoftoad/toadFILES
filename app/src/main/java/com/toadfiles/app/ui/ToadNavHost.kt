@@ -2,11 +2,9 @@ package com.toadfiles.app.ui
 
 import android.net.Uri
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -22,6 +20,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import com.toadfiles.app.ui.about.AboutScreen
 import com.toadfiles.app.ui.browse.BrowseScreen
 import com.toadfiles.app.ui.categories.CategoriesScreen
 import com.toadfiles.app.ui.home.HomeScreen
@@ -36,6 +35,7 @@ object Routes {
     const val CATEGORIES = "categories"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
+    const val ABOUT = "about"
     const val TRASH = "trash"
     const val STORAGE = "storage"
 
@@ -58,8 +58,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     val destinations = listOf(
         BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) },
         BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) },
-        BottomDestination(Routes.CATEGORIES, "Categories") { Icon(Icons.Outlined.Category, null) },
-        BottomDestination(Routes.RECENT, "Recent") { Icon(Icons.Outlined.History, null) },
         BottomDestination(Routes.SETTINGS, "Settings") { Icon(Icons.Outlined.Settings, null) },
     )
 
@@ -133,6 +131,14 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
                     onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
+                    onOpenAbout = { navController.navigateSingleTop(Routes.ABOUT) },
+                )
+            }
+
+            composable(Routes.ABOUT) {
+                AboutScreen(
+                    bottomPadding = padding.calculateBottomPadding(),
+                    onBack = { navController.popBackStack() },
                 )
             }
 
