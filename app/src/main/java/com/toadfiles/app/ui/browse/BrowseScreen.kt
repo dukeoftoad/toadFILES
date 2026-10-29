@@ -39,6 +39,8 @@ import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -171,10 +173,14 @@ fun BrowseScreen(
                             Icon(Icons.Outlined.SelectAll, "Select all")
                         }
                         IconButton(onClick = {
-                            // Share is local-only in v1.4: copies the selection into the app-private
-                            // shared folder. Nothing leaves the device; the user reviews snapshots
-                            // in About → "Locally shared copies".
-                            vm.shareLocal(state.selection.filter { it.isFile }.toList())
+                            // Real share: system share sheet via ACTION_SEND/_MULTIPLE.
+                            // Folders can't be shared by Android — only the files in the selection.
+                            val shareable = state.selection.filter { it.isFile }.toList()
+                            if (shareable.isEmpty()) {
+                                vm.requestToast("Folders can't be shared — pick files")
+                            } else if (!Intents.shareFiles(context, shareable)) {
+                                vm.requestToast("Could not share these files")
+                            }
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(state.selection.toList()) }) {
@@ -270,6 +276,13 @@ fun BrowseScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { vm.toggleHiddenFiles() }) {
+                            Icon(
+                                if (state.settings.showHidden) Icons.Outlined.Visibility
+                                else Icons.Outlined.VisibilityOff,
+                                if (state.settings.showHidden) "Hide hidden files" else "Show hidden files",
+                            )
+                        }
                         IconButton(onClick = { vm.toggleLayout() }) {
                             Icon(
                                 if (state.settings.browseLayout == BrowseLayout.GRID)
@@ -492,9 +505,13 @@ fun BrowseScreen(
                 "Android may ask you to allow installs from toadFILES first.",
             confirmLabel = "Install",
             onConfirm = {
-                if (!Intents.installApk(context, apk)) {
-                    vm.requestToast(
-                        "Could not start the installer — allow \"Install unknown apps\" for toadFILES in Android settings"
+                when (Intents.installApk(context, apk)) {
+                    Intents.InstallResult.STARTED -> Unit // the installer took over
+                    Intents.InstallResult.NEEDS_PERMISSION -> vm.requestToast(
+                        "Allow \"Install unknown apps\" for toadFILES in the screen that just opened, then tap Install again"
+                    )
+                    Intents.InstallResult.FAILED -> vm.requestToast(
+                        "Could not start the installer"
                     )
                 }
                 pendingInstallApk = null
@@ -570,7 +587,13 @@ fun BrowseScreen(
             },
             onShare = {
                 pendingActionSheet = null
-                vm.shareLocal(listOf(item.file))
+                if (!item.isDir) {
+                    if (!Intents.shareFiles(context, listOf(item.file))) {
+                        vm.requestToast("Could not share this file")
+                    }
+                } else {
+                    vm.requestToast("Folders can't be shared — pick files")
+                }
             },
             onRename = {
                 pendingActionSheet = null

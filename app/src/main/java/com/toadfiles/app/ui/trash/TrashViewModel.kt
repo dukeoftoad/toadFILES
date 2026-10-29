@@ -17,6 +17,8 @@ data class TrashUiState(
     val entries: List<TrashEntry> = emptyList(),
     val loading: Boolean = false,
     val confirmingEmpty: Boolean = false,
+    /** Item awaiting its "delete forever" confirmation. */
+    val confirmingDelete: TrashEntry? = null,
     val toast: String? = null,
 )
 
@@ -57,9 +59,22 @@ class TrashViewModel(
         }
     }
 
-    fun deleteForever(entry: TrashEntry) {
+    /** Permanent deletion must be confirmed first — there is no undo for this. */
+    fun requestDeleteForever(entry: TrashEntry) = _state.update { it.copy(confirmingDelete = entry) }
+
+    fun dismissDeleteForever() = _state.update { it.copy(confirmingDelete = null) }
+
+    fun confirmDeleteForever() {
+        val entry = _state.value.confirmingDelete ?: return
+        _state.update { it.copy(confirmingDelete = null) }
         viewModelScope.launch(ioDispatcher) {
-            Trash.deleteForever(entry.file)
+            val ok = Trash.deleteForever(entry.file)
+            _state.update {
+                it.copy(
+                    toast = if (ok) "Deleted \"${entry.originPath.substringAfterLast('/')}\" forever"
+                    else "Could not delete — the item may already be gone",
+                )
+            }
             refresh()
         }
     }

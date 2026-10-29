@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -107,13 +108,23 @@ class TrashViewModelTest {
     }
 
     @Test
-    fun `deleteForever removes the item permanently`() = runTest {
+    fun `delete forever requires an explicit confirmation first`() = runTest {
         val trashed = seedTrash("gone-forever.txt")
+        val entry = com.toadfiles.app.domain.TrashEntry(trashed, File(volume, "gone-forever.txt").path, 0)
 
-        vm.deleteForever(com.toadfiles.app.domain.TrashEntry(trashed, File(volume, "gone-forever.txt").path, 0))
+        // Requesting shows the confirm dialog; dismissing leaves the item untouched.
+        vm.requestDeleteForever(entry)
+        assertEquals(entry, vm.state.value.confirmingDelete)
+        vm.dismissDeleteForever()
+        assertNull(vm.state.value.confirmingDelete)
+        assertTrue(trashed.exists())
 
+        // Confirming performs the permanent delete and reports it.
+        vm.requestDeleteForever(entry)
+        vm.confirmDeleteForever()
         await { vm.state.value.entries.isEmpty() }
         assertFalse(trashed.exists())
+        assertTrue(vm.state.value.toast!!.contains("Deleted"))
     }
 
     @Test
