@@ -53,10 +53,10 @@ import com.toadfiles.app.util.Intents
 import java.io.File
 
 /**
- * Home tab. The user explicitly asked for one tab to replace the old Categories + Recent
- * split: Home now carries the storage summary, quick-access folders, favorites, and a
- * smart-recent feed (files the OS media library reports as newest, capped at
- * [HomeViewModel.RECENT_LIMIT]). The Categories route was removed in v1.4.
+ * Home tab. Recent is folded in here as a smart-recent feed (files the OS media library
+ * reports as newest, capped at [HomeViewModel.RECENT_LIMIT]) with a "See all" hop into
+ * the full Recent screen. Categories lives on its own tab again — see CategoriesScreen
+ * for the grid.
  */
 @Composable
 fun HomeScreen(

@@ -2,6 +2,7 @@ package com.toadfiles.app.ui
 
 import android.net.Uri
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
@@ -22,6 +23,7 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.toadfiles.app.ui.about.AboutScreen
 import com.toadfiles.app.ui.browse.BrowseScreen
+import com.toadfiles.app.ui.categories.CategoriesScreen
 import com.toadfiles.app.ui.home.HomeScreen
 import com.toadfiles.app.ui.recent.RecentScreen
 import com.toadfiles.app.ui.settings.SettingsScreen
@@ -31,6 +33,7 @@ import com.toadfiles.app.ui.storage.StorageScreen
 object Routes {
     const val HOME = "home"
     const val BROWSE = "browse?dir={dir}"
+    const val CATEGORIES = "categories"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
@@ -56,6 +59,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     val destinations = listOf(
         BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) },
         BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) },
+        BottomDestination(Routes.CATEGORIES, "Categories") { Icon(Icons.Outlined.Category, null) },
         BottomDestination(Routes.SETTINGS, "Settings") { Icon(Icons.Outlined.Settings, null) },
     )
 
@@ -114,6 +118,13 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 RecentScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
+                )
+            }
+            composable(Routes.CATEGORIES) {
+                CategoriesScreen(
+                    bottomPadding = padding.calculateBottomPadding(),
+                    onBack = { navController.popBackStack() },
+                    onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
                 )
             }
             composable(Routes.SETTINGS) {
