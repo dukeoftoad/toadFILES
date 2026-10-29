@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.util.Intents
 import org.junit.Assert.assertEquals
@@ -43,9 +44,25 @@ class IntentsTest {
     }
 
     @Test
+    fun `content uri resolves real files under external storage`() {
+        // A file that actually exists inside the Robolectric external-storage root —
+        // the same path the external-path entry in file_paths.xml maps to.
+        val root = Environment.getExternalStorageDirectory()
+        root.mkdirs()
+        val f = File(root, "DCIM/intents_uri_test.jpg").apply { parentFile.mkdirs(); writeText("x") }
+        try {
+            val uri = Intents.contentUri(context, f)
+            assertTrue(uri.toString().startsWith("content://"))
+        } finally {
+            f.delete()
+        }
+    }
+
+    @Test
     fun `content uri resolves files on secondary volumes too`() {
         // /storage/XXXX-XXXX is an SD card / OTG root. file_paths.xml carries a root-path
-        // catch-all exactly so this doesn't throw "Failed to find configured root".
+        // catch-all exactly so this doesn't throw "Failed to find configured root" —
+        // tapping a photo on an SD card used to crash the app before it existed.
         val uri = Intents.contentUri(context, File("/storage/0000-0001/DCIM/photo.jpg"))
         assertTrue(uri.toString().startsWith("content://"))
         assertTrue(uri.toString().endsWith("/storage/0000-0001/DCIM/photo.jpg"))
@@ -89,6 +106,25 @@ class IntentsTest {
     @Test
     fun `sharing nothing is refused instead of launching an empty chooser`() {
         assertFalse(Intents.shareFiles(context, emptyList()))
+    }
+
+    @Test
+    fun `openFile hands a chooser a granted, typed content uri`() {
+        val root = Environment.getExternalStorageDirectory()
+        root.mkdirs()
+        val f = File(root, "intents_open_me.txt").apply { writeText("open me") }
+        try {
+            assertTrue(Intents.openFile(context, f))
+            val chooser = lastStartedIntent()
+            assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+            @Suppress("DEPRECATION")
+            val view = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+            assertEquals(Intent.ACTION_VIEW, view.action)
+            assertEquals("text/plain", view.type)
+            assertTrue(view.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        } finally {
+            f.delete()
+        }
     }
 
     @Test

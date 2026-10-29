@@ -26,7 +26,13 @@ object Intents {
     /** Opens a real file with an external app. Returns false if nothing can handle it. */
     fun openFile(context: Context, file: File): Boolean {
         if (!file.exists()) return false
-        val uri = contentUri(context, file)
+        val uri = try {
+            contentUri(context, file)
+        } catch (_: Exception) {
+            // File is outside every provider root (unmounted volume, odd path):
+            // refuse honestly rather than crash the tap.
+            return false
+        }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeOf(file))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -42,7 +48,11 @@ object Intents {
     /** Same as [openFile] but forces a chooser so the user picks the handler each time. */
     fun openWith(context: Context, file: File): Boolean {
         if (!file.exists()) return false
-        val uri = contentUri(context, file)
+        val uri = try {
+            contentUri(context, file)
+        } catch (_: Exception) {
+            return false
+        }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeOf(file))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -87,7 +97,11 @@ object Intents {
      */
     fun installApk(context: Context, file: File): Boolean {
         if (!file.exists()) return false
-        val uri = contentUri(context, file)
+        val uri = try {
+            contentUri(context, file)
+        } catch (_: Exception) {
+            return false
+        }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
