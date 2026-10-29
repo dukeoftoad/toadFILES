@@ -79,8 +79,12 @@ class AboutScreenTest {
             compose.onAllNodesWithText("Diagnostics").fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Off by default. Even when on, no data leaves the device")
-                .fetchSemanticsNodes().isNotEmpty()
+            // The diagnostics disclaimer is one long Text node — substringEquals = true so we
+            // match the lead substring instead of requiring the whole paragraph verbatim.
+            compose.onAllNodesWithText(
+                "Off by default. Even when on, toadFILES has no internet",
+                substringEquals = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
     }
 
