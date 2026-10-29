@@ -290,7 +290,9 @@ class BrowseViewModelTest {
 
         vm.rename(f, "new.txt")
 
-        await { File(dir, "new.txt").exists() && vm.state.value.pendingRename == null }
+        // Await the toast, not just the file: the rename lands on disk microseconds
+        // before the state update is committed, and polling the file alone raced on CI.
+        await { vm.state.value.toast == "Renamed to \"new.txt\"" && !File(dir, "old.txt").exists() }
         assertTrue(File(dir, "new.txt").exists())
         assertFalse(File(dir, "old.txt").exists())
         assertEquals("Renamed to \"new.txt\"", vm.state.value.toast)
