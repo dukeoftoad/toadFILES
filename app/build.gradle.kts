@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -11,8 +12,8 @@ android {
         applicationId = "com.toadfiles.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.4.0"
+        versionCode = 7
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -106,6 +107,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)
+    implementation(libs.coil.video) // video thumbnails for the Categories/Recent grids
     implementation(libs.kotlinx.coroutines.core)
 
     // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
@@ -118,6 +120,8 @@ dependencies {
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.navigation.testing)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
 
     // ---- Instrumented tests (device/emulator) ----
     androidTestImplementation(libs.androidx.test.ext.junit)

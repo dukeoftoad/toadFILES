@@ -21,3 +21,4 @@ keystore.properties
 # Logs & OS
 *.log
 .DS_Store
+roborazzi/
