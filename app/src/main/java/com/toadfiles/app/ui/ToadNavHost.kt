@@ -42,6 +42,15 @@ object Routes {
 
 private data class BottomDestination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
+/**
+ * Navigate without stacking a second copy when the destination is already on top.
+ * Plain navigate() pushed a new instance on every tap, so repeated taps on
+ * "Categories" (or a quick link) opened the screen again and again.
+ */
+private fun NavHostController.navigateSingleTop(route: String) {
+    navigate(route) { launchSingleTop = true }
+}
+
 @Composable
 fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     val destinations = listOf(
@@ -83,11 +92,11 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             composable(Routes.HOME) {
                 HomeScreen(
                     bottomPadding = padding.calculateBottomPadding(),
-                    onOpenFolder = { navController.navigate(Routes.browse(it)) },
-                    onOpenCategories = { navController.navigate(Routes.CATEGORIES) },
-                    onOpenStorage = { navController.navigate(Routes.STORAGE) },
-                    onOpenRecent = { navController.navigate(Routes.RECENT) },
-                    onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
+                    onOpenCategories = { navController.navigateSingleTop(Routes.CATEGORIES) },
+                    onOpenStorage = { navController.navigateSingleTop(Routes.STORAGE) },
+                    onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },
+                    onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
                 )
             }
             composable(
@@ -122,7 +131,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 StorageScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
-                    onOpenFolder = { navController.navigate(Routes.browse(it)) },
+                    onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
                 )
             }
         }
