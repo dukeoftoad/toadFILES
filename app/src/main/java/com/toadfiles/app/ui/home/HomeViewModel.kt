@@ -34,6 +34,12 @@ class HomeViewModel(
         refreshStorage()
         refreshQuickLinks()
         viewModelScope.launch {
+            // One-shot cleanup of favorites pointing at paths that no longer exist
+            // (file renamed / moved / deleted outside toadFILES, or volume unmounted).
+            // The result also flows back via settings so refreshFavorites re-runs.
+            container.settingsRepo.pruneDeadFavorites()
+        }
+        viewModelScope.launch {
             container.settingsRepo.settings.collect { s ->
                 refreshFavorites(s.favorites)
             }

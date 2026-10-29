@@ -24,6 +24,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepo.setSortMode(mode)
         container.settingsRepo.setSortOrder(SortOrder.ASC)
     }
+    fun setContentSearch(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setContentSearch(enabled) }
+    fun setSearchResultLimit(limit: Int) = viewModelScope.launch { container.settingsRepo.setSearchResultLimit(limit) }
 
     fun removeFavorite(path: String) = viewModelScope.launch { container.settingsRepo.toggleFavorite(path) }
 }

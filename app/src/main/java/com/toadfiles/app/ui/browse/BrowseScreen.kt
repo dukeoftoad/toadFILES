@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -102,6 +103,7 @@ fun BrowseScreen(
     initialDir: String,
     bottomPadding: Dp,
     onNavigateUp: () -> Unit,
+    onOpenTrash: () -> Unit,
     vm: BrowseViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -342,6 +344,33 @@ fun BrowseScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 2.dp),
                     )
+                    // "Recently deleted" chip: surfaces trash items while the user is browsing
+                    // the file tree. Hidden when trash is empty, never shown in selection mode.
+                    if (!selectionMode && state.trashCount > 0) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            AssistChip(
+                                onClick = onOpenTrash,
+                                label = { Text("Recently deleted: ${state.trashCount}") },
+                                leadingIcon = { Icon(Icons.Outlined.Delete, null) },
+                            )
+                        }
+                    }
+                    if (state.searchCapped) {
+                        Text(
+                            "Reached the ${state.settings.searchResultLimit}-result limit. " +
+                                "Narrow the query, or raise the limit in Settings → Browsing.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 2.dp),
+                        )
+                    }
                 }
 
                 val openItem: (FileItem) -> Unit = { item ->
