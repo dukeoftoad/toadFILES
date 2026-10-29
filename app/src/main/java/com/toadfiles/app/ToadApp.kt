@@ -60,8 +60,6 @@ object ToadViewModelFactory : ViewModelProvider.Factory {
                 com.toadfiles.app.ui.home.HomeViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.browse.BrowseViewModel::class.java) ->
                 com.toadfiles.app.ui.browse.BrowseViewModel(c) as T
-            modelClass.isAssignableFrom(com.toadfiles.app.ui.categories.CategoriesViewModel::class.java) ->
-                com.toadfiles.app.ui.categories.CategoriesViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.recent.RecentViewModel::class.java) ->
                 com.toadfiles.app.ui.recent.RecentViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.storage.StorageViewModel::class.java) ->

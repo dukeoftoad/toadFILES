@@ -332,7 +332,9 @@ private fun CategoryStatRow(name: String, count: Int, bytes: Long, fillFraction:
 
 @Composable
 private fun ChangelogBullet(text: String) {
-    Row(Modifier.padding(start = 4.dp, vertical = 1.dp)) {
+    // 4-arg padding form: mixing `start` with `vertical` would be ambiguous (different
+    // padding overloads) and is rejected by the Kotlin compiler, so we name top/bottom.
+    Row(Modifier.padding(start = 4.dp, top = 1.dp, bottom = 1.dp)) {
         Text("•", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.width(8.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium)

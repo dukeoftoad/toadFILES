@@ -10,9 +10,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -95,15 +93,6 @@ class HomeViewModelTest {
         }
     }
 
-    @Test
-    fun `categories summaries cover every category`() = runTest {
-        vm.refreshCategories()
-        // Robolectric MediaStore is empty, but every category must be represented.
-        assertEquals(6, vm.state.value.categories.size)
-        assertTrue(vm.state.value.categories.all { it.count == 0 })
-        assertFalse(vm.state.value.loadingCategories)
-    }
-
     // ---- v1.4: smart-recent feed ----
 
     @Test
@@ -119,9 +108,7 @@ class HomeViewModelTest {
         // refresh() must not throw and must keep the state internally consistent.
         vm.refresh()
         await { !vm.state.value.loadingRecent }
-        await { !vm.state.value.loadingCategories }
-        // All four sub-refreshes set their respective flags false on completion.
+        // All sub-refreshes set their respective flags false on completion.
         assertFalse(vm.state.value.loadingRecent)
-        assertFalse(vm.state.value.loadingCategories)
     }
 }
