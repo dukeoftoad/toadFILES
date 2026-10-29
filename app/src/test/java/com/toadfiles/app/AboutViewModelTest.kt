@@ -21,10 +21,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * About page ViewModel — version/build are static, but storage stats, category counts, and
- * the shared-folder totals all come from real queries that should produce a populated state
- * even on Robolectric's empty media library (where every category has zero items but every
- * category still appears).
+ * About page ViewModel — version/build are static, but storage stats and category counts
+ * come from real queries that should produce a populated state even on Robolectric's
+ * empty media library (where every category has zero items but every category still
+ * appears).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -87,11 +87,5 @@ class AboutViewModelTest {
         val s = vm.state.value
         assertNotNull(s.storage)
         assertEquals(6, s.categoryCounts.size)
-    }
-
-    @Test
-    fun `clearShared on an empty shared folder returns zero`() {
-        assertEquals(0, vm.clearShared())
-        assertEquals(0, vm.state.value.sharedCount)
     }
 }

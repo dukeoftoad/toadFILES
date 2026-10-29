@@ -3,8 +3,11 @@ package com.toadfiles.app.ui.storage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
+import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileOps
 import com.toadfiles.app.domain.StorageRoot
+import com.toadfiles.app.domain.Trash
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -23,10 +26,19 @@ data class StorageUiState(
     val analyzedBytes: Long = 0L,
     val analyzedRoot: File? = null,
     val usages: List<DirUsage> = emptyList(),
+    /** Media-library breakdown by type (MediaStore): images, videos, audio, docs… */
+    val mediaSummaries: List<CategorySummary> = emptyList(),
+    val mediaLoading: Boolean = true,
+    /** Items currently held in the toadFILES trash across volumes. */
+    val trashCount: Int = 0,
+    val trashBytes: Long = 0L,
 )
 
-/** Storage overview: real volumes (internal, SD card, USB) plus on-demand folder analysis. */
-class StorageViewModel(private val container: AppContainer) : ViewModel() {
+/** Storage overview: real volumes, media-by-type breakdown, trash usage, on-demand analysis. */
+class StorageViewModel(
+    private val container: AppContainer,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(StorageUiState())
     val state: StateFlow<StorageUiState> = _state
@@ -38,8 +50,19 @@ class StorageViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun refresh() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _state.update { it.copy(roots = container.fileRepo.roots()) }
+        viewModelScope.launch(ioDispatcher) {
+            val roots = container.fileRepo.roots()
+            val media = runCatching { container.mediaRepo.summaries() }.getOrDefault(emptyList())
+            val trashEntries = runCatching { Trash.entries(roots.map { it.dir }) }.getOrDefault(emptyList())
+            _state.update {
+                it.copy(
+                    roots = roots,
+                    mediaSummaries = media,
+                    mediaLoading = false,
+                    trashCount = trashEntries.size,
+                    trashBytes = trashEntries.sumOf { e -> FileOps.sizeOf(e.file) },
+                )
+            }
         }
     }
 
@@ -54,7 +77,7 @@ class StorageViewModel(private val container: AppContainer) : ViewModel() {
         _state.update {
             it.copy(analyzing = true, analyzedBytes = 0L, usages = emptyList(), analyzedRoot = root)
         }
-        analyzeJob = viewModelScope.launch(Dispatchers.IO) {
+        analyzeJob = viewModelScope.launch(ioDispatcher) {
             val result = mutableListOf<DirUsage>()
             var progress = 0L
             try {

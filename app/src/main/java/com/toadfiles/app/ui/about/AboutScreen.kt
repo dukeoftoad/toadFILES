@@ -102,8 +102,8 @@ fun AboutScreen(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "toadFILES has no INTERNET permission by design. It never uploads files, " +
-                            "favorites, settings or analytics. Share within toadFILES duplicates " +
-                            "files into an app-private folder on this device — nothing leaves it.",
+                            "favorites, settings or analytics. Sharing hands a copy to the app you " +
+                            "pick from Android's standard share sheet — toadFILES itself never sends anything.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -168,36 +168,6 @@ fun AboutScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                         }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // ---- Locally shared folder ----
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Locally shared copies", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Sharing in toadFILES duplicates files into an app-private folder. " +
-                            "They stay there until you clear them, and never leave the device.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "${state.sharedCount} file(s) · ${Format.size(state.sharedBytes)}",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(
-                        onClick = { vm.clearShared() },
-                        enabled = state.sharedCount > 0,
-                    ) {
-                        Icon(Icons.Outlined.DeleteSweep, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Clear all shared copies")
                     }
                 }
             }
@@ -346,6 +316,17 @@ private fun ChangelogBullet(text: String) {
  * offline and respects the no-internet promise. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.5.0" to listOf(
+        "Real Android share: the system share sheet hands files to the app you pick (single or batch), replacing the old local-copy share.",
+        "Open files with the standard \"Just once / Always\" chooser so you can pin a default app per file type.",
+        "APK install fixed: toadFILES now walks you to the exact \"Install unknown apps\" toggle when Android requires it.",
+        "Categories redesign: back from a category returns to the grid, photos and videos open as a thumbnail grid, long-press opens the action sheet, and multi-select batch-shares or deletes to trash.",
+        "Recent is fully actionable: open, share, show in folder, delete to trash, details — plus multi-select and thumbnails.",
+        "Home redesigned: hero storage card, quick-access icon grid, polished favorites and recent feeds.",
+        "Hidden-files eye toggle right in the Browse toolbar; clearing a search restores the folder listing.",
+        "Permanent trash deletions (single item and empty-all) now ask for confirmation.",
+        "Storage page gains a media-by-type breakdown and trash usage; trashed files are hidden from Recent and Categories.",
+    ),
     "v1.4.0" to listOf(
         "Merged Recent into Home as a smart-recent list with a \"See all\" hop to the full view.",
         "Categories is back as its own tab — an organized grid with per-type icons, item counts and sizes.",

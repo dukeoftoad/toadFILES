@@ -15,8 +15,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +62,9 @@ fun StorageScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
                 },
+                actions = {
+                    IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
+                },
             )
         },
     ) { padding ->
@@ -87,6 +93,90 @@ fun StorageScreen(
                     onOpen = { onOpenFolder(root.dir.path) },
                     onAnalyze = { vm.analyzeTopLevel(root.dir) },
                 )
+            }
+
+            // ---- Media library by type (real MediaStore numbers) ----
+            item {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                ) {
+                    Column(Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.PieChart,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text("Media by type", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "From the system media library — images, video and audio only.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        if (state.mediaLoading) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Counting…", style = MaterialTheme.typography.labelMedium)
+                            }
+                        } else {
+                            val maxBytes = state.mediaSummaries.maxOfOrNull { it.totalBytes } ?: 0L
+                            state.mediaSummaries.forEach { m ->
+                                MediaStatRow(
+                                    name = m.category.label,
+                                    count = m.count,
+                                    bytes = m.totalBytes,
+                                    fillFraction = if (maxBytes > 0L) {
+                                        (m.totalBytes.toFloat() / maxBytes).coerceIn(0.03f, 1f)
+                                    } else 0f,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- Trash usage ----
+            item {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                ) {
+                    Row(
+                        Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Delete,
+                            null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Trash", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "${state.trashCount} item(s) · ${Format.size(state.trashBytes)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "kept ${com.toadfiles.app.domain.Trash.RETENTION_DAYS} days",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
             }
 
             item {
@@ -167,6 +257,27 @@ fun StorageScreen(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+private fun MediaStatRow(name: String, count: Int, bytes: Long, fillFraction: Float) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text(
+                "$count item(s) · ${Format.size(bytes)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = { fillFraction },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp),
+        )
     }
 }
 

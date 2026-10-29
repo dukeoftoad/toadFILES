@@ -22,8 +22,6 @@ data class AboutUiState(
     val loading: Boolean = false,
     val storage: StorageStats? = null,
     val categoryCounts: List<CategorySummary> = emptyList(),
-    val sharedCount: Int = 0,
-    val sharedBytes: Long = 0,
     val diagnosticsEnabled: Boolean = false,
 )
 
@@ -54,14 +52,11 @@ class AboutViewModel(
             val root = container.fileRepo.primaryRoot()
             val storage = container.fileRepo.statsOf(root)
             val summaries = container.mediaRepo.summaries()
-            val shared = container.sharedRepo.list()
             _state.update {
                 it.copy(
                     loading = false,
                     storage = storage,
                     categoryCounts = summaries,
-                    sharedCount = shared.size,
-                    sharedBytes = shared.sumOf { item -> item.length() },
                 )
             }
         }
@@ -70,7 +65,4 @@ class AboutViewModel(
     fun setDiagnostics(enabled: Boolean) {
         viewModelScope.launch { container.settingsRepo.setDiagnosticsEnabled(enabled) }
     }
-
-    /** Wipe every locally-shared copy. Returns the number removed. */
-    fun clearShared(): Int = container.sharedRepo.clear().also { refresh() }
 }
