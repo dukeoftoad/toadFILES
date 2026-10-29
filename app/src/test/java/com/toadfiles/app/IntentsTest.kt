@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
+import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.util.Intents
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -20,11 +22,15 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 /**
- * Open/install handoff checks on the JVM: the FileProvider must resolve real paths
+ * Open/share/install handoff checks on the JVM: the FileProvider must resolve real paths
  * (including SD-card / OTG volumes), and the intents that leave the app must carry a
  * content URI, the right mime, and read grants — otherwise receiving apps silently
  * get nothing. Started from a real Activity context because Application-context
- * startActivity is not a realistic harness for chooser intents on Robolectric.
+ * startActivity is not a realistic harness on Robolectric.
+ *
+ * v1.5 semantics: open uses a DIRECT ACTION_VIEW launch (the system resolver provides
+ * "Just once / Always"), share uses ACTION_SEND / ACTION_SEND_MULTIPLE behind a chooser,
+ * and install gates on the "Install unknown apps" grant.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -75,36 +81,127 @@ class IntentsTest {
     }
 
     @Test
-    fun `openFile hands a chooser a granted, typed content uri`() {
+    fun `openFile launches a direct ACTION_VIEW with grants for just-once-always`() {
         val root = Environment.getExternalStorageDirectory()
         root.mkdirs()
         val f = File(root, "intents_open_me.txt").apply { writeText("open me") }
         try {
             assertTrue(Intents.openFile(activity, f))
-            val chooser = lastStartedIntent()
-            assertEquals(Intent.ACTION_CHOOSER, chooser.action)
-            @Suppress("DEPRECATION")
-            val view = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+            // Direct launch — NOT a chooser. The system resolver shows "Just once / Always".
+            val view = lastStartedIntent()
             assertEquals(Intent.ACTION_VIEW, view.action)
             assertEquals("text/plain", view.type)
             assertTrue(view.data.toString().startsWith("content://"))
             assertTrue(view.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            assertNotNull(view.clipData)
         } finally {
             f.delete()
         }
     }
 
     @Test
-    fun `installApk sends the package-archive mime straight to the installer`() {
+    fun `openWith still wraps in a chooser`() {
+        val root = Environment.getExternalStorageDirectory()
+        root.mkdirs()
+        val f = File(root, "intents_open_with.txt").apply { writeText("open with me") }
+        try {
+            assertTrue(Intents.openWith(activity, f))
+            val chooser = lastStartedIntent()
+            assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+            @Suppress("DEPRECATION")
+            val view = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+            assertEquals(Intent.ACTION_VIEW, view.action)
+        } finally {
+            f.delete()
+        }
+    }
+
+    @Test
+    fun `shareFiles sends one file via ACTION_SEND with a granted stream`() {
+        val root = Environment.getExternalStorageDirectory()
+        root.mkdirs()
+        val f = File(root, "intents_share_me.txt").apply { writeText("share me") }
+        try {
+            assertTrue(Intents.shareFiles(activity, listOf(f)))
+            val chooser = lastStartedIntent()
+            assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+            @Suppress("DEPRECATION")
+            val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+            assertEquals(Intent.ACTION_SEND, send.action)
+            assertEquals("text/plain", send.type)
+            @Suppress("DEPRECATION")
+            val stream = send.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)!!
+            assertTrue(stream.toString().startsWith("content://"))
+            assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            assertNotNull(send.clipData)
+        } finally {
+            f.delete()
+        }
+    }
+
+    @Test
+    fun `shareFiles sends several files via ACTION_SEND_MULTIPLE`() {
+        val root = Environment.getExternalStorageDirectory()
+        root.mkdirs()
+        val a = File(root, "share_a.png").apply { writeText("a") }
+        val b = File(root, "share_b.png").apply { writeText("b") }
+        try {
+            assertTrue(Intents.shareFiles(activity, listOf(a, b)))
+            val chooser = lastStartedIntent()
+            assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+            @Suppress("DEPRECATION")
+            val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+            assertEquals(Intent.ACTION_SEND_MULTIPLE, send.action)
+            assertEquals("image/png", send.type) // both png -> the exact common type
+            @Suppress("DEPRECATION")
+            val streams = send.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)!!
+            assertEquals(2, streams.size)
+            assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        } finally {
+            a.delete(); b.delete()
+        }
+    }
+
+    @Test
+    fun `shareUris shares a media-store uri behind the chooser`() {
+        val uri = Uri.parse("content://media/external/images/media/42")
+        assertTrue(Intents.shareUris(activity, listOf(uri), "image/jpeg"))
+        val chooser = lastStartedIntent()
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        @Suppress("DEPRECATION")
+        val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+        assertEquals(Intent.ACTION_SEND, send.action)
+        assertEquals("image/jpeg", send.type)
+        assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+    }
+
+    @Test
+    fun `shareFiles with nothing shareable returns false instead of crashing`() {
+        assertFalse(Intents.shareFiles(activity, emptyList()))
+        assertFalse(Intents.shareUris(activity, emptyList(), "*/*"))
+    }
+
+    @Test
+    fun `installApk gates on the unknown-apps permission`() {
         val root = Environment.getExternalStorageDirectory()
         root.mkdirs()
         val apk = File(root, "intents_installer.apk").apply { writeText("apk bytes") }
         try {
-            assertTrue(Intents.installApk(activity, apk))
-            val view = lastStartedIntent()
-            assertEquals(Intent.ACTION_VIEW, view.action)
-            assertEquals("application/vnd.android.package-archive", view.type)
-            assertTrue(view.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            val result = Intents.installApk(activity, apk)
+            if (Intents.hasInstallPermission(activity)) {
+                // Permission granted: the installer must have been launched directly.
+                assertEquals(Intents.InstallResult.STARTED, result)
+                val view = lastStartedIntent()
+                assertEquals(Intent.ACTION_VIEW, view.action)
+                assertEquals("application/vnd.android.package-archive", view.type)
+                assertTrue(view.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            } else {
+                // Permission missing: the user is walked to the exact settings toggle.
+                assertEquals(Intents.InstallResult.NEEDS_PERMISSION, result)
+                val started = lastStartedIntent()
+                assertEquals(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, started.action)
+                assertTrue(started.data.toString().endsWith(activity.packageName))
+            }
         } finally {
             apk.delete()
         }
@@ -114,7 +211,10 @@ class IntentsTest {
     fun `openFile refuses missing files instead of crashing on the provider`() {
         assertFalse(Intents.openFile(activity, File("/storage/emulated/0/definitely-missing.bin")))
         assertFalse(Intents.openWith(activity, File("/storage/emulated/0/definitely-missing.bin")))
-        assertFalse(Intents.installApk(activity, File("/storage/emulated/0/definitely-missing.apk")))
+        assertEquals(
+            Intents.InstallResult.FAILED,
+            Intents.installApk(activity, File("/storage/emulated/0/definitely-missing.apk")),
+        )
     }
 
     @Test
