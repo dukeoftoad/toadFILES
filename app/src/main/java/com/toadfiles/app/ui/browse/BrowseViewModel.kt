@@ -39,10 +39,14 @@ data class BrowseUiState(
     val selection: Set<File> = emptySet(),
     val query: String = "",
     val searching: Boolean = false,
+    /** True when the last search hit the configured limit (UI can warn the user). */
+    val searchCapped: Boolean = false,
     val filterMode: FilterMode = FilterMode.ALL,
     val settings: ToadSettings = ToadSettings(),
     val favoritePaths: Set<String> = emptySet(),
     val clipboard: Clipboard.Clip? = null,
+    /** Number of items currently in the trash across all known volumes; -1 means "not loaded". */
+    val trashCount: Int = -1,
     // dialogs
     val pendingNewFolder: Boolean = false,
     val pendingRename: File? = null,
@@ -97,6 +101,7 @@ class BrowseViewModel(
                 _state.update { it.copy(clipboard = c) }
             }
         }
+        refreshTrashCount()
     }
 
     fun openDir(dir: File) = load(dir)
@@ -161,39 +166,120 @@ class BrowseViewModel(
     }
 
     fun setQuery(q: String) {
-        _state.update { it.copy(query = q, searching = q.isNotBlank()) }
+        _state.update { it.copy(query = q, searching = q.isNotBlank(), searchCapped = false) }
         searchJob?.cancel()
         val dir = _state.value.dir ?: return
         if (q.isBlank()) return
         searchJob = viewModelScope.launch(ioDispatcher) {
             delay(300) // debounce
-            val showHidden = _state.value.settings.showHidden
-            val results = searchTree(dir, q, showHidden)
+            val s = _state.value.settings
+            val results = searchTree(
+                root = dir,
+                query = q,
+                showHidden = s.showHidden,
+                limit = s.searchResultLimit,
+                includeContent = s.contentSearch,
+            )
             // Only apply if this search is still the latest
             if (_state.value.query == q) {
                 _state.update {
-                    it.copy(items = results, searching = false)
+                    it.copy(
+                        items = results.items,
+                        searching = false,
+                        searchCapped = results.capped,
+                    )
                 }
             }
         }
     }
 
-    private fun searchTree(root: File, query: String, showHidden: Boolean): List<FileItem> {
+    /** Recursive in-tree search. Matches file name (always) and small-text-file content (opt-in). */
+    private fun searchTree(
+        root: File,
+        query: String,
+        showHidden: Boolean,
+        limit: Int,
+        includeContent: Boolean,
+    ): SearchResult {
         val q = query.lowercase()
         val out = mutableListOf<FileItem>()
+        var capped = false
         val stack = ArrayDeque<File>()
         stack.addLast(root)
-        while (stack.isNotEmpty() && out.size < 500) {
+        while (stack.isNotEmpty() && out.size < limit) {
             val dir = stack.removeLast()
             val children = fileRepo.list(dir, showHidden)
             for (c in children) {
-                if (c.name.lowercase().contains(q)) out += c
+                if (c.name.lowercase().contains(q)) {
+                    out += c
+                    if (out.size >= limit) {
+                        capped = true
+                        break
+                    }
+                } else if (includeContent && !c.isDir && contentFileMightMatch(c.file, q)) {
+                    out += c
+                    if (out.size >= limit) {
+                        capped = true
+                        break
+                    }
+                }
                 if (c.isDir) stack.addLast(c.file)
             }
         }
-        return out.sortedWith(
-            compareByDescending<FileItem> { it.isDir }
-                .thenComparator { a, b -> Sorting.naturalCompare(a.name, b.name) }
+        return SearchResult(
+            items = out.sortedWith(
+                compareByDescending<FileItem> { it.isDir }
+                    .thenComparator { a, b -> Sorting.naturalCompare(a.name, b.name) }
+            ),
+            capped = capped,
+        )
+    }
+
+    private data class SearchResult(val items: List<FileItem>, val capped: Boolean)
+
+    /**
+     * Cheap content peek: only opens files with extension in the safe-to-read allowlist
+     * and smaller than [CONTENT_MAX_BYTES]. Reads as text (UTF-8); binary content never matches.
+     */
+    private fun contentFileMightMatch(f: File, q: String): Boolean {
+        if (!f.isFile || f.length() > CONTENT_MAX_BYTES || f.length() == 0L) return false
+        val ext = f.name.substringAfterLast('.', "").lowercase()
+        if (ext !in CONTENT_EXTENSIONS) return false
+        return try {
+            f.bufferedReader(Charsets.UTF_8).use { r ->
+                val buf = CharArray(8192)
+                while (true) {
+                    val n = r.read(buf)
+                    if (n <= 0) break
+                    if (String(buf, 0, n).lowercase().contains(q)) return true
+                }
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Refresh the in-trash item count for the "Recently deleted" chip in Browse. */
+    fun refreshTrashCount() {
+        viewModelScope.launch(ioDispatcher) {
+            val roots = fileRepo.roots().map { it.dir }
+            val n = runCatching { Trash.entries(roots).size }.getOrDefault(0)
+            _state.update { it.copy(trashCount = n) }
+        }
+    }
+
+    companion object {
+        /** Largest file size (in bytes) the content-search peek will open. */
+        private const val CONTENT_MAX_BYTES = 1L * 1024 * 1024 // 1 MiB
+
+        /** Extensions considered small-text-ish. Binary formats never match (decoded as gibberish). */
+        private val CONTENT_EXTENSIONS = setOf(
+            "txt", "md", "markdown", "log", "csv", "tsv", "json", "yaml", "yml",
+            "xml", "html", "htm", "css", "js", "mjs", "ts", "kt", "kts", "java",
+            "py", "rb", "go", "rs", "c", "h", "cpp", "hpp", "cs", "swift",
+            "sh", "bash", "zsh", "bat", "ps1", "ini", "cfg", "conf", "toml",
+            "properties", "gradle", "gitignore", "env", "sql",
         )
     }
 
@@ -313,6 +399,7 @@ class BrowseViewModel(
                     },
                 )
             }
+            refreshTrashCount()
             _state.value.dir?.let { d -> load(d) }
         }
     }
@@ -330,6 +417,7 @@ class BrowseViewModel(
                     else "Restored $restored of ${trashed.size} — the rest stays in Trash"
                 )
             }
+            refreshTrashCount()
             _state.value.dir?.let { d -> load(d) }
         }
     }

@@ -171,6 +171,7 @@ class BrowseViewModelTest {
         val state = vm.state.value
         assertFalse(state.searching)
         assertEquals(listOf("report-final.docx"), state.items.map { it.name })
+        assertFalse(state.searchCapped)
     }
 
     @Test
@@ -185,6 +186,80 @@ class BrowseViewModelTest {
 
         assertFalse(vm.state.value.searching)
         assertEquals(1, vm.state.value.items.size)
+    }
+
+    @Test
+    fun `setQuery reports capped when the configured limit is reached`() = runTest {
+        // 15 files all named with the prefix "match-" → one query, 15 hits, limit 10.
+        repeat(15) { i -> File(dir, "match-$i.txt").writeText("x") }
+        container.settingsRepo.setSearchResultLimit(10) // SEARCH_LIMIT_MIN, smallest legal value
+        vm.openDir(dir)
+        await { vm.state.value.settings.searchResultLimit == 10 }
+
+        vm.setQuery("match")
+        testScheduler.advanceTimeBy(301)
+        testScheduler.advanceUntilIdle()
+
+        val state = vm.state.value
+        assertFalse(state.searching)
+        assertEquals(10, state.items.size)
+        assertTrue("expected searchCapped to be true", state.searchCapped)
+    }
+
+    @Test
+    fun `setQuery content search matches text inside small files`() = runTest {
+        val f = File(dir, "notes.txt").apply { writeText("buy milk, fix the kitchen sink") }
+        File(dir, "other.bin").apply { writeBytes(ByteArray(200)) } // wrong extension
+        container.settingsRepo.setContentSearch(true)
+        container.settingsRepo.setSearchResultLimit(10)
+        vm.openDir(dir)
+        await { vm.state.value.settings.contentSearch }
+
+        // The query does NOT appear in the filename, only inside the file body.
+        vm.setQuery("kitchen")
+        testScheduler.advanceTimeBy(301)
+        testScheduler.advanceUntilIdle()
+
+        val state = vm.state.value
+        assertFalse(state.searching)
+        assertEquals(listOf("notes.txt"), state.items.map { it.name })
+    }
+
+    @Test
+    fun `setQuery content search is a no-op when the setting is off`() = runTest {
+        File(dir, "notes.txt").apply { writeText("kitchen sink content here") }
+        // contentSearch defaults to false
+        vm.openDir(dir)
+
+        vm.setQuery("kitchen")
+        testScheduler.advanceTimeBy(301)
+        testScheduler.advanceUntilIdle()
+
+        // No matches: filename does not contain "kitchen", and content search is off.
+        assertTrue(vm.state.value.items.isEmpty())
+        assertFalse(vm.state.value.searchCapped)
+    }
+
+    @Test
+    fun `setQuery content search skips files larger than the size cap`() = runTest {
+        // A ~2 MiB text file: bigger than the 1 MiB content-search ceiling.
+        val big = File(dir, "big.txt").apply {
+            writeText("kitchen ".repeat(256 * 1024)) // ~2 MiB of "kitchen kitchen ..."
+        }
+        assertTrue(big.length() > 1024 * 1024)
+        container.settingsRepo.setContentSearch(true)
+        vm.openDir(dir)
+        await { vm.state.value.settings.contentSearch }
+
+        vm.setQuery("kitchen")
+        testScheduler.advanceTimeBy(301)
+        testScheduler.advanceUntilIdle()
+
+        // Filename doesn't contain "kitchen", and the file body is too large to peek.
+        // The result is empty (capped stays false because we never reached the limit).
+        val state = vm.state.value
+        assertTrue(state.items.isEmpty())
+        assertFalse(state.searchCapped)
     }
 
     @Test
@@ -362,5 +437,38 @@ class BrowseViewModelTest {
         container.settingsRepo.setSortMode(com.toadfiles.app.domain.SortMode.SIZE)
         vm.openDir(dir)
         await { vm.state.value.settings.sortMode == com.toadfiles.app.domain.SortMode.SIZE }
+    }
+
+    @Test
+    fun `confirmDelete bumps trashCount and undoDelete brings it back down`() = runTest {
+        // Bring trashCount to a known 0 baseline.
+        val f = File(dir, "trashme.txt").apply { writeText("x") }
+        vm.openDir(dir)
+        await { vm.state.value.trashCount >= 0 }
+
+        vm.requestDelete(listOf(f))
+        vm.confirmDelete()
+        await { !f.exists() && vm.state.value.lastTrashed != null }
+        await { vm.state.value.trashCount >= 1 }
+
+        vm.undoDelete()
+        await { f.exists() }
+        await { vm.state.value.trashCount == 0 }
+    }
+
+    @Test
+    fun `refreshTrashCount updates the state with the current in-trash count`() = runTest {
+        // Directly drop two files into the trash folder so the next refresh picks them up.
+        val roots = container.fileRepo.roots().map { it.dir }
+        val trashDir = com.toadfiles.app.domain.Trash.dirFor(roots.first())
+        trashDir.mkdirs()
+        File(trashDir, "manually-trashed.txt").writeText("x")
+        File(trashDir, "another.txt").writeText("y")
+
+        vm.refreshTrashCount()
+
+        await { vm.state.value.trashCount >= 2 }
+        assertTrue("trashCount should be >= 2 (got ${vm.state.value.trashCount})",
+            vm.state.value.trashCount >= 2)
     }
 }

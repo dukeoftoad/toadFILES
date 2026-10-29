@@ -11,10 +11,32 @@ android {
         applicationId = "com.toadfiles.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Release signing: populated from env vars by CI (see .github/workflows/release.yml).
+    // Local dev builds without these vars simply fall back to the debug keystore.
+    val ksFile: java.io.File? = System.getenv("TOADFILES_KEYSTORE_FILE")?.let(::File)
+    val ksStorePassword: String = System.getenv("TOADFILES_KEYSTORE_PASSWORD").orEmpty()
+    val ksKeyAlias: String = System.getenv("TOADFILES_KEY_ALIAS").orEmpty()
+    val ksKeyPassword: String = System.getenv("TOADFILES_KEY_PASSWORD").orEmpty()
+    val signingReady = ksFile != null && ksStorePassword.isNotEmpty() &&
+        ksKeyAlias.isNotEmpty() && ksKeyPassword.isNotEmpty()
+
+    signingConfigs {
+        create("release") {
+            storeFile = ksFile
+            storePassword = ksStorePassword
+            keyAlias = ksKeyAlias
+            keyPassword = ksKeyPassword
+            enableV1Signing = signingReady
+            enableV2Signing = signingReady
+            enableV3Signing = signingReady
+            enableV4Signing = signingReady
+        }
     }
 
     buildTypes {
@@ -25,6 +47,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Use the release signing config when present (CI), else stay unsigned
+            // (debug builds of release are fine for local sanity checks).
+            if (signingReady) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

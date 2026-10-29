@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.toadfiles.app.data.SettingsRepository
 import com.toadfiles.app.data.ThemeMode
+import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
@@ -142,5 +143,41 @@ class SettingsRepositoryTest {
             it[stringPreferencesKey("theme_mode")] = "NOT_A_REAL_MODE"
         }
         assertEquals(ThemeMode.SYSTEM, repo.settings.first().themeMode)
+    }
+
+    @Test
+    fun `search limit defaults to 500 and clamps to the legal range`() = runTest {
+        val repo = newRepo()
+        assertEquals(ToadSettings.SEARCH_LIMIT_DEFAULT, repo.settings.first().searchResultLimit)
+
+        repo.setSearchResultLimit(5) // below SEARCH_LIMIT_MIN (10)
+        assertEquals(ToadSettings.SEARCH_LIMIT_MIN, repo.settings.first().searchResultLimit)
+
+        repo.setSearchResultLimit(99_999) // above SEARCH_LIMIT_MAX (2000)
+        assertEquals(ToadSettings.SEARCH_LIMIT_MAX, repo.settings.first().searchResultLimit)
+
+        repo.setSearchResultLimit(250)
+        assertEquals(250, repo.settings.first().searchResultLimit)
+    }
+
+    @Test
+    fun `content search defaults off and toggles cleanly`() = runTest {
+        val repo = newRepo()
+        assertEquals(false, repo.settings.first().contentSearch)
+        repo.setContentSearch(true)
+        assertEquals(true, repo.settings.first().contentSearch)
+        repo.setContentSearch(false)
+        assertEquals(false, repo.settings.first().contentSearch)
+    }
+
+    @Test
+    fun `corrupt search limit value falls back to the default`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit {
+            it[androidx.datastore.preferences.core.intPreferencesKey("search_limit")] = -7
+        }
+        // The clamping in the reader should bring -7 back to SEARCH_LIMIT_MIN (50).
+        assertEquals(ToadSettings.SEARCH_LIMIT_MIN, repo.settings.first().searchResultLimit)
     }
 }

@@ -44,6 +44,8 @@ import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.SortMode
 import java.io.File
 
+private val SEARCH_LIMIT_CHOICES = listOf(100, 250, 500, 1000, 2000)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -54,6 +56,7 @@ fun SettingsScreen(
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var searchLimitMenuOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -163,6 +166,47 @@ fun SettingsScreen(
                             )
                         }
                         Switch(checked = settings.showHidden, onCheckedChange = { vm.setShowHidden(it) })
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Search inside file contents", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Open small text files (.txt .md .json .xml .kt …) and search their contents",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = settings.contentSearch, onCheckedChange = { vm.setContentSearch(it) })
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { searchLimitMenuOpen = true },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Search result limit", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "${settings.searchResultLimit} matches per search. Higher limits scan longer.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "Change",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        DropdownMenu(expanded = searchLimitMenuOpen, onDismissRequest = { searchLimitMenuOpen = false }) {
+                            SEARCH_LIMIT_CHOICES.forEach { n ->
+                                DropdownMenuItem(
+                                    text = { Text("$n") },
+                                    onClick = { vm.setSearchResultLimit(n); searchLimitMenuOpen = false },
+                                )
+                            }
+                        }
                     }
                 }
             }
