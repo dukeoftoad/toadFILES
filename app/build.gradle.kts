@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "io.github.dukeoftoad.toadfiles"
+    namespace = "com.toadfiles.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.dukeoftoad.toadfiles"
+        applicationId = "com.toadfiles.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
