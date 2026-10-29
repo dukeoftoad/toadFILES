@@ -9,8 +9,8 @@ import com.toadfiles.app.domain.FileItem
 import java.io.File
 
 /**
- * MediaStore-backed category and recent-file queries (real, on-demand, indexed by the OS —
- * no manual filesystem scanning).
+ * MediaStore-backed category and recent-file queries. Real and on-demand, the OS
+ * already keeps the index so there is no manual filesystem scanning here.
  */
 class MediaRepository(private val resolver: ContentResolver) {
 

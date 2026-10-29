@@ -40,7 +40,7 @@ jobs:
         run: ./gradlew :app:lintDebug --stacktrace
 
       - name: Lint (release)
-        # Catches issues that only show up with minification enabled (the release build).
+        # Some issues only show up with minification on.
         run: ./gradlew :app:lintRelease --stacktrace
 
       - name: Unit tests
@@ -49,9 +49,9 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Assemble release APK (unsigned, gating only)
-        # Verifies the release build path compiles and minimises without the signing key.
-        # Actual signed releases are produced by .github/workflows/release.yml on tag push.
+      - name: Assemble release APK (unsigned)
+        # Keeps the release build path honest on every push. Signed releases
+        # come from release.yml on tag push.
         run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Upload debug APK
