@@ -1,13 +1,12 @@
 package com.toadfiles.app
 
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.ui.components.FileActionSheet
 import com.toadfiles.app.ui.theme.ToadTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,6 +18,12 @@ import java.io.File
  * a FileItem and a bunch of callbacks, and renders rows based on the item's shape (file vs
  * folder, zip vs not). We assert those visibility rules because they're the load-bearing
  * "Mi Files style" promise: the right actions appear for the right item.
+ *
+ * We use onAllNodesWithText(...).fetchSemanticsNodes().isNotEmpty/isEmpty as the assertion
+ * primitive because assertExists/assertIsDisplayed are unreliable on ModalBottomSheet
+ * content under Robolectric (no animation pipeline, no viewport bounds) and the
+ * compose-ui-test version pinned by this project doesn't expose assertExists as a
+ * top-level import. The semantics-node-count check is the equivalent contract.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -48,70 +53,65 @@ class FileActionSheetTest {
             }
         }
         // ModalBottomSheet animates open. waitForIdle lets the animation settle before we
-        // query the tree; assertExists then checks the node is present (the sheet's
-        // visible-bounds check is unreliable in Robolectric, so we don't use assertIsDisplayed).
+        // query the tree.
         compose.waitForIdle()
+    }
+
+    private fun assertRowShown(label: String) {
+        val nodes = compose.onAllNodesWithText(label).fetchSemanticsNodes()
+        assertTrue("Expected row '$label' to be present in the sheet", nodes.isNotEmpty())
+    }
+
+    private fun assertRowHidden(label: String) {
+        val nodes = compose.onAllNodesWithText(label).fetchSemanticsNodes()
+        assertTrue("Row '$label' should NOT appear in the sheet", nodes.isEmpty())
     }
 
     @Test
     fun `file sheet shows the core actions plus file-only actions`() {
         renderSheet(fileItem("report.pdf", isDir = false))
         // Core actions every item gets
-        compose.onNodeWithText("Open").assertExists()
-        compose.onNodeWithText("Share (copy locally)").assertExists()
-        compose.onNodeWithText("Rename").assertExists()
-        compose.onNodeWithText("Copy to…").assertExists()
-        compose.onNodeWithText("Move to…").assertExists()
-        compose.onNodeWithText("Delete").assertExists()
-        compose.onNodeWithText("Details").assertExists()
-        compose.onNodeWithText("Add favorite").assertExists()
-        compose.onNodeWithText("Select more").assertExists()
+        assertRowShown("Open")
+        assertRowShown("Share (copy locally)")
+        assertRowShown("Rename")
+        assertRowShown("Copy to…")
+        assertRowShown("Move to…")
+        assertRowShown("Delete")
+        assertRowShown("Details")
+        assertRowShown("Add favorite")
+        assertRowShown("Select more")
         // File-only actions
-        compose.onNodeWithText("Copy path").assertExists()
-        compose.onNodeWithText("Open with…").assertExists()
+        assertRowShown("Copy path")
+        assertRowShown("Open with…")
         // For a non-zip file the zip row reads "Zip this file" (not "Extract here")
-        compose.onNodeWithText("Zip this file").assertExists()
+        assertRowShown("Zip this file")
     }
 
     @Test
     fun `folder sheet hides Copy path and Open with, shows Zip this folder`() {
         renderSheet(fileItem("Pictures", isDir = true))
-        compose.onNodeWithText("Open").assertExists()
-        compose.onNodeWithText("Zip this folder").assertExists()
+        assertRowShown("Open")
+        assertRowShown("Zip this folder")
         // File-only actions must NOT appear for a folder — the sheet hides them.
-        // assertExists would throw if the node was present, so we use the inverse:
-        // there should be zero nodes with this text.
-        assert(compose.onAllNodesWithText("Copy path").fetchSemanticsNodes().isEmpty()) {
-            "Copy path should not appear for a folder"
-        }
-        assert(compose.onAllNodesWithText("Open with…").fetchSemanticsNodes().isEmpty()) {
-            "Open with… should not appear for a folder"
-        }
-        assert(compose.onAllNodesWithText("Extract here").fetchSemanticsNodes().isEmpty()) {
-            "Extract here should not appear for a folder"
-        }
+        assertRowHidden("Copy path")
+        assertRowHidden("Open with…")
+        assertRowHidden("Extract here")
     }
 
     @Test
     fun `zip file sheet shows Extract here instead of Zip this file`() {
         renderSheet(fileItem("archive.zip", isDir = false))
-        compose.onNodeWithText("Extract here").assertExists()
+        assertRowShown("Extract here")
         // The file-zip row must be hidden when the extract row is shown.
-        assert(compose.onAllNodesWithText("Zip this file").fetchSemanticsNodes().isEmpty()) {
-            "Zip this file should not appear for a .zip"
-        }
-        assert(compose.onAllNodesWithText("Zip this folder").fetchSemanticsNodes().isEmpty()) {
-            "Zip this folder should not appear for a file"
-        }
+        assertRowHidden("Zip this file")
+        assertRowHidden("Zip this folder")
     }
 
     @Test
     fun `favorite state toggles the favorite row label`() {
         renderSheet(fileItem("x.txt", isDir = false), isFavorite = true)
-        compose.onNodeWithText("Remove favorite").assertExists()
+        assertRowShown("Remove favorite")
         // The "Add favorite" copy should be gone when isFavorite is true.
-        assert(compose.onAllNodesWithText("Add favorite").fetchSemanticsNodes().isEmpty()) {
-            "Add favorite should not appear when the item is already a favorite"
-        }
+        assertRowHidden("Add favorite")
     }
 }
