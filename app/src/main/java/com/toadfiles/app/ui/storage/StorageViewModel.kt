@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.domain.FileOps
-import com.toadfiles.app.domain.StorageStats
+import com.toadfiles.app.domain.StorageRoot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -18,13 +18,14 @@ import java.io.File
 data class DirUsage(val dir: File, val sizeBytes: Long)
 
 data class StorageUiState(
-    val stats: StorageStats? = null,
+    val roots: List<StorageRoot> = emptyList(),
     val analyzing: Boolean = false,
     val analyzedBytes: Long = 0L,
+    val analyzedRoot: File? = null,
     val usages: List<DirUsage> = emptyList(),
 )
 
-/** Storage analyzer: computes real folder sizes only on demand, never at startup, fully cancellable. */
+/** Storage overview: real volumes (internal, SD card, USB) plus on-demand folder analysis. */
 class StorageViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _state = MutableStateFlow(StorageUiState())
@@ -33,13 +34,12 @@ class StorageViewModel(private val container: AppContainer) : ViewModel() {
     private var analyzeJob: Job? = null
 
     init {
-        refreshStats()
+        refresh()
     }
 
-    fun refreshStats() {
+    fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
-            val stats = container.fileRepo.statsOf(container.fileRepo.primaryRoot())
-            _state.update { it.copy(stats = stats) }
+            _state.update { it.copy(roots = container.fileRepo.roots()) }
         }
     }
 
@@ -48,11 +48,12 @@ class StorageViewModel(private val container: AppContainer) : ViewModel() {
         _state.update { it.copy(analyzing = false) }
     }
 
-    fun analyzeTopLevel() {
+    fun analyzeTopLevel(root: File) {
         if (_state.value.analyzing) return
-        val root = container.fileRepo.primaryRoot()
         val dirs = root.listFiles { f -> f.isDirectory && !f.name.startsWith(".") } ?: return
-        _state.update { it.copy(analyzing = true, analyzedBytes = 0L, usages = emptyList()) }
+        _state.update {
+            it.copy(analyzing = true, analyzedBytes = 0L, usages = emptyList(), analyzedRoot = root)
+        }
         analyzeJob = viewModelScope.launch(Dispatchers.IO) {
             val result = mutableListOf<DirUsage>()
             var progress = 0L

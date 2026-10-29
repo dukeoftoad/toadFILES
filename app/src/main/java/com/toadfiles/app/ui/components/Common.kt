@@ -4,11 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -18,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderZip
@@ -37,14 +40,20 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.toadfiles.app.domain.ConflictStrategy
@@ -53,7 +62,9 @@ import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.util.VideoThumbs
 import java.io.File
+import coil.compose.AsyncImage
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -75,6 +86,8 @@ fun FileRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val isImage = !item.isDir && FilterMode.IMAGES.matches(item.name)
+            val isVideo = !item.isDir && FilterMode.VIDEOS.matches(item.name)
             Box(
                 modifier = Modifier
                     .size(42.dp)
@@ -84,12 +97,29 @@ fun FileRow(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = iconFor(item),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(22.dp),
-                )
+                when {
+                    isImage -> AsyncImage(
+                        model = item.file,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        error = rememberVectorPainter(iconFor(item)),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                    )
+                    isVideo -> VideoThumb(
+                        path = item.file.path,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                    )
+                    else -> Icon(
+                        imageVector = iconFor(item),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -142,6 +172,122 @@ fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
     FilterMode.AUDIO -> Icons.Outlined.Audiotrack
     FilterMode.ARCHIVES -> Icons.Outlined.FolderZip
     FilterMode.APKS -> Icons.Outlined.InstallMobile
+}
+
+/** Video thumbnail from MediaMetadataRetriever with a tiny in-memory cache (no extra dependency). */
+@Composable
+fun VideoThumb(path: String, modifier: Modifier = Modifier) {
+    var bitmap by remember(path) { mutableStateOf(VideoThumbs.peek(path)) }
+    LaunchedEffect(path) {
+        if (bitmap == null) bitmap = VideoThumbs.load(File(path))
+    }
+    val current = bitmap
+    if (current != null) {
+        Image(
+            bitmap = current.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+        )
+    } else {
+        Icon(
+            Icons.Outlined.Videocam,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+/** Compact grid cell used by Browse's grid layout. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FileGridCell(
+    item: FileItem,
+    selected: Boolean,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    Surface(color = bg, shape = RoundedCornerShape(14.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            val isImage = !item.isDir && FilterMode.IMAGES.matches(item.name)
+            val isVideo = !item.isDir && FilterMode.VIDEOS.matches(item.name)
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(78.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        isImage -> AsyncImage(
+                            model = item.file,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            error = rememberVectorPainter(iconFor(item)),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp)),
+                        )
+                        isVideo -> VideoThumb(
+                            path = item.file.path,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp)),
+                        )
+                        else -> Icon(
+                            imageVector = iconFor(item),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(30.dp),
+                        )
+                    }
+                }
+                if (selected) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp)
+                            .size(22.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(3.dp),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                item.name,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                if (item.isDir) "Folder" else Format.size(item.size),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            if (isFavorite) {
+                Text("★", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
 }
 
 @Composable

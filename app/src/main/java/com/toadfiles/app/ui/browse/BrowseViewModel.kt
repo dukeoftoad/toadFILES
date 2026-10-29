@@ -6,6 +6,7 @@ import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.ConflictStrategy
+import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.FileOps
@@ -15,6 +16,7 @@ import com.toadfiles.app.domain.PathSafety
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
 import com.toadfiles.app.domain.ZipSupport
+import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -51,6 +53,7 @@ data class BrowseUiState(
     val properties: File? = null,
     val propertiesDetail: PropertiesDetail? = null,
     val toast: String? = null,
+    val lastTrashed: List<File>? = null,
 )
 
 data class PendingConflict(val op: OpKind, val targetDir: File, val sources: List<File>, val conflicts: List<String>)
@@ -221,6 +224,11 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { settingsRepo.setSortOrder(order) }
     }
 
+    fun toggleLayout() {
+        val next = if (_state.value.settings.browseLayout == BrowseLayout.GRID) BrowseLayout.LIST else BrowseLayout.GRID
+        viewModelScope.launch { settingsRepo.setBrowseLayout(next) }
+    }
+
     // ---------- favorites ----------
 
     fun toggleFavorite(path: String) {
@@ -249,6 +257,7 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
     fun rename(file: File, newName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val dest = FileOps.rename(file, newName)
+            if (dest != null) remapFavorites(file.path, dest.path)
             _state.update {
                 it.copy(
                     pendingRename = null,
@@ -262,6 +271,22 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Favorites pointing at (or under) a renamed/moved path keep working. */
+    private suspend fun remapFavorites(oldPath: String, newPath: String) {
+        val favs = _state.value.favoritePaths
+        if (favs.any { it == oldPath || it.startsWith("$oldPath/") }) {
+            settingsRepo.remapFavorites(oldPath, newPath)
+        }
+    }
+
+    private suspend fun remapMovedFavorites(sources: List<File>, target: File) {
+        for (src in sources) {
+            if (src.exists()) continue
+            val dest = File(target, src.name)
+            if (dest.exists()) remapFavorites(src.path, dest.path)
+        }
+    }
+
     // ---------- delete ----------
 
     fun requestDelete(files: List<File>) = _state.update { it.copy(pendingDelete = files) }
@@ -269,8 +294,43 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
     fun confirmDelete() {
         val files = _state.value.pendingDelete ?: return
         _state.update { it.copy(pendingDelete = null, progress = "Deleting" to OpProgress(0, files.size, "")) }
-        runOp("Delete") { onP -> FileOps.delete(files, onP) }
+        opJob = viewModelScope.launch(Dispatchers.IO) {
+            val roots = container.fileRepo.roots().map { it.dir }
+            val trashed = Trash.trash(files, roots)
+            val failed = files.count { it.exists() }
+            _state.update {
+                it.copy(
+                    progress = null,
+                    lastTrashed = trashed.takeIf { t -> t.isNotEmpty() },
+                    toast = when {
+                        trashed.isEmpty() -> "Could not move anything to trash"
+                        failed > 0 -> "Moved ${trashed.size} of ${files.size} to trash ($failed failed)"
+                        else -> null // the undo snackbar reports success instead
+                    },
+                )
+            }
+            _state.value.dir?.let { d -> load(d) }
+        }
     }
+
+    /** Restores the most recent delete batch (snackbar "Undo"). */
+    fun undoDelete() {
+        val trashed = _state.value.lastTrashed ?: return
+        _state.update { it.copy(lastTrashed = null) }
+        opJob = viewModelScope.launch(Dispatchers.IO) {
+            var restored = 0
+            for (t in trashed) if (Trash.restore(t) != null) restored++
+            _state.update {
+                it.copy(
+                    toast = if (restored == trashed.size) "Restored $restored item(s)"
+                    else "Restored $restored of ${trashed.size} — the rest stays in Trash"
+                )
+            }
+            _state.value.dir?.let { d -> load(d) }
+        }
+    }
+
+    fun dismissUndo() = _state.update { it.copy(lastTrashed = null) }
 
     // ---------- copy / move (paste) ----------
 
@@ -308,12 +368,14 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         _state.update { it.copy(progress = label(kind) to OpProgress(0, sources.size, "")) }
-        runOp(label(kind)) { onP ->
+        runOp(label(kind), { onP ->
             when (kind) {
                 OpKind.COPY -> FileOps.copy(sources, target, strategy, onP)
                 OpKind.MOVE -> FileOps.move(sources, target, strategy, onP)
                 OpKind.ZIP_EXTRACT -> ZipSupport.extract(sources.first(), target, strategy == ConflictStrategy.REPLACE, onProgress = onP)
             }
+        }) { r ->
+            if (kind == OpKind.MOVE && r.succeeded > 0) remapMovedFavorites(sources, target)
         }
         container.clipboard.clear()
     }
@@ -324,10 +386,15 @@ class BrowseViewModel(private val container: AppContainer) : ViewModel() {
         OpKind.ZIP_EXTRACT -> "Extracting"
     }
 
-    private fun runOp(title: String, op: suspend (onP: (OpProgress) -> Unit) -> OpResult) {
+    private fun runOp(
+        title: String,
+        op: suspend (onP: (OpProgress) -> Unit) -> OpResult,
+        onDone: suspend (OpResult) -> Unit = {},
+    ) {
         opJob = viewModelScope.launch(Dispatchers.IO) {
             val r = op { p -> _state.update { it.copy(progress = title to p) } }
             _state.update { it.copy(progress = null, result = r, resultTitle = title) }
+            onDone(r)
             _state.value.dir?.let { d -> load(d) }
         }
     }

@@ -22,8 +22,11 @@ class MediaRepository(private val resolver: ContentResolver) {
         val dateModified: Long,
         val mime: String,
         val category: FileCategory,
+        /** Real path from the DATA column; null when unknown. Used for "Show in folder". */
+        val data: String? = null,
     )
 
+    @Suppress("DEPRECATION") // DATA is deprecated but is the only way back to a real path
     fun list(category: FileCategory, limit: Int = 1000): List<MediaEntry> {
         val selection: String
         val args: Array<String>
@@ -63,6 +66,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                     MediaStore.Files.FileColumns.SIZE,
                     MediaStore.Files.FileColumns.DATE_MODIFIED,
                     MediaStore.Files.FileColumns.MIME_TYPE,
+                    MediaStore.Files.FileColumns.DATA,
                 ),
                 selection,
                 args,
@@ -73,6 +77,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                 val iSize = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
                 val iDate = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
                 val iMime = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+                val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                 while (c.moveToNext() && out.size < limit) {
                     val id = c.getLong(iId)
                     out += MediaEntry(
@@ -83,6 +88,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                         dateModified = c.getLong(iDate) * 1000L,
                         mime = c.getString(iMime) ?: "application/octet-stream",
                         category = category,
+                        data = if (iData >= 0) c.getString(iData) else null,
                     )
                 }
             }

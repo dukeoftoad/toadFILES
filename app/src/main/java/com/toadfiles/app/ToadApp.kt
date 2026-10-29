@@ -8,14 +8,16 @@ import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.SettingsRepository
+import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** Tiny hand-rolled DI container — no framework, no reflection, nothing to misconfigure. */
 class AppContainer(app: ToadApp) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val fileRepo = FileRepository()
+    val fileRepo = FileRepository(app)
     val mediaRepo = MediaRepository(app.contentResolver)
     val settingsRepo = SettingsRepository(app)
     val clipboard = Clipboard()
@@ -28,6 +30,11 @@ class ToadApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Trash retention: quietly drop items older than 30 days in the background.
+        container.appScope.launch(Dispatchers.IO) {
+            val roots = container.fileRepo.roots().map { it.dir }
+            Trash.purge(roots)
+        }
     }
 }
 
@@ -58,6 +65,8 @@ object ToadViewModelFactory : ViewModelProvider.Factory {
                 com.toadfiles.app.ui.storage.StorageViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.settings.SettingsViewModel::class.java) ->
                 com.toadfiles.app.ui.settings.SettingsViewModel(c) as T
+            modelClass.isAssignableFrom(com.toadfiles.app.ui.trash.TrashViewModel::class.java) ->
+                com.toadfiles.app.ui.trash.TrashViewModel(c) as T
             else -> throw IllegalArgumentException("Unknown ViewModel: ${modelClass.name}")
         }
     }

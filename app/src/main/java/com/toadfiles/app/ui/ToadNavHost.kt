@@ -27,6 +27,7 @@ import com.toadfiles.app.ui.categories.CategoriesScreen
 import com.toadfiles.app.ui.home.HomeScreen
 import com.toadfiles.app.ui.recent.RecentScreen
 import com.toadfiles.app.ui.settings.SettingsScreen
+import com.toadfiles.app.ui.trash.TrashScreen
 import com.toadfiles.app.ui.storage.StorageScreen
 
 object Routes {
@@ -35,6 +36,7 @@ object Routes {
     const val CATEGORIES = "categories"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
+    const val TRASH = "trash"
     const val STORAGE = "storage"
 
     fun browse(dir: String): String = "browse?dir=${Uri.encode(dir)}"
@@ -112,6 +114,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 CategoriesScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
+                    onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
                 )
             }
             composable(Routes.RECENT) {
@@ -122,6 +125,14 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(
+                    bottomPadding = padding.calculateBottomPadding(),
+                    onBack = { navController.popBackStack() },
+                    onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
+                )
+            }
+
+            composable(Routes.TRASH) {
+                TrashScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
                 )
