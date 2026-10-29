@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.Trash
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,10 +16,22 @@ import java.io.File
 data class RecentUiState(
     val entries: List<MediaRepository.MediaEntry> = emptyList(),
     val loading: Boolean = false,
+    /** Multi-select, keyed by content-uri string. */
+    val selection: Set<String> = emptySet(),
+    val pendingDelete: List<MediaRepository.MediaEntry>? = null,
+    val detailsOf: MediaRepository.MediaEntry? = null,
     val toast: String? = null,
 )
 
-class RecentViewModel(private val container: AppContainer) : ViewModel() {
+/**
+ * Recent files straight from the OS media library, newest first. Entries sitting in the
+ * toadFILES trash folder are filtered out by the repository. Every row is actionable:
+ * open, share, show in folder, delete to trash — via the long-press sheet or multi-select.
+ */
+class RecentViewModel(
+    private val container: AppContainer,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     private val _state = MutableStateFlow(RecentUiState())
     val state: StateFlow<RecentUiState> = _state
@@ -28,34 +42,75 @@ class RecentViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refresh() {
         _state.update { it.copy(loading = true) }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(ioDispatcher) {
             val entries = container.mediaRepo.recent()
-            _state.update { it.copy(entries = entries, loading = false) }
-        }
-    }
-
-    /**
-     * Local-only share: copies [files] into the app-private shared folder. Used by the
-     * Recent screen's per-row share button. Honest toast instead of silent failure.
-     */
-    fun shareLocal(files: List<File>) {
-        if (files.isEmpty()) {
-            _state.update { it.copy(toast = "Nothing selected to share") }
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            val r = container.sharedRepo.copyIn(files)
-            _state.update {
-                it.copy(
-                    toast = when {
-                        r.copied == 0 -> "Could not share any files"
-                        r.skipped == 0 -> "Shared ${r.copied} file(s) locally"
-                        else -> "Shared ${r.copied} of ${r.copied + r.skipped} file(s) locally"
-                    },
-                )
+            _state.update { s ->
+                // Drop selections that no longer exist after a refresh.
+                val live = entries.map { it.uri.toString() }.toSet()
+                s.copy(entries = entries, loading = false, selection = s.selection.intersect(live))
             }
         }
     }
+
+    // ---------- multi-select ----------
+
+    fun toggleSelection(entry: MediaRepository.MediaEntry) {
+        _state.update { s ->
+            val next = s.selection.toMutableSet()
+            if (!next.add(entry.uri.toString())) next.remove(entry.uri.toString())
+            s.copy(selection = next)
+        }
+    }
+
+    fun selectAll() = _state.update { s ->
+        s.copy(selection = s.entries.map { it.uri.toString() }.toSet())
+    }
+
+    fun clearSelection() = _state.update { it.copy(selection = emptySet()) }
+
+    fun selectedEntries(): List<MediaRepository.MediaEntry> =
+        _state.value.entries.filter { it.uri.toString() in _state.value.selection }
+
+    // ---------- delete to trash ----------
+
+    fun requestDelete(entries: List<MediaRepository.MediaEntry>) {
+        if (entries.isEmpty()) return
+        _state.update { it.copy(pendingDelete = entries) }
+    }
+
+    fun dismissDelete() = _state.update { it.copy(pendingDelete = null) }
+
+    /** Same trash flow as Categories: real paths into the 30-day trash, stale rows dropped. */
+    fun confirmDelete() {
+        val entries = _state.value.pendingDelete ?: return
+        _state.update { it.copy(pendingDelete = null, selection = emptySet()) }
+        viewModelScope.launch(ioDispatcher) {
+            val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
+            val noPath = entries.size - withPath.size
+            val roots = container.fileRepo.roots().map { it.dir }
+            val trashed = withPath.filter { (_, f) -> f.exists() }
+                .map { (_, f) -> f }
+                .let { Trash.trash(it, roots) }
+            container.mediaRepo.deleteStale(entries)
+            _state.update {
+                it.copy(
+                    toast = when {
+                        trashed.size == entries.size -> "Moved ${trashed.size} item(s) to trash"
+                        noPath > 0 -> "Moved ${trashed.size} to trash · $noPath had no on-disk path"
+                        else -> "Moved ${trashed.size} of ${entries.size} to trash"
+                    },
+                )
+            }
+            refresh()
+        }
+    }
+
+    // ---------- details ----------
+
+    fun requestDetails(entry: MediaRepository.MediaEntry) =
+        _state.update { it.copy(detailsOf = entry) }
+
+    fun dismissDetails() = _state.update { it.copy(detailsOf = null) }
 
     fun requestToast(message: String) {
         _state.update { it.copy(toast = message) }

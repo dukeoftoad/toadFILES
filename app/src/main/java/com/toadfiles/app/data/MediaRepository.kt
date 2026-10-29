@@ -6,6 +6,7 @@ import android.provider.MediaStore
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
+import com.toadfiles.app.domain.Trash
 import java.io.File
 
 /**
@@ -80,6 +81,10 @@ class MediaRepository(private val resolver: ContentResolver) {
                 val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                 while (c.moveToNext() && out.size < limit) {
                     val id = c.getLong(iId)
+                    val data = if (iData >= 0) c.getString(iData) else null
+                    // Same trash-hiding rule as recent(): renamed-away files can linger
+                    // in the media index and would otherwise appear inside categories.
+                    if (data != null && isTrashPath(data)) continue
                     out += MediaEntry(
                         id = id,
                         uri = ContentUrisHelper.uriFor(category, id),
@@ -88,7 +93,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                         dateModified = c.getLong(iDate) * 1000L,
                         mime = c.getString(iMime) ?: "application/octet-stream",
                         category = category,
-                        data = if (iData >= 0) c.getString(iData) else null,
+                        data = data,
                     )
                 }
             }
@@ -116,6 +121,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                     MediaStore.Files.FileColumns.DATE_MODIFIED,
                     MediaStore.Files.FileColumns.MIME_TYPE,
                     MediaStore.Files.FileColumns.MEDIA_TYPE,
+                    MediaStore.Files.FileColumns.DATA,
                 ),
                 null,
                 null,
@@ -127,6 +133,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                 val iDate = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
                 val iMime = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
                 val iType = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                 while (c.moveToNext() && out.size < limit) {
                     val id = c.getLong(iId)
                     val type = c.getInt(iType)
@@ -136,6 +143,10 @@ class MediaRepository(private val resolver: ContentResolver) {
                         MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO -> FileCategory.AUDIO
                         else -> FileCategory.DOCS
                     }
+                    val data = if (iData >= 0) c.getString(iData) else null
+                    // Renaming a file into the trash does not always update the media index
+                    // immediately, so trashed files can still surface as "recent". Hide them.
+                    if (data != null && isTrashPath(data)) continue
                     out += MediaEntry(
                         id = id,
                         uri = ContentUrisHelper.uriFor(category, id),
@@ -144,12 +155,53 @@ class MediaRepository(private val resolver: ContentResolver) {
                         dateModified = c.getLong(iDate) * 1000L,
                         mime = c.getString(iMime) ?: "application/octet-stream",
                         category = category,
+                        data = data,
                     )
                 }
             }
         } catch (_: Exception) {
         }
         return out
+    }
+
+    /**
+     * Removes MediaStore rows whose on-disk file no longer exists (e.g. after toadFILES
+     * moved them to the trash — the index only catches up on the next media scan).
+     * Best-effort: rows we are not allowed to touch are skipped, never crash.
+     * Returns how many rows were dropped.
+     */
+    fun deleteStale(entries: List<MediaEntry>): Int {
+        var dropped = 0
+        for (e in entries) {
+            val path = e.data ?: continue
+            if (File(path).exists()) continue
+            try {
+                if (resolver.delete(e.uri, null, null) > 0) dropped++
+            } catch (_: Exception) {
+                // Not ours to delete (or volume gone): leave the row; the media scanner
+                // will reconcile it eventually.
+            }
+        }
+        return dropped
+    }
+
+    companion object {
+        /**
+         * True when [path] lives inside the toadFILES trash folder on any volume. Pure so it
+         * can be unit tested; the trash dir name must match [com.toadfiles.app.domain.Trash.DIR_NAME].
+         */
+        fun isTrashPath(path: String): Boolean {
+            if (path.isBlank()) return false
+            var i = path.indexOf(Trash.DIR_NAME)
+            while (i >= 0) {
+                val before = if (i == 0) '/' else path[i - 1]
+                val afterIdx = i + Trash.DIR_NAME.length
+                val after = if (afterIdx >= path.length) '/' else path[afterIdx]
+                if (before == '/' && after == '/') return true
+                i = path.indexOf(Trash.DIR_NAME, i + 1)
+            }
+            return false
+        }
     }
 
     /** Bridge so MediaStore entries can be reused with the shared [FileItem] row UI. */

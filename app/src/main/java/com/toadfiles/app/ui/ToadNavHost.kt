@@ -101,6 +101,8 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
                     onOpenStorage = { navController.navigateSingleTop(Routes.STORAGE) },
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },
+                    onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
+                    onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
                 )
             }
             composable(
@@ -118,6 +120,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 RecentScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
+                    onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
                 )
             }
             composable(Routes.CATEGORIES) {
