@@ -1,6 +1,7 @@
 package com.toadfiles.app
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.ui.graphics.Color
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.ui.theme.AccentPalettes
 import org.junit.Assert.assertEquals
@@ -39,15 +40,16 @@ class AccentPalettesTest {
     @Test
     fun `TOAD light scheme preserves the v1 moss-green primary`() {
         // v1.0–v1.3 used #4E7A46 as the moss-green primary. v1.4 must keep that exact value
-        // as the default so upgraders see no visual regression.
+        // as the default so upgraders see no visual regression. Compare Color values
+        // directly so we don't trip on Long vs ULong conversions of the packed ARGB.
         val toadLight = AccentPalettes.schemeFor(AccentColor.TOAD, dark = false)
-        assertEquals(0xFF4E7A46.toInt(), toadLight.primary.value.toInt())
+        assertEquals(Color(0xFF4E7A46), toadLight.primary)
     }
 
     @Test
     fun `TOAD dark scheme preserves the v1 light-moss primary`() {
         val toadDark = AccentPalettes.schemeFor(AccentColor.TOAD, dark = true)
-        assertEquals(0xFFA5C89A.toInt(), toadDark.primary.value.toInt())
+        assertEquals(Color(0xFFA5C89A), toadDark.primary)
     }
 
     @Test
