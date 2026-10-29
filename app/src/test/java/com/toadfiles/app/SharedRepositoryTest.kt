@@ -14,6 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.nio.file.Files
 
 /**
  * Local-only share: copyIn/clear/remove with name-conflict handling. Robolectric gives us
@@ -35,7 +36,9 @@ class SharedRepositoryTest {
         sharedDir = File(ctx.getExternalFilesDir(null), "shared")
         // start clean: leftover snapshots from a previous test would skew counts.
         sharedDir.listFiles()?.forEach { it.delete() }
-        workDir = createTempDir(prefix = "toadfiles-test")
+        // Modern kotlin.io.path.createTempDirectory avoids the too-wide permissions
+        // warning that the deprecated kotlin.io.createTempDir emits.
+        workDir = Files.createTempDirectory("toadfiles-test").toFile()
     }
 
     @After

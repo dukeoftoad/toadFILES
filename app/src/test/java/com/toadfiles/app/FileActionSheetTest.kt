@@ -2,6 +2,7 @@ package com.toadfiles.app
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.domain.FileItem
@@ -27,16 +28,17 @@ class FileActionSheetTest {
     val compose = createComposeRule()
 
     private fun fileItem(name: String, isDir: Boolean = false): FileItem {
-        val f = File("/tmp/toadfiles-test/$name") // path doesn't need to exist for the sheet UI
+        // Path doesn't need to exist for the sheet UI; only the name + flags matter.
+        val f = File("/tmp/toadfiles-test/$name")
         return FileItem(file = f, name = name, isDir = isDir, size = 1024L, lastModified = 1L)
     }
 
-    private fun renderSheet(item: FileItem) {
+    private fun renderSheet(item: FileItem, isFavorite: Boolean = false) {
         compose.setContent {
             ToadTheme {
                 FileActionSheet(
                     item = item,
-                    isFavorite = false,
+                    isFavorite = isFavorite,
                     onOpen = {}, onShare = {}, onRename = {}, onCopy = {}, onMove = {},
                     onDelete = {}, onDetails = {}, onZip = {},
                     onExtract = null,
@@ -101,19 +103,7 @@ class FileActionSheetTest {
 
     @Test
     fun `favorite state toggles the favorite row label`() {
-        compose.setContent {
-            ToadTheme {
-                FileActionSheet(
-                    item = fileItem("x.txt", isDir = false),
-                    isFavorite = true,
-                    onOpen = {}, onShare = {}, onRename = {}, onCopy = {}, onMove = {},
-                    onDelete = {}, onDetails = {}, onZip = {},
-                    onExtract = null,
-                    onToggleFavorite = {}, onCopyPath = {}, onOpenWith = {},
-                    onSelect = {}, onDismiss = {},
-                )
-            }
-        }
+        renderSheet(fileItem("x.txt", isDir = false), isFavorite = true)
         compose.onNodeWithText("Remove favorite").assertIsDisplayed()
         // The "Add favorite" copy should be gone when isFavorite is true.
         assert(compose.onAllNodesWithText("Add favorite").fetchSemanticsNodes().isEmpty()) {
