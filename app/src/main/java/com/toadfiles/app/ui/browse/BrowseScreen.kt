@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import android.os.Environment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
@@ -99,9 +100,11 @@ fun BrowseScreen(
     var moreMenuOpen by remember { mutableStateOf(false) }
 
     val rootDir = remember(initialDir) {
-        if (initialDir.isNotBlank()) File(initialDir) else null
+        // Bottom-bar Browse passes an empty dir; default to the external storage root
+        // so the tab opens to a real folder instead of an empty screen.
+        if (initialDir.isNotBlank()) File(initialDir) else Environment.getExternalStorageDirectory()
     }
-    LaunchedEffect(rootDir) { rootDir?.let { vm.openDir(it) } }
+    LaunchedEffect(rootDir) { vm.openDir(rootDir) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
