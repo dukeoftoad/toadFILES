@@ -53,6 +53,26 @@ object Intents {
         }
     }
 
+    /**
+     * Hands a real APK to the Android package installer via FileProvider.
+     * Returns false when the installer cannot be started (e.g. "Install unknown
+     * apps" not granted for toadFILES and the system declines to route).
+     */
+    fun installApk(context: Context, file: File): Boolean {
+        if (!file.exists()) return false
+        val uri = contentUri(context, file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            context.startActivity(intent) // no chooser: this must reach the installer
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun shareFiles(context: Context, files: List<File>): Boolean {
         if (files.isEmpty()) return false
         val uris = ArrayList(files.map { contentUri(context, it) })

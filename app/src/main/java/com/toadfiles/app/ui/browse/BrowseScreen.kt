@@ -106,6 +106,8 @@ fun BrowseScreen(
     }
     LaunchedEffect(rootDir) { vm.openDir(rootDir) }
 
+    var pendingInstallApk by remember { mutableStateOf<File?>(null) }
+
     LaunchedEffect(state.toast) {
         state.toast?.let {
             snackbar.showSnackbar(it)
@@ -241,7 +243,9 @@ fun BrowseScreen(
                         SortMenu(
                             expanded = sortMenuOpen,
                             current = state.settings.sortMode,
+                            currentOrder = state.settings.sortOrder,
                             onSelect = { vm.setSort(it); sortMenuOpen = false },
+                            onSelectOrder = { vm.setSortOrder(it); sortMenuOpen = false },
                             onDismiss = { sortMenuOpen = false },
                         )
                         IconButton(onClick = { filterMenuOpen = true }) {
@@ -270,9 +274,10 @@ fun BrowseScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            Column(Modifier.fillMaxSize()) {
-                if (!selectionMode) {
-                    OutlinedTextField(
+                val visible = state.items.filter { state.filterMode.matches(it.name) }
+                Column(Modifier.fillMaxSize()) {
+                    if (!selectionMode) {
+                        OutlinedTextField(
                         value = state.query,
                         onValueChange = { vm.setQuery(it) },
                         modifier = Modifier
@@ -293,9 +298,21 @@ fun BrowseScreen(
                         shape = MaterialTheme.shapes.extraLarge,
                     )
                     Breadcrumbs(state.breadcrumbs) { vm.openDir(it) }
+                    Text(
+                        buildString {
+                            append(visible.size)
+                            append(if (visible.size == 1) " item" else " items")
+                            if (state.filterMode != FilterMode.ALL) append(" · ${state.filterMode.label.lowercase()}")
+                            if (state.query.isNotBlank()) append(" · search results")
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 2.dp),
+                    )
                 }
 
-                val visible = state.items.filter { state.filterMode.matches(it.name) }
                 when {
                     state.loading -> Row(
                         Modifier
@@ -324,6 +341,8 @@ fun BrowseScreen(
                                     when {
                                         selectionMode -> vm.toggleSelection(item)
                                         item.isDir -> vm.openDir(item.file)
+                                        item.name.lowercase().endsWith(".apk") ->
+                                            pendingInstallApk = item.file
                                         else -> {
                                             if (!Intents.openFile(context, item.file)) {
                                                 vm.requestToast("No app can open this file")
@@ -371,6 +390,23 @@ fun BrowseScreen(
             confirmLabel = "Rename",
             onConfirm = { vm.rename(file, it) },
             onDismiss = { vm.dismissRename() },
+        )
+    }
+    pendingInstallApk?.let { apk ->
+        ConfirmDialog(
+            title = "Install \"${apk.name}\"?",
+            message = "toadFILES hands this APK to the Android package installer. " +
+                "Android may ask you to allow installs from toadFILES first.",
+            confirmLabel = "Install",
+            onConfirm = {
+                if (!Intents.installApk(context, apk)) {
+                    vm.requestToast(
+                        "Could not start the installer — allow \"Install unknown apps\" for toadFILES in Android settings"
+                    )
+                }
+                pendingInstallApk = null
+            },
+            onDismiss = { pendingInstallApk = null },
         )
     }
     state.pendingDelete?.let { files ->
