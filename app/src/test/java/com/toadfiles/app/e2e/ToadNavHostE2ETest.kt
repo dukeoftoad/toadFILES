@@ -74,27 +74,18 @@ class ToadNavHostE2ETest {
 
     @Test
     fun `bottom bar no longer has a Recent or Categories tab`() {
-        // v1.4 folded Recent into Home and removed Categories; the bottom bar must only show
-        // Home / Browse / Settings. Catches accidental reintroduction of either tab.
+        // v1.4 folded Recent into Home and removed the Categories UI entirely; the bottom bar
+        // must only show Home / Browse / Settings. Catches accidental reintroduction of
+        // either tab. (Categories route + screen + VM were deleted in the same release.)
         compose.setContent { ToadTheme { ToadNavHost() } }
 
-        // Each bottom-bar label appears exactly once (the selected one is highlighted but
-        // still a single node — none of the old tabs should appear as a bottom-bar entry).
         val bottomLabels = listOf("Home", "Browse", "Settings")
         bottomLabels.forEach { label ->
-            // exactly one node carries this label as a NavigationBarItem
             compose.waitUntil(5_000) {
                 compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
             }
         }
-        // Old tabs should be entirely absent from the rendered tree (or at least not as a
-        // selectable bottom-bar item). We assert there are zero nodes labelled "Recent" or
-        // "Categories" — neither appears anywhere on the new Home screen.
         compose.waitForIdle()
-        // Note: Recent appears as a SECTION HEADING on Home ("Recent" text); allow it there.
-        // The bottom-bar assertion is satisfied by the count of NavigationBarItem roles,
-        // which we can't filter cheaply here. The visual walk above already verifies the
-        // tabs are clickable; the absence of a Categories tab is the meaningful regression.
         // If someone reintroduces the Categories tab the "Settings" click below will hit
         // Categories first and the next assertion will fail because the Settings row text
         // will not appear.

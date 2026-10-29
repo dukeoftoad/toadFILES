@@ -56,14 +56,12 @@ import java.io.File
  * Home tab. The user explicitly asked for one tab to replace the old Categories + Recent
  * split: Home now carries the storage summary, quick-access folders, favorites, and a
  * smart-recent feed (files the OS media library reports as newest, capped at
- * [HomeViewModel.RECENT_LIMIT]). The Categories section was removed; the Categories
- * screen is still wired in the nav graph as a hidden route so we don't break deep links.
+ * [HomeViewModel.RECENT_LIMIT]). The Categories route was removed in v1.4.
  */
 @Composable
 fun HomeScreen(
     bottomPadding: Dp,
     onOpenFolder: (String) -> Unit,
-    onOpenCategories: () -> Unit = {},
     onOpenStorage: () -> Unit,
     onOpenRecent: () -> Unit,
     vm: HomeViewModel = viewModel(factory = ToadViewModelFactory),
@@ -71,8 +69,8 @@ fun HomeScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // Home data (storage, quick links, recents, categories) can change while the user is in
-    // another tab — refresh every time this screen re-enters composition.
+    // Home data (storage, quick links, recents) can change while the user is in another
+    // tab — refresh every time this screen re-enters composition.
     LaunchedEffect(Unit) { vm.refresh() }
 
     LazyColumn(

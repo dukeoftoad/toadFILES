@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaRepository
-import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.StorageStats
 import kotlinx.coroutines.CoroutineDispatcher
@@ -20,15 +19,12 @@ data class HomeUiState(
     val quickLinks: List<Pair<String, File>> = emptyList(),
     val favorites: List<FileItem> = emptyList(),
     /**
-     * Smart-recent feed on Home. Replaces the old Categories section: the user wanted one
-     * unified home, with the previously-separate Recent tab folded in. We list files the
-     * OS media library reports as recently modified, newest first, capped at [RECENT_LIMIT].
+     * Smart-recent feed on Home. Replaces the old Categories section + the standalone Recent
+     * tab: the user wanted one unified home. We list files the OS media library reports as
+     * recently modified, newest first, capped at [HomeViewModel.RECENT_LIMIT].
      */
     val recentFiles: List<MediaRepository.MediaEntry> = emptyList(),
     val loadingRecent: Boolean = false,
-    /** Kept for the Storage screen which still uses category counts; not shown on Home anymore. */
-    val categories: List<CategorySummary> = emptyList(),
-    val loadingCategories: Boolean = false,
 )
 
 class HomeViewModel(
@@ -54,7 +50,6 @@ class HomeViewModel(
                 refreshFavorites(s.favorites)
             }
         }
-        refreshCategories()
     }
 
     fun refreshStorage() {
@@ -90,20 +85,11 @@ class HomeViewModel(
         }
     }
 
-    fun refreshCategories() {
-        _state.update { it.copy(loadingCategories = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val summaries = container.mediaRepo.summaries()
-            _state.update { it.copy(categories = summaries, loadingCategories = false) }
-        }
-    }
-
     /** Re-reads everything that can change while the user is in other tabs. */
     fun refresh() {
         refreshStorage()
         refreshQuickLinks()
         refreshRecent()
-        refreshCategories()
     }
 
     fun toggleFavorite(path: String) {

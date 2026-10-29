@@ -22,7 +22,6 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.toadfiles.app.ui.about.AboutScreen
 import com.toadfiles.app.ui.browse.BrowseScreen
-import com.toadfiles.app.ui.categories.CategoriesScreen
 import com.toadfiles.app.ui.home.HomeScreen
 import com.toadfiles.app.ui.recent.RecentScreen
 import com.toadfiles.app.ui.settings.SettingsScreen
@@ -32,7 +31,6 @@ import com.toadfiles.app.ui.storage.StorageScreen
 object Routes {
     const val HOME = "home"
     const val BROWSE = "browse?dir={dir}"
-    const val CATEGORIES = "categories"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
@@ -47,7 +45,7 @@ private data class BottomDestination(val route: String, val label: String, val i
 /**
  * Navigate without stacking a second copy when the destination is already on top.
  * Plain navigate() pushed a new instance on every tap, so repeated taps on
- * "Categories" (or a quick link) opened the screen again and again.
+ * "Settings" (or a quick link) opened the screen again and again.
  */
 private fun NavHostController.navigateSingleTop(route: String) {
     navigate(route) { launchSingleTop = true }
@@ -97,7 +95,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 HomeScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
-                    onOpenCategories = { navController.navigateSingleTop(Routes.CATEGORIES) },
                     onOpenStorage = { navController.navigateSingleTop(Routes.STORAGE) },
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },
                 )
@@ -111,13 +108,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     bottomPadding = padding.calculateBottomPadding(),
                     onNavigateUp = { navController.popBackStack() },
                     onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
-                )
-            }
-            composable(Routes.CATEGORIES) {
-                CategoriesScreen(
-                    bottomPadding = padding.calculateBottomPadding(),
-                    onBack = { navController.popBackStack() },
-                    onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
                 )
             }
             composable(Routes.RECENT) {
