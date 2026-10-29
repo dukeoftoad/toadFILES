@@ -347,7 +347,8 @@ private fun ChangelogBullet(text: String) {
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
     "v1.4.0" to listOf(
-        "Merged Recent into Home as a smart-recent list — one fewer tab to fumble through.",
+        "Merged Recent into Home as a smart-recent list with a \"See all\" hop to the full view.",
+        "Categories is back as its own tab — an organized grid with per-type icons, item counts and sizes.",
         "Long-press a file opens a Mi-Files-style action sheet (open, share, rename, copy, move, delete, details, zip, favorite, copy-path, open-with).",
         "Share is now local-only: copies into an app-private 'shared' folder, nothing leaves the device.",
         "Pick your accent color (toad, blue, purple, green, orange, red, pink) when dynamic color is off.",

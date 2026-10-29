@@ -76,22 +76,28 @@ class ToadNavHostE2ETest {
     }
 
     @Test
-    fun `bottom bar no longer has a Recent or Categories tab`() {
-        // v1.4 folded Recent into Home and removed the Categories UI entirely; the bottom bar
-        // must only show Home / Browse / Settings. Catches accidental reintroduction of
-        // either tab. (Categories route + screen + VM were deleted in the same release.)
+    fun `bottom bar shows Home Browse Categories Settings and Categories opens its grid`() {
+        // v1.4 brought Categories back as a first-class tab (grid of media categories),
+        // while Recent stays folded into Home. The bar must show these four tabs.
         compose.setContent { ToadTheme { ToadNavHost() } }
 
-        val bottomLabels = listOf("Home", "Browse", "Settings")
+        val bottomLabels = listOf("Home", "Browse", "Categories", "Settings")
         bottomLabels.forEach { label ->
             compose.waitUntil(5_000) {
                 compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
             }
         }
-        compose.waitForIdle()
-        // If someone reintroduces the Categories tab the "Settings" click below will hit
-        // Categories first and the next assertion will fail because the Settings row text
-        // will not appear.
+
+        // Categories: the grid renders the media-library header plus one tile per category.
+        compose.onNodeWithText("Categories").performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Media library").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Images").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Settings is still reachable with Categories sitting between Browse and it.
         compose.onNodeWithText("Settings").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Show hidden files").fetchSemanticsNodes().isNotEmpty()
