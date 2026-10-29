@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,11 +86,15 @@ fun RecentScreen(
                     .padding(padding)
             ) {
                 items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
-                    RecentRow(e) {
-                        if (!Intents.openContent(context, e.uri, e.mime)) {
-                            // Nothing installed can open this type; no fake feedback.
-                        }
-                    }
+                    RecentRow(
+                        e,
+                        onClick = {
+                            if (!Intents.openContent(context, e.uri, e.mime)) {
+                                // Nothing installed can open this type; no fake feedback.
+                            }
+                        },
+                        onShare = { Intents.shareContent(context, e.uri, e.mime) },
+                    )
                 }
             }
         }
@@ -97,7 +102,11 @@ fun RecentScreen(
 }
 
 @Composable
-private fun RecentRow(e: MediaRepository.MediaEntry, onClick: () -> Unit) {
+private fun RecentRow(
+    e: MediaRepository.MediaEntry,
+    onClick: () -> Unit,
+    onShare: () -> Unit,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -149,6 +158,7 @@ private fun RecentRow(e: MediaRepository.MediaEntry, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            IconButton(onClick = onShare) { Icon(Icons.Outlined.Share, "Share") }
         }
     }
 }

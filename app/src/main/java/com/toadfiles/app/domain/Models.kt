@@ -14,6 +14,9 @@ data class FileItem(
 enum class SortMode { NAME, SIZE, DATE, TYPE }
 enum class SortOrder { ASC, DESC }
 
+/** Persisted Browse layout preference. */
+enum class BrowseLayout { LIST, GRID }
+
 enum class FilterMode(val label: String) {
     ALL("All"),
     DOCS("Documents"),
@@ -45,7 +48,12 @@ data class StorageStats(val totalBytes: Long, val freeBytes: Long) {
         get() = if (totalBytes <= 0) 0f else usedBytes.toFloat() / totalBytes
 }
 
-data class StorageRoot(val label: String, val dir: File, val stats: StorageStats?)
+data class StorageRoot(
+    val label: String,
+    val dir: File,
+    val stats: StorageStats?,
+    val removable: Boolean = false,
+)
 
 enum class FileCategory(val label: String) {
     IMAGES("Images"),

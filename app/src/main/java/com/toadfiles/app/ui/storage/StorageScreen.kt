@@ -1,7 +1,6 @@
 package com.toadfiles.app.ui.storage
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.domain.StorageRoot
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,34 +68,35 @@ fun StorageScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp),
         ) {
-            item {
-                val stats = state.stats
-                Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp)) {
-                        if (stats == null) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            LinearProgressIndicator(
-                                progress = { stats.usedFraction },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(10.dp),
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                "${Format.size(stats.usedBytes)} used of ${Format.size(stats.totalBytes)}",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                "${Format.size(stats.freeBytes)} free",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+            if (state.roots.isEmpty()) {
+                item {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }
                 }
-                Spacer(Modifier.height(16.dp))
-                Text("Top-level folders", style = MaterialTheme.typography.titleMedium)
+            }
+
+            // One card per mounted volume: internal storage, SD cards, USB drives.
+            items(state.roots, key = { it.dir.path }) { root ->
+                VolumeCard(
+                    root = root,
+                    analyzing = state.analyzing,
+                    onOpen = { onOpenFolder(root.dir.path) },
+                    onAnalyze = { vm.analyzeTopLevel(root.dir) },
+                )
+            }
+
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (state.analyzedRoot != null)
+                        "Top-level folders of \"${state.analyzedRoot!!.name}\""
+                    else "Top-level folders",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     "Sizes are computed on demand by walking each folder — this can take a " +
                         "while on large libraries. Nothing runs in the background.",
@@ -103,19 +104,17 @@ fun StorageScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (state.analyzing) {
+                if (state.analyzing) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedButton(onClick = { vm.cancelAnalyze() }) { Text("Cancel") }
                         Spacer(Modifier.width(12.dp))
                         Text(
                             "Analyzed so far: ${Format.size(state.analyzedBytes)}",
                             style = MaterialTheme.typography.labelMedium,
                         )
-                    } else {
-                        Button(onClick = { vm.analyzeTopLevel() }) { Text("Analyze storage") }
                     }
+                    Spacer(Modifier.height(12.dp))
                 }
-                Spacer(Modifier.height(12.dp))
             }
 
             if (state.analyzing && state.usages.isEmpty()) {
@@ -167,6 +166,66 @@ fun StorageScreen(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun VolumeCard(
+    root: StorageRoot,
+    analyzing: Boolean,
+    onOpen: () -> Unit,
+    onAnalyze: () -> Unit,
+) {
+    val stats = root.stats
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        onClick = onOpen,
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    root.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (root.removable) {
+                    Text(
+                        "removable",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+                IconButton(onClick = onOpen) { Icon(Icons.Outlined.FolderOpen, "Browse this volume") }
+            }
+            if (stats == null) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                LinearProgressIndicator(
+                    progress = { stats.usedFraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "${Format.size(stats.usedBytes)} used of ${Format.size(stats.totalBytes)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "${Format.size(stats.freeBytes)} free",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!analyzing) {
+                    TextButton(onClick = onAnalyze) { Text("Analyze this volume") }
+                }
+            }
         }
     }
 }

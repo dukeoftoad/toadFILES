@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,6 +18,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Archive
@@ -27,6 +32,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.FolderZip
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.ContentPaste
@@ -36,6 +42,7 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -49,7 +56,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,12 +79,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.domain.BrowseLayout
+import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileGridCell
 import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.NameInputDialog
 import com.toadfiles.app.ui.components.ProgressOverlay
@@ -113,6 +125,17 @@ fun BrowseScreen(
             snackbar.showSnackbar(it)
             vm.consumeToast()
         }
+    }
+
+    // Undo for deletes: trashed items go straight back to their original location.
+    LaunchedEffect(state.lastTrashed) {
+        val trashed = state.lastTrashed ?: return@LaunchedEffect
+        val result = snackbar.showSnackbar(
+            message = "Moved ${trashed.size} item(s) to trash",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete() else vm.dismissUndo()
     }
 
     val selectionMode = state.selection.isNotEmpty()
@@ -239,6 +262,13 @@ fun BrowseScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { vm.toggleLayout() }) {
+                            Icon(
+                                if (state.settings.browseLayout == BrowseLayout.GRID)
+                                    Icons.Outlined.ViewList else Icons.Outlined.GridView,
+                                "Toggle list / grid view",
+                            )
+                        }
                         IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Outlined.Sort, "Sort") }
                         SortMenu(
                             expanded = sortMenuOpen,
@@ -313,6 +343,20 @@ fun BrowseScreen(
                     )
                 }
 
+                val openItem: (FileItem) -> Unit = { item ->
+                    when {
+                        selectionMode -> vm.toggleSelection(item)
+                        item.isDir -> vm.openDir(item.file)
+                        item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
+                        else -> if (!Intents.openFile(context, item.file)) {
+                            vm.requestToast("No app can open this file")
+                        }
+                    }
+                }
+                val longPressItem: (FileItem) -> Unit = { item ->
+                    if (!selectionMode) vm.toggleSelection(item)
+                }
+
                 when {
                     state.loading -> Row(
                         Modifier
@@ -329,31 +373,38 @@ fun BrowseScreen(
                         }
                     )
 
-                    else -> LazyColumn(Modifier.fillMaxSize()) {
-                        itemsIndexed(visible, key = { _, it -> it.file.path }) { _, item ->
-                            FileRow(
-                                item = item,
-                                selected = item.file in state.selection,
-                                isFavorite = item.file.path in state.favoritePaths,
-                                subtitle = if (item.isDir) null else
-                                    "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
-                                onClick = {
-                                    when {
-                                        selectionMode -> vm.toggleSelection(item)
-                                        item.isDir -> vm.openDir(item.file)
-                                        item.name.lowercase().endsWith(".apk") ->
-                                            pendingInstallApk = item.file
-                                        else -> {
-                                            if (!Intents.openFile(context, item.file)) {
-                                                vm.requestToast("No app can open this file")
-                                            }
-                                        }
-                                    }
-                                },
-                                onLongClick = { if (!selectionMode) vm.toggleSelection(item) },
-                            )
+                    else -> if (state.settings.browseLayout == BrowseLayout.GRID) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(112.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                        ) {
+                            gridItems(visible, key = { it.file.path }) { item ->
+                                FileGridCell(
+                                    item = item,
+                                    selected = item.file in state.selection,
+                                    isFavorite = item.file.path in state.favoritePaths,
+                                    onClick = { openItem(item) },
+                                    onLongClick = { longPressItem(item) },
+                                )
+                            }
+                            item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(80.dp)) }
                         }
-                        item { Spacer(Modifier.height(80.dp)) }
+                    } else {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            itemsIndexed(visible, key = { _, it -> it.file.path }) { _, item ->
+                                FileRow(
+                                    item = item,
+                                    selected = item.file in state.selection,
+                                    isFavorite = item.file.path in state.favoritePaths,
+                                    subtitle = if (item.isDir) null else
+                                        "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
+                                    onClick = { openItem(item) },
+                                    onLongClick = { longPressItem(item) },
+                                )
+                            }
+                            item { Spacer(Modifier.height(80.dp)) }
+                        }
                     }
                 }
             }
@@ -411,9 +462,9 @@ fun BrowseScreen(
     }
     state.pendingDelete?.let { files ->
         ConfirmDialog(
-            title = "Delete ${files.size} item(s)?",
-            message = "Deleted files cannot be recovered from toadFILES. " +
-                "Some may remain in the other app's trash if it keeps one.",
+            title = "Move ${files.size} item(s) to trash?",
+            message = "Items are moved to the toadFILES trash and kept for 30 days. " +
+                "You can undo right away or restore later from Settings → Trash.",
             confirmLabel = "Delete",
             destructive = true,
             onConfirm = { vm.confirmDelete() },

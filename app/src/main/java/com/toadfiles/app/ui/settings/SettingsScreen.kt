@@ -49,6 +49,7 @@ import java.io.File
 fun SettingsScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
+    onOpenTrash: () -> Unit,
     vm: SettingsViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -163,6 +164,35 @@ fun SettingsScreen(
                         }
                         Switch(checked = settings.showHidden, onCheckedChange = { vm.setShowHidden(it) })
                     }
+                }
+            }
+
+            Text("Trash", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp))
+
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenTrash() },
+            ) {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Open trash", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Deleted items are kept for 30 days, then removed automatically",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "View",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                 }
             }
 

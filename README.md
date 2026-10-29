@@ -20,7 +20,13 @@ toadFILES blends the simplicity of Fossify File Manager, the category/storage in
 | Categories via MediaStore (images, videos, audio, docs, archives, APKs) | ✅ Implemented |
 | Recent files (MediaStore, on-demand) | ✅ Implemented |
 | Storage analyzer (top-level folder sizes, computed on demand, cancellable) | ✅ Implemented |
-| Favorites (pinned locally via DataStore) | ✅ Implemented |
+| Favorites (pinned locally via DataStore, follow renames & moves) | ✅ Implemented |
+| Trash with undo — deletes move to a per-volume trash, kept 30 days, auto-purged | ✅ Implemented |
+| Browse thumbnails — images (Coil) + video frames (MediaMetadataRetriever) | ✅ Implemented |
+| Grid / list view toggle in Browse (persisted) | ✅ Implemented |
+| SD card & USB-OTG volumes (StorageManager) with per-volume stats, analyzer & trash | ✅ Implemented |
+| APK install handoff to the system package installer | ✅ Implemented |
+| Share from Recent & Categories + "Show in folder" jump from Categories | ✅ Implemented |
 | Theme: light / dark / follow system + Material You dynamic color | ✅ Implemented |
 | Privacy: no INTERNET permission, no analytics, no background scans | ✅ Implemented |
 | Encrypted Vault (Keystore + biometrics) | 🧭 Planned — omitted from v1 until it can be done safely |
@@ -34,7 +40,7 @@ toadFILES blends the simplicity of Fossify File Manager, the category/storage in
 
 ```bash
 ./gradlew :app:assembleDebug          # debug APK
-./gradlew :app:testDebugUnitTest      # 34 JVM unit tests
+./gradlew :app:testDebugUnitTest      # 41 JVM unit tests
 ./gradlew :app:lintDebug              # Android lint
 ```
 
@@ -45,14 +51,14 @@ Or open the project in Android Studio (Koala or newer) and press Run.
 Small, boring, on purpose:
 
 ```
-app/src/main/java/io/github/dukeoftoad/toadfiles/
+app/src/main/java/com/toadfiles/app/
 ├── domain/        # Pure Kotlin: models, natural sorting, path safety,
 │                  # file operations engine, safe ZIP support (all unit-tested)
 ├── data/          # FileRepository (java.io), MediaRepository (MediaStore),
 │                  # SettingsRepository (DataStore), session Clipboard
 ├── ui/            # Compose screens: home / browse / categories /
-│                  # recent / storage / settings + shared components
-├── util/          # Real share/open intents (FileProvider)
+│                  # recent / storage / trash / settings + shared components
+├── util/          # Real share/open intents (FileProvider), video thumbnails
 └── ToadApp.kt     # Hand-rolled DI container — no framework
 ```
 

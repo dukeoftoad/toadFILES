@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,12 +44,14 @@ import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.util.Intents
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoriesScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
+    onShowInFolder: (String) -> Unit,
     vm: CategoriesViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -130,11 +134,21 @@ fun CategoriesScreen(
                         .padding(padding)
                 ) {
                     items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
-                        MediaRow(e) {
-                            if (!Intents.openContent(context, e.uri, e.mime)) {
-                                // No handler installed; do nothing rather than pretend.
-                            }
-                        }
+                        MediaRow(
+                            e,
+                            onClick = {
+                                if (!Intents.openContent(context, e.uri, e.mime)) {
+                                    // No handler installed; do nothing rather than pretend.
+                                }
+                            },
+                            onShare = { Intents.shareContent(context, e.uri, e.mime) },
+                            onShowInFolder = {
+                                val parent = e.data?.let { File(it).parentFile }
+                                if (parent != null && parent.isDirectory) {
+                                    onShowInFolder(parent.absolutePath)
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -143,7 +157,12 @@ fun CategoriesScreen(
 }
 
 @Composable
-private fun MediaRow(e: MediaRepository.MediaEntry, onClick: () -> Unit) {
+private fun MediaRow(
+    e: MediaRepository.MediaEntry,
+    onClick: () -> Unit,
+    onShare: () -> Unit,
+    onShowInFolder: () -> Unit,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -181,6 +200,12 @@ private fun MediaRow(e: MediaRepository.MediaEntry, onClick: () -> Unit) {
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            IconButton(onClick = onShowInFolder, enabled = e.data != null) {
+                Icon(Icons.Outlined.FolderOpen, "Show in folder")
+            }
+            IconButton(onClick = onShare) {
+                Icon(Icons.Outlined.Share, "Share")
             }
         }
     }
