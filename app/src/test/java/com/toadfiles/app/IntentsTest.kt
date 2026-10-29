@@ -14,8 +14,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
-import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import java.io.File
 
@@ -32,12 +32,10 @@ class IntentsTest {
 
     private val appContext: Context = ApplicationProvider.getApplicationContext()
     private lateinit var activity: Activity
-    private lateinit var activityController: ActivityController<Activity>
 
     @Before
     fun setUp() {
-        activityController = Robolectric.setupActivity(Activity::class.java)
-        activity = activityController.get()
+        activity = Robolectric.setupActivity(Activity::class.java)
     }
 
     private fun lastStartedIntent(): Intent = Shadows.shadowOf(activity).nextStartedActivity
