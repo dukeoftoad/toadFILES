@@ -2,6 +2,7 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.ui.categories.CategoriesViewModel
 import kotlinx.coroutines.Dispatchers
@@ -23,8 +24,8 @@ import org.robolectric.annotation.Config
 
 /**
  * Categories tab state machine: grid summaries load up front, tapping a tile drills into
- * that category's entries, back closes the drill-in, and the local-only share path reports
- * honestly when a media entry has no on-disk path.
+ * that category's entries, back closes the drill-in, multi-select toggles by uri, and
+ * delete moves real files into the 30-day trash.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -56,6 +57,17 @@ class CategoriesViewModelTest {
         }
     }
 
+    private fun entry(id: Long, name: String, data: String? = null) = MediaRepository.MediaEntry(
+        id = id,
+        uri = android.net.Uri.parse("content://test/$id"),
+        name = name,
+        size = 10L,
+        dateModified = 0L,
+        mime = "text/plain",
+        category = FileCategory.DOCS,
+        data = data,
+    )
+
     @Test
     fun `init loads one summary per category and clears the loading flag`() = runTest {
         // Robolectric's MediaStore is empty, so every count is 0 — but the grid still gets
@@ -79,6 +91,14 @@ class CategoriesViewModelTest {
     }
 
     @Test
+    fun `close also clears an active multi-select`() = runTest {
+        vm.toggleSelection(entry(1, "a.txt"))
+        assertEquals(1, vm.state.value.selection.size)
+        vm.close()
+        assertTrue(vm.state.value.selection.isEmpty())
+    }
+
+    @Test
     fun `refresh survives a media store hiccup`() = runTest {
         vm.refresh()
         await { !vm.state.value.loading }
@@ -88,46 +108,62 @@ class CategoriesViewModelTest {
     }
 
     @Test
-    fun `shareLocal without any on-disk path toasts instead of launching`() = runTest {
-        // A MediaEntry built without `data` has no real path; sharing must refuse honestly.
-        val orphan = container.mediaRepo.list(FileCategory.IMAGES).firstOrNull()
-        // Robolectric MediaStore is empty so orphan is null — exercise the empty-input path.
-        vm.shareLocal(emptyList())
-        assertEquals("Can't share this item — no on-disk path", vm.state.value.toast)
-        assertNull(orphan)
-    }
-
-    @Test
     fun `toast is consumed after being shown`() = runTest {
-        vm.requestToast("Shared 2 file(s) locally")
-        assertEquals("Shared 2 file(s) locally", vm.state.value.toast)
+        vm.requestToast("Moved 2 item(s) to trash")
+        assertEquals("Moved 2 item(s) to trash", vm.state.value.toast)
         vm.consumeToast()
         assertNull(vm.state.value.toast)
     }
 
     @Test
-    fun `shareLocal copies a real file into the shared folder`() = runTest {
-        val src = java.io.File(container.fileRepo.primaryRoot(), "cat-share-me.txt")
+    fun `confirmDelete moves a real file into the trash and reports it`() = runTest {
+        val src = java.io.File(container.fileRepo.primaryRoot(), "cat-delete-me.txt")
         src.parentFile.mkdirs()
-        src.writeText("share me")
+        src.writeText("delete me")
         try {
-            vm.shareLocal(listOf(com.toadfiles.app.data.MediaRepository.MediaEntry(
-                id = 1L,
-                uri = android.net.Uri.parse("content://test/1"),
-                name = src.name,
-                size = src.length(),
-                dateModified = 0L,
-                mime = "text/plain",
-                category = FileCategory.DOCS,
-                data = src.absolutePath,
-            )))
+            vm.requestDelete(listOf(entry(1, src.name, data = src.absolutePath)))
+            assertEquals(1, vm.state.value.pendingDelete?.size)
+            vm.confirmDelete()
             await { vm.state.value.toast != null }
-            assertEquals("Shared 1 file(s) locally", vm.state.value.toast)
-            val sharedNames = container.sharedRepo.list().map { it.name }
-            assertTrue(src.name in sharedNames)
+            assertEquals("Moved 1 item(s) to trash", vm.state.value.toast)
+            // The file must have actually moved into the trash dir on the same volume.
+            assertFalse(src.exists())
+            val trashDir = java.io.File(
+                container.fileRepo.primaryRoot(),
+                com.toadfiles.app.domain.Trash.DIR_NAME,
+            )
+            assertTrue(trashDir.listFiles()?.any { it.name.endsWith(src.name) } == true)
         } finally {
             src.delete()
-            container.sharedRepo.clear()
         }
+    }
+
+    @Test
+    fun `confirmDelete reports entries without an on-disk path honestly`() = runTest {
+        vm.requestDelete(listOf(entry(1, "orphan.txt", data = null)))
+        vm.confirmDelete()
+        await { vm.state.value.toast != null }
+        assertEquals("Moved 0 to trash · 1 had no on-disk path", vm.state.value.toast)
+    }
+
+    @Test
+    fun `requestDelete with nothing is a no-op`() = runTest {
+        vm.requestDelete(emptyList())
+        assertNull(vm.state.value.pendingDelete)
+    }
+
+    @Test
+    fun `selection toggles by uri and select-all covers the current entries`() = runTest {
+        val a = entry(1, "a.txt")
+        val b = entry(2, "b.txt")
+        vm.toggleSelection(a)
+        vm.toggleSelection(b)
+        assertEquals(2, vm.state.value.selection.size)
+        vm.toggleSelection(a)
+        assertEquals(1, vm.state.value.selection.size)
+        vm.selectAll()
+        // Entries come from MediaStore (empty on Robolectric): select-all selects nothing
+        // rather than throwing — the state machine stays consistent.
+        assertTrue(vm.state.value.selection.isEmpty())
     }
 }

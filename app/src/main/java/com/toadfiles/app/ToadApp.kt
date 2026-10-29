@@ -9,7 +9,6 @@ import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.SettingsRepository
-import com.toadfiles.app.data.SharedRepository
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +21,6 @@ class AppContainer(context: Context) {
     val fileRepo = FileRepository(context)
     val mediaRepo = MediaRepository(context.contentResolver)
     val settingsRepo = SettingsRepository(context)
-    val sharedRepo = SharedRepository(context)
     val clipboard = Clipboard()
 }
 

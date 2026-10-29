@@ -1,12 +1,16 @@
 package com.toadfiles.app.ui.categories
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,15 +27,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.InstallMobile
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,18 +50,24 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,7 +80,9 @@ import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.MediaActionSheet
 import com.toadfiles.app.util.Intents
+import java.io.File
 
 /**
  * Per-category look for the tiles: every category gets its own icon and its own color
@@ -100,6 +116,7 @@ fun CategoriesScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    var actionSheetFor by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
@@ -108,34 +125,75 @@ fun CategoriesScreen(
         }
     }
 
+    // System back: first leave multi-select, then the drill-in list, then the tab.
+    // Without these handlers back popped the whole route straight to Home (bug report).
+    val inDrillIn = state.selected != null
+    val inSelection = state.selection.isNotEmpty()
+    BackHandler(enabled = inSelection) { vm.clearSelection() }
+    BackHandler(enabled = inDrillIn && !inSelection) { vm.close() }
+
+    val openEntry: (MediaRepository.MediaEntry) -> Boolean = { e ->
+        Intents.openContent(context, e.uri, e.mime)
+    }
+
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(state.selected?.label ?: "Categories")
-                        if (state.selected != null) {
-                            Text(
-                                "${state.entries.size} item(s)",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+            if (inDrillIn && inSelection) {
+                TopAppBar(
+                    title = { Text("${state.selection.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = { vm.clearSelection() }) {
+                            Icon(Icons.Outlined.Close, "Clear selection")
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { if (state.selected != null) vm.close() else onBack() }) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
-                    }
-                },
-                actions = {
-                    if (state.selected == null) {
+                    },
+                    actions = {
+                        IconButton(onClick = { vm.selectAll() }) {
+                            Icon(Icons.Outlined.SelectAll, "Select all")
+                        }
+                        IconButton(onClick = {
+                            val picked = vm.selectedEntries()
+                            if (picked.isNotEmpty()) {
+                                val mime = commonMime(picked)
+                                if (!Intents.shareUris(context, picked.map { it.uri }, mime)) {
+                                    vm.requestToast("Could not share these items")
+                                }
+                            }
+                            vm.clearSelection()
+                        }) { Icon(Icons.Outlined.Share, "Share") }
+                        IconButton(onClick = { vm.requestDelete(vm.selectedEntries()) }) {
+                            Icon(Icons.Outlined.Delete, "Delete")
+                        }
+                    },
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        if (inDrillIn) {
+                            Column {
+                                Text(state.selected!!.label)
+                                Text(
+                                    "${state.entries.size} item(s) · " +
+                                        Format.size(state.entries.sumOf { it.size }),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            Text("Categories")
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { if (inDrillIn) vm.close() else onBack() }) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
+                        }
+                    },
+                    actions = {
                         IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
-                    }
-                },
-            )
+                    },
+                )
+            }
         },
     ) { padding ->
         if (state.selected == null) {
@@ -152,21 +210,120 @@ fun CategoriesScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                onOpenEntry = {
-                    if (!Intents.openContent(context, it.uri, it.mime)) {
-                        // No handler installed for this type; no fake feedback.
+                onEntryTap = { e ->
+                    when {
+                        inSelection -> vm.toggleSelection(e)
+                        else -> if (!openEntry(e)) vm.requestToast("No app can open this file")
                     }
                 },
-                onShareEntry = { e ->
-                    if (e.data != null) vm.shareLocal(listOf(e))
-                    else vm.requestToast("Can't share this item — no on-disk path")
-                },
-                onShowInFolder = { e ->
-                    val parent = e.data?.let { java.io.File(it).parentFile }
-                    if (parent != null && parent.isDirectory) onShowInFolder(parent.absolutePath)
+                onEntryLongPress = { e ->
+                    if (inSelection) vm.toggleSelection(e) else actionSheetFor = e
                 },
             )
         }
+    }
+
+    // Long-press action sheet (bug 2): the per-row folder/share buttons are gone —
+    // every action now lives here, like the Browse sheet.
+    actionSheetFor?.let { entry ->
+        MediaActionSheet(
+            entry = entry,
+            onOpen = {
+                actionSheetFor = null
+                if (!openEntry(entry)) vm.requestToast("No app can open this file")
+            },
+            onOpenWith = {
+                actionSheetFor = null
+                if (!Intents.openContentWith(context, entry.uri, entry.mime)) {
+                    vm.requestToast("No app can open this file")
+                }
+            },
+            onShare = {
+                actionSheetFor = null
+                if (!Intents.shareUris(context, listOf(entry.uri), entry.mime)) {
+                    vm.requestToast("Could not share this item")
+                }
+            },
+            onShowInFolder = entry.data?.let { path ->
+                {
+                    actionSheetFor = null
+                    val parent = java.io.File(path).parentFile
+                    if (parent != null && parent.isDirectory) onShowInFolder(parent.absolutePath)
+                }
+            },
+            onDelete = entry.data?.let {
+                {
+                    actionSheetFor = null
+                    vm.requestDelete(listOf(entry))
+                }
+            },
+            onDetails = {
+                actionSheetFor = null
+                vm.requestDetails(entry)
+            },
+            onCopyPath = entry.data?.let { path ->
+                {
+                    actionSheetFor = null
+                    val f = java.io.File(path)
+                    if (Intents.copyPathToClipboard(context, f)) {
+                        vm.requestToast("Path copied to clipboard")
+                    } else {
+                        vm.requestToast("Could not copy the path")
+                    }
+                }
+            },
+            onSelect = {
+                actionSheetFor = null
+                vm.toggleSelection(entry)
+            },
+            onDismiss = { actionSheetFor = null },
+        )
+    }
+
+    // Delete confirmation: media entries go to the real 30-day trash.
+    state.pendingDelete?.let { entries ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissDelete() },
+            title = { Text("Move ${entries.size} item(s) to trash?") },
+            text = {
+                Text("Items are moved to the toadFILES trash and kept for 30 days. " +
+                    "You can restore them from Settings → Trash.")
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { vm.dismissDelete() }) { Text("Cancel") } },
+        )
+    }
+
+    // Details dialog for a media entry.
+    state.detailsOf?.let { e ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissDetails() },
+            title = { Text(e.name, maxLines = 2) },
+            text = {
+                Column {
+                    if (e.data != null) Text("Path: ${e.data}", style = MaterialTheme.typography.labelMedium)
+                    Text("Type: ${e.mime}")
+                    Text("Size: ${Format.size(e.size)}")
+                    Text("Modified: ${Format.dateTime(e.dateModified)}")
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.dismissDetails() }) { Text("Close") } },
+        )
+    }
+}
+
+/** One common mime for a mixed batch of media entries (shareUris needs a single type). */
+private fun commonMime(entries: List<MediaRepository.MediaEntry>): String {
+    if (entries.size == 1) return entries.first().mime
+    val mimes = entries.map { it.mime }.toSet()
+    return when {
+        mimes.size == 1 -> mimes.first()
+        mimes.all { it.startsWith("image/") } -> "image/*"
+        mimes.all { it.startsWith("video/") } -> "video/*"
+        mimes.all { it.startsWith("audio/") } -> "audio/*"
+        else -> "*/*"
     }
 }
 
@@ -271,15 +428,20 @@ private fun CategoryTile(summary: CategorySummary, onClick: () -> Unit) {
     }
 }
 
-/** Drill-in list for one category, newest first (MediaStore sorts by DATE_MODIFIED DESC). */
+/**
+ * Drill-in view for one category, newest first (MediaStore sorts by DATE_MODIFIED DESC).
+ * Photos and videos render as a modern thumbnail grid; other categories use compact
+ * rows. Tap opens the file, long-press opens the action sheet or starts multi-select.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CategoryEntries(
     state: CategoriesUiState,
     modifier: Modifier = Modifier,
-    onOpenEntry: (MediaRepository.MediaEntry) -> Unit,
-    onShareEntry: (MediaRepository.MediaEntry) -> Unit,
-    onShowInFolder: (MediaRepository.MediaEntry) -> Unit,
+    onEntryTap: (MediaRepository.MediaEntry) -> Unit,
+    onEntryLongPress: (MediaRepository.MediaEntry) -> Unit,
 ) {
+    val visual = state.selected == FileCategory.IMAGES || state.selected == FileCategory.VIDEOS
     when {
         state.entriesLoading -> Row(
             modifier.padding(24.dp),
@@ -291,70 +453,134 @@ private fun CategoryEntries(
             modifier,
         )
 
+        visual -> LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 108.dp),
+            modifier = modifier,
+            contentPadding = PaddingValues(4.dp),
+        ) {
+            gridItems(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
+                MediaGridCell(
+                    e = e,
+                    selected = e.uri.toString() in state.selection,
+                    onClick = { onEntryTap(e) },
+                    onLongClick = { onEntryLongPress(e) },
+                )
+            }
+        }
+
         else -> LazyColumn(modifier) {
             items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
                 MediaRow(
-                    e,
-                    onClick = { onOpenEntry(e) },
-                    onShare = { onShareEntry(e) },
-                    onShowInFolder = { onShowInFolder(e) },
+                    e = e,
+                    selected = e.uri.toString() in state.selection,
+                    onClick = { onEntryTap(e) },
+                    onLongClick = { onEntryLongPress(e) },
+                )
+            }
+            item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+/** Square thumbnail cell for image/video grids, with a selection check overlay. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MediaGridCell(
+    e: MediaRepository.MediaEntry,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .padding(2.dp)
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        AsyncImage(
+            // Prefer the real file when its path is known (faster, works for video frames);
+            // fall back to the MediaStore URI when the index hides the path.
+            model = e.data?.let(::File) ?: e.uri,
+            contentDescription = e.name,
+            contentScale = ContentScale.Crop,
+            error = androidx.compose.ui.graphics.vector.rememberVectorPainter(lookFor(e.category).icon),
+            modifier = Modifier
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .fillMaxSize(),
+        )
+        if (selected) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f)),
+            )
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(24.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.Check,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(4.dp),
                 )
             }
         }
     }
 }
 
+/** Compact row for non-visual categories (docs, audio, archives, APKs). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaRow(
     e: MediaRepository.MediaEntry,
+    selected: Boolean,
     onClick: () -> Unit,
-    onShare: () -> Unit,
-    onShowInFolder: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 5.dp),
-        shape = RoundedCornerShape(14.dp),
-        onClick = onClick,
-    ) {
-        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (e.category == FileCategory.IMAGES || e.category == FileCategory.VIDEOS) {
-                AsyncImage(
-                    model = e.uri,
-                    contentDescription = e.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .padding(2.dp)
-                        .size(52.dp),
+    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    Surface(color = bg, shape = RoundedCornerShape(12.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    lookFor(e.category).icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(22.dp),
                 )
-            } else {
-                Card(shape = RoundedCornerShape(10.dp)) {
-                    Box(
-                        Modifier.size(52.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            e.name.substringAfterLast('.', "?").uppercase().take(4),
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
-                }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(e.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    e.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Text(
                     "${Format.size(e.size)} · ${Format.date(e.dateModified)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onShowInFolder, enabled = e.data != null) {
-                Icon(Icons.AutoMirrored.Outlined.OpenInNew, "Show in folder")
-            }
-            IconButton(onClick = onShare) {
-                Icon(Icons.Outlined.Share, "Share a local copy")
+            if (selected) {
+                Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
