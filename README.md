@@ -1,5 +1,7 @@
 # toadFILES
 
+[![Android CI](https://github.com/dukeoftoad/toadFILES/actions/workflows/android.yml/badge.svg)](https://github.com/dukeoftoad/toadFILES/actions/workflows/android.yml)
+
 A file manager for Android that stays out of your way. No ads, no tracking, no cloud, and no internet permission at all, so it can't phone home even if it wanted to.
 
 I built it because I wanted something that opens fast, browses real folders instead of a fake "recent files" view, and doesn't nag me. It works on actual files in actual directories and tells you honestly when something fails.
@@ -49,6 +51,8 @@ Grab the APK from the [Releases](https://github.com/dukeoftoad/toadFILES/release
 ```
 
 Android Studio (Koala or newer) works too. Tests are plain JVM tests running on Robolectric, so no emulator is needed.
+
+The instrumentation suite (`./gradlew :app:connectedDebugAndroidTest`) does need a device or emulator, so CI runs it for you on emulators for API 29, 33 and 36 on every push and pull request — the same gate lint, unit tests and APK assembly go through.
 
 To regenerate the README screenshots after UI changes:
 
