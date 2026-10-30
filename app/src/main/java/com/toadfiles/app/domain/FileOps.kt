@@ -85,9 +85,12 @@ object FileOps {
         targetDir: File,
         strategy: ConflictStrategy,
         onProgress: (OpProgress) -> Unit = {},
+        checkCancelled: (() -> Unit)? = null,
     ): OpResult = withContext(Dispatchers.IO) {
         PathSafety.rejectSelfTarget(sources, targetDir)
         if (!targetDir.isDirectory) targetDir.mkdirs()
+        val ct = currentCoroutineContext()
+        val cancelCheck: () -> Unit = checkCancelled ?: { ct.ensureActive() }
         var ok = 0; var skip = 0; var fail = 0
         val failures = mutableListOf<String>()
         var cancelled = false
@@ -107,15 +110,22 @@ object FileOps {
                 }
                 if (dest.exists() && strategy == ConflictStrategy.REPLACE) {
                     val error = swapReplace(src, dest) { staging ->
-                        copyRecursively(src, staging) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
+                        copyRecursively(src, staging, cancelCheck) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
                     }
                     if (error == null) ok++ else { fail++; failures += error }
                     continue
                 }
-                copyRecursively(src, dest) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
-                    .let { copied ->
-                        if (copied) ok++ else { fail++ }
-                    }
+                try {
+                    copyRecursively(src, dest, cancelCheck) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
+                        .let { copied ->
+                            if (copied) ok++ else { fail++ }
+                        }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    // The destination path is always freshly created on this route (REPLACE
+                    // goes through swapReplace), so the half-written tree is ours to remove.
+                    deleteRecursively(dest)
+                    throw ce
+                }
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 cancelled = true
                 break
@@ -133,9 +143,12 @@ object FileOps {
         targetDir: File,
         strategy: ConflictStrategy,
         onProgress: (OpProgress) -> Unit = {},
+        checkCancelled: (() -> Unit)? = null,
     ): OpResult = withContext(Dispatchers.IO) {
         PathSafety.rejectSelfTarget(sources, targetDir)
         if (!targetDir.isDirectory) targetDir.mkdirs()
+        val ct = currentCoroutineContext()
+        val cancelCheck: () -> Unit = checkCancelled ?: { ct.ensureActive() }
         var ok = 0; var skip = 0; var fail = 0
         val failures = mutableListOf<String>()
         var cancelled = false
@@ -168,15 +181,19 @@ object FileOps {
                             // only then publish it under the final name.
                             val staging = File(targetDir, PathSafety.uniqueName(targetDir, STAGE_PREFIX + src.name))
                             try {
-                                val copied = copyRecursively(src, staging) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
+                                val copied = copyRecursively(src, staging, cancelCheck) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
                                 if (copied && staging.renameTo(dest)) replaced = true else fail++
                             } finally {
                                 if (staging.exists() && !replaced) deleteRecursively(staging)
                             }
                         }
                         if (replaced) {
-                            deleteRecursively(src) // no-op when the rename already moved it
-                            ok++
+                            // Source is already gone when the rename moved it; a failed
+                            // cleanup still counts as a failure — the copy stays either way.
+                            if (deleteRecursively(src, cancelCheck)) ok++ else {
+                                fail++
+                                failures += "Copied ${src.name} to the destination, but the original could not be deleted"
+                            }
                         }
                     } finally {
                         if (replaced) {
@@ -196,11 +213,15 @@ object FileOps {
                     val staging = File(targetDir, PathSafety.uniqueName(targetDir, STAGE_PREFIX + src.name))
                     var published = false
                     try {
-                        val copied = copyRecursively(src, staging) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
+                        val copied = copyRecursively(src, staging, cancelCheck) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
                         if (copied && staging.renameTo(dest)) {
-                            deleteRecursively(src)
-                            ok++
                             published = true
+                            // The destination is a complete copy now; if the original cannot
+                            // be removed the move is only partial and must not count as done.
+                            if (deleteRecursively(src, cancelCheck)) ok++ else {
+                                fail++
+                                failures += "Copied ${src.name} to the destination, but the original could not be deleted"
+                            }
                         } else {
                             fail++
                         }
@@ -223,7 +244,10 @@ object FileOps {
     suspend fun delete(
         sources: List<File>,
         onProgress: (OpProgress) -> Unit = {},
+        checkCancelled: (() -> Unit)? = null,
     ): OpResult = withContext(Dispatchers.IO) {
+        val ct = currentCoroutineContext()
+        val cancelCheck: () -> Unit = checkCancelled ?: { ct.ensureActive() }
         var ok = 0; var fail = 0
         val failures = mutableListOf<String>()
         var cancelled = false
@@ -233,7 +257,7 @@ object FileOps {
                 onProgress(OpProgress(index, sources.size, src.name))
                 // A dangling symlink has exists() == false but still needs unlinking.
                 if (!src.exists() && !isSymlink(src)) { ok++; continue }
-                if (deleteRecursively(src)) ok++ else { fail++; failures += "Could not delete ${src.name}" }
+                if (deleteRecursively(src, cancelCheck)) ok++ else { fail++; failures += "Could not delete ${src.name}" }
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 cancelled = true
                 break
@@ -322,13 +346,21 @@ object FileOps {
             false
         }
 
-    /** Returns true when fully copied; records per-item failures via [onItemFailure]. */
+    /**
+     * Returns true when fully copied; records per-item failures via [onItemFailure].
+     * [checkCancelled] is polled before every directory and file visit and inside the
+     * stream loop, so a cancelled operation stops promptly. It throws
+     * [kotlinx.coroutines.CancellationException], which is rethrown — never reported as
+     * a copy failure — so callers can clean partial outputs and flag the cancellation.
+     */
     private fun copyRecursively(
         src: File,
         dest: File,
+        checkCancelled: () -> Unit,
         onItemFailure: (String, Exception?) -> Unit,
     ): Boolean {
         return try {
+            checkCancelled()
             if (isSymlink(src)) {
                 // Policy: links to plain files are copied by content; links to folders
                 // (and broken links) are never followed — they are recorded instead of
@@ -339,7 +371,7 @@ object FileOps {
                     null
                 }
                 if (target != null && target.isRegularFile) {
-                    copyFileContents(src, dest)
+                    copyFileContents(src, dest, checkCancelled)
                 } else {
                     val why = if (target == null) "broken symbolic link" else "symbolic link to a folder"
                     onItemFailure(src.name, IOException("not copied: $why (links are not followed)"))
@@ -359,25 +391,28 @@ object FileOps {
                 }
                 var all = true
                 for (child in children) {
-                    val ok = copyRecursively(File(src, child.name), File(dest, child.name), onItemFailure)
+                    val ok = copyRecursively(File(src, child.name), File(dest, child.name), checkCancelled, onItemFailure)
                     if (!ok) all = false
                 }
                 all
             } else {
-                copyFileContents(src, dest)
+                copyFileContents(src, dest, checkCancelled)
             }
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
         } catch (e: Exception) {
             onItemFailure(src.name, e)
             false
         }
     }
 
-    private fun copyFileContents(src: File, dest: File): Boolean {
+    private fun copyFileContents(src: File, dest: File, checkCancelled: () -> Unit): Boolean {
         if (dest.exists() && dest.length() == src.length()) return true // already there
         FileInputStream(src).use { input ->
             FileOutputStream(dest).use { output ->
                 val buf = ByteArray(BUFFER)
                 while (true) {
+                    checkCancelled() // job-state poll only: cheap, no syscalls per iteration
                     val n = input.read(buf)
                     if (n == -1) break
                     output.write(buf, 0, n)
@@ -392,8 +427,16 @@ object FileOps {
      * including links to directories and dangling links — are unlinked themselves;
      * their targets are never entered, so deleting a link can never touch the linked
      * folder's contents and link cycles cannot occur.
+     *
+     * Never cancellable: cleanup paths (staging/backup removal) must always run to the
+     * end. [delete] and [move] use the checkpoint-aware variant below instead.
      */
-    fun deleteRecursively(file: File): Boolean {
+    fun deleteRecursively(file: File): Boolean = deleteRecursively(file, checkCancelled = null)
+
+    /** As [deleteRecursively], but [checkCancelled] is polled before each visit; a
+     *  cancelled walk stops promptly and rethrows
+     *  [kotlinx.coroutines.CancellationException] instead of reporting `false`. */
+    private fun deleteRecursively(file: File, checkCancelled: (() -> Unit)?): Boolean {
         return try {
             val path = file.toPath()
             if (Files.isSymbolicLink(path)) {
@@ -402,18 +445,27 @@ object FileOps {
             }
             if (!file.exists()) return true
             Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    checkCancelled?.invoke()
+                    return FileVisitResult.CONTINUE
+                }
+
                 override fun visitFile(f: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    checkCancelled?.invoke()
                     Files.delete(f) // also unlinks file symlinks without touching their targets
                     return FileVisitResult.CONTINUE
                 }
 
                 override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
                     exc?.let { throw it }
+                    checkCancelled?.invoke()
                     Files.delete(dir)
                     return FileVisitResult.CONTINUE
                 }
             })
             true
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
         } catch (_: Exception) {
             false
         }

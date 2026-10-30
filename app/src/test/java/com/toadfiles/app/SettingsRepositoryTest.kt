@@ -17,15 +17,19 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * SettingsRepository against a real DataStore file — a fresh, isolated store per test so
@@ -422,5 +426,175 @@ class SettingsRepositoryTest {
         assertEquals(setOf("/vol/keep.txt"), s.favorites)
         assertEquals(setOf("/vol/keep-folder"), s.quickPins)
         assertTrue(s.quickHidden.isEmpty())
+    }
+
+    // ---- P2.9: remap, record and persist are serialized on one mutex ----
+
+    /**
+     * Runs a suspend block on a daemon thread so a race test can park it on a latch
+     * without ever keeping the test JVM alive after a failure.
+     */
+    private fun raceThread(name: String, block: suspend () -> Unit): Thread =
+        Thread({ runBlocking { block() } }, name).apply { isDaemon = true }
+
+    /**
+     * Barrier test (audit P2.9): a flush parks inside its critical section — snapshot
+     * taken, write not yet committed — and only then does a rename start. The one mutex
+     * must hold the remap back until the flush commits, so the remapped set is written
+     * last and no fresh session can resurrect the pre-remap path from disk.
+     * Latches only — no sleeps.
+     */
+    @Test
+    fun `persist parked mid-flush cannot land stale paths after a racing remap`() = runTest {
+        val store = newStore()
+        store.edit { it[stringSetPreferencesKey("folder_uses")] = setOf("4|/vol/Old") }
+        val repo = SettingsRepository(store = store)
+        repo.reloadFolderUses()
+
+        val parked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        repo.onUsesPersistSnapshotted = {
+            parked.countDown()
+            release.await(10, TimeUnit.SECONDS)
+        }
+        val persisting = raceThread("p2-9-persist") { repo.persistFolderUses() }.apply { start() }
+        try {
+            assertTrue("persist never reached its snapshot", parked.await(10, TimeUnit.SECONDS))
+
+            // The rename starts while the flush is parked inside its critical section.
+            val remapping = raceThread("p2-9-remap") { repo.remapSavedPaths("/vol/Old", "/vol/New") }
+                .apply { start() }
+
+            release.countDown()
+            persisting.join(TimeUnit.SECONDS.toMillis(10))
+            remapping.join(TimeUnit.SECONDS.toMillis(10))
+            assertFalse("persist did not finish", persisting.isAlive)
+            assertFalse("remap did not finish", remapping.isAlive)
+
+            // The live map ends up remapped…
+            assertEquals(mapOf("/vol/New" to 4), repo.folderUses.value)
+
+            // …and so does the persisted set: a fresh repository must not resurrect /vol/Old.
+            val repo2 = SettingsRepository(store = store)
+            repo2.recordFolderUse("/warmup") // triggers the hydrate
+            assertEquals(4, repo2.folderUses.value["/vol/New"])
+            assertNull(repo2.folderUses.value["/vol/Old"])
+        } finally {
+            release.countDown() // never leave a parked flush hanging
+            repo.onUsesPersistSnapshotted = null
+        }
+    }
+
+    /**
+     * Same interleaving as above but with the flush hydrating inside the race (app
+     * stopped before the initial read): the hydrate, the snapshot and the write must
+     * stay one critical section, so the remap can only land after the full flush.
+     */
+    @Test
+    fun `persist that hydrates mid-race with a remap lands remapped paths everywhere`() = runTest {
+        val store = newStore()
+        store.edit { it[stringSetPreferencesKey("folder_uses")] = setOf("4|/vol/Old") }
+        val repo = SettingsRepository(store = store) // not hydrated yet
+
+        val parked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        repo.onUsesPersistSnapshotted = {
+            parked.countDown()
+            release.await(10, TimeUnit.SECONDS)
+        }
+        val persisting = raceThread("p2-9-persist") { repo.persistFolderUses() }.apply { start() }
+        try {
+            assertTrue("persist never reached its snapshot", parked.await(10, TimeUnit.SECONDS))
+            // The flush hydrated first: the previous session's history is in memory.
+            assertEquals(mapOf("/vol/Old" to 4), repo.folderUses.value)
+
+            val remapping = raceThread("p2-9-remap") { repo.remapSavedPaths("/vol/Old", "/vol/New") }
+                .apply { start() }
+
+            release.countDown()
+            persisting.join(TimeUnit.SECONDS.toMillis(10))
+            remapping.join(TimeUnit.SECONDS.toMillis(10))
+            assertFalse("persist did not finish", persisting.isAlive)
+            assertFalse("remap did not finish", remapping.isAlive)
+
+            assertEquals(mapOf("/vol/New" to 4), repo.folderUses.value)
+
+            val repo2 = SettingsRepository(store = store)
+            repo2.recordFolderUse("/warmup") // triggers the hydrate
+            assertEquals(4, repo2.folderUses.value["/vol/New"])
+            assertNull(repo2.folderUses.value["/vol/Old"])
+        } finally {
+            release.countDown() // never leave a parked flush hanging
+            repo.onUsesPersistSnapshotted = null
+        }
+    }
+
+    /**
+     * Barrier test (audit P2.9, the audit's exact window): the remap parks right after
+     * the persisted set was rewritten but before the live map follows, and a flush is
+     * started inside that window. The flush must wait for the remap's mutex section to
+     * finish and then persist the REMAPPED in-memory paths — writing the old map here
+     * would undo the path rewrite on disk until the next remap.
+     */
+    @Test
+    fun `persist started while a remap is mid-write lands remapped paths everywhere`() = runTest {
+        val store = newStore()
+        store.edit { it[stringSetPreferencesKey("folder_uses")] = setOf("4|/vol/Old") }
+        val repo = SettingsRepository(store = store)
+        repo.reloadFolderUses()
+
+        val parked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        repo.onUsesRemapCommitted = {
+            parked.countDown()
+            release.await(10, TimeUnit.SECONDS)
+        }
+        val remapping = raceThread("p2-9-remap") { repo.remapSavedPaths("/vol/Old", "/vol/New") }
+            .apply { start() }
+        try {
+            assertTrue("remap never committed its persisted rewrite", parked.await(10, TimeUnit.SECONDS))
+            // Parked in the exact window: disk already remapped…
+            assertEquals(
+                setOf("4|/vol/New"),
+                store.data.first()[stringSetPreferencesKey("folder_uses")],
+            )
+            // …while the live map still carries the old paths.
+            assertEquals(mapOf("/vol/Old" to 4), repo.folderUses.value)
+
+            // The flush starts before the remap finishes.
+            val persisting = raceThread("p2-9-persist") { repo.persistFolderUses() }.apply { start() }
+
+            release.countDown()
+            remapping.join(TimeUnit.SECONDS.toMillis(10))
+            persisting.join(TimeUnit.SECONDS.toMillis(10))
+            assertFalse("remap did not finish", remapping.isAlive)
+            assertFalse("persist did not finish", persisting.isAlive)
+
+            assertEquals(mapOf("/vol/New" to 4), repo.folderUses.value)
+
+            val repo2 = SettingsRepository(store = store)
+            repo2.recordFolderUse("/warmup") // triggers the hydrate
+            assertEquals(4, repo2.folderUses.value["/vol/New"])
+            assertNull(repo2.folderUses.value["/vol/Old"])
+        } finally {
+            release.countDown() // never leave a parked remap hanging
+            repo.onUsesRemapCommitted = null
+        }
+    }
+
+    /** Recording racing a remap must neither lose the fresh count nor keep a stale path. */
+    @Test
+    fun `recordFolderUse racing remapSavedPaths keeps every count exactly once`() = runTest {
+        val store = newStore()
+        store.edit { it[stringSetPreferencesKey("folder_uses")] = setOf("3|/vol/A") }
+        val repo = SettingsRepository(store = store)
+        repo.reloadFolderUses()
+
+        kotlinx.coroutines.coroutineScope {
+            launch { repo.recordFolderUse("/vol/B") }
+            launch { repo.remapSavedPaths("/vol/A", "/vol/A2") }
+        }
+
+        assertEquals(mapOf("/vol/A2" to 3, "/vol/B" to 1), repo.folderUses.value)
     }
 }

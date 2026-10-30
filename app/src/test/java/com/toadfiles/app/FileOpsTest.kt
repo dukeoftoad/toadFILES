@@ -2,6 +2,9 @@ package com.toadfiles.app
 
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileOps
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -127,7 +130,7 @@ class FileOpsTest {
         val dst = tmp.newFolder("dst2")
         repeat(3) { File(src, "f$it.txt").writeText("x") }
         var lastTotal = 0
-        FileOps.copy(listOf(src), dst, ConflictStrategy.RENAME) { p -> lastTotal = p.total }
+        FileOps.copy(listOf(src), dst, ConflictStrategy.RENAME, onProgress = { p -> lastTotal = p.total })
         assertEquals(1, lastTotal)
     }
 
@@ -296,5 +299,129 @@ class FileOpsTest {
             listOf("item.txt"),
             dst.listFiles()!!.map { it.name },
         )
+    }
+
+    // ---------- cancellation inside the recursive / streaming steps (P2.4) ----------
+
+    @Test
+    fun `cancelling mid copy stops the recursion and removes the partial destination`() = runBlocking {
+        val src = tmp.newFolder("cancel-copy-src")
+        val dst = tmp.newFolder("cancel-copy-dst")
+        File(src, "a.txt").writeText("A")
+        File(src, "b.txt").writeText("B")
+        File(src, "c.txt").writeText("C")
+        var checks = 0
+        // Checkpoint sequence: dir entry, then per 1-byte file: entry + 2 read-loop
+        // iterations — so call 5 is the entry of the second file: the first file is
+        // already on disk (a partial tree), the rest was never touched.
+        val r = FileOps.copy(
+            listOf(src), dst, ConflictStrategy.RENAME,
+            checkCancelled = { if (++checks == 5) throw CancellationException("cancel after the first file") },
+        )
+
+        assertTrue(r.cancelled)
+        assertEquals(0, r.succeeded)
+        assertEquals(0, r.failed)
+        assertTrue("cancellation is never reported as a per-item failure", r.failures.isEmpty())
+        assertFalse("the half-written destination must be cleaned up", File(dst, "src").exists())
+    }
+
+    @Test
+    fun `cancelling mid delete stops the walk with the rest of the tree intact`() = runBlocking {
+        val dir = tmp.newFolder("cancel-delete")
+        repeat(5) { File(dir, "f$it.txt").writeText("x") }
+        var checks = 0
+        // Walk checkpoints: pre-visit of the folder, then one before each file deletion —
+        // call 4 cancels after exactly two files are gone.
+        val r = FileOps.delete(
+            listOf(dir),
+            checkCancelled = { if (++checks == 4) throw CancellationException("cancel after two files") },
+        )
+
+        assertTrue(r.cancelled)
+        assertEquals(0, r.succeeded)
+        assertEquals(0, r.failed)
+        assertEquals("exactly two files were deleted before the stop", 3, dir.listFiles()!!.size)
+    }
+
+    @Test
+    fun `cancelling the running job stops a copy at the next checkpoint`() = runBlocking {
+        val dst = tmp.newFolder("job-cancel-dst")
+        // Folder names must match the paths asserted below (copy preserves source names).
+        val d1 = tmp.newFolder("d1")
+        val d2 = tmp.newFolder("d2")
+        File(d1, "x.txt").writeText("x")
+        File(d2, "y.txt").writeText("y")
+        var job: Job? = null
+        val job2 = launch {
+            try {
+                FileOps.copy(listOf(d1, d2), dst, ConflictStrategy.RENAME, onProgress = { p ->
+                    if (p.done == 1) job?.cancel()
+                })
+            } catch (_: CancellationException) {
+                // cooperative cancellation surfaces as cancellation of the caller job
+            }
+        }
+        job = job2
+        job2.join()
+
+        assertEquals("the first source finished before the cancel", "x", File(dst, "d1/x.txt").readText())
+        assertFalse("the second source must not have been copied", File(dst, "d2").exists())
+    }
+
+    // ---------- cross-volume moves keep the copy when source cleanup fails (P2.10) ----------
+
+    @Test
+    fun `move with failing source cleanup keeps the copy and reports failure`() = runBlocking {
+        val srcParent = tmp.newFolder("mv-cleanup-src")
+        val dst = tmp.newFolder("mv-cleanup-dst")
+        val src = File(srcParent, "item").apply { mkdirs() }
+        File(src, "data.txt").writeText("DATA")
+        // The cross-volume (staging) route is forced by making the same-volume rename
+        // fail (non-writable parent), and the post-publish source deletion fail too
+        // (non-writable source). Requires a non-root test user, like the tests above.
+        assertTrue(srcParent.setWritable(false))
+        assertTrue(src.setWritable(false))
+
+        try {
+            val r = FileOps.move(listOf(src), dst, ConflictStrategy.RENAME)
+
+            assertEquals(0, r.succeeded)
+            assertEquals(1, r.failed)
+            assertTrue(r.failures.any { it.contains("the original could not be deleted") })
+            assertEquals("the copy must be intact at the destination", "DATA", File(dst, "item/data.txt").readText())
+            assertEquals("no staging leftovers", listOf("item"), dst.listFiles()!!.map { it.name })
+            assertTrue("the original must be kept when it cannot be deleted", File(src, "data.txt").exists())
+        } finally {
+            srcParent.setWritable(true)
+            src.setWritable(true)
+        }
+    }
+
+    @Test
+    fun `REPLACE move with failing source cleanup keeps the new copy and reports failure`() = runBlocking {
+        val srcParent = tmp.newFolder("mv-repl-src")
+        val dst = tmp.newFolder("mv-repl-dst")
+        File(dst, "item").apply { mkdirs() }
+        File(dst, "item/old.txt").writeText("old")
+        val src = File(srcParent, "item").apply { mkdirs() }
+        File(src, "new.txt").writeText("new")
+        assertTrue(srcParent.setWritable(false))
+        assertTrue(src.setWritable(false))
+
+        try {
+            val r = FileOps.move(listOf(src), dst, ConflictStrategy.REPLACE)
+
+            assertEquals(0, r.succeeded)
+            assertEquals(1, r.failed)
+            assertTrue(r.failures.any { it.contains("the original could not be deleted") })
+            assertEquals("the new content must be published", "new", File(dst, "item/new.txt").readText())
+            assertFalse("the old destination content was replaced", File(dst, "item/old.txt").exists())
+            assertEquals("no staging or backup leftovers", listOf("item"), dst.listFiles()!!.map { it.name })
+            assertTrue("the original must be kept when it cannot be deleted", File(src, "new.txt").exists())
+        } finally {
+            srcParent.setWritable(true)
+            src.setWritable(true)
+        }
     }
 }

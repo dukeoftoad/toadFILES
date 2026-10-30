@@ -3,10 +3,14 @@ package com.toadfiles.app
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.data.FileRepository
+import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.ui.browse.BrowseViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -24,7 +28,15 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.junit.Assume.assumeTrue
 import java.io.File
+import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * BrowseViewModel end-to-end on the JVM: real files, real DataStore, real trash —
@@ -434,7 +446,10 @@ class BrowseViewModelTest {
 
         vm.zipSelected(listOf(f))
 
-        await { vm.state.value.result != null }
+        // Await the archive in the listing, not just the result dialog: result is set
+        // while the refreshed folder listing is still in flight on a real IO thread,
+        // and asserting on items right after the dialog raced on CI.
+        await { vm.state.value.result != null && vm.state.value.items.any { it.name.endsWith(".zip") } }
         val zip = vm.state.value.items.firstOrNull { it.name.endsWith(".zip") }
         assertNotNull("expected archive.zip to appear after zipping", zip)
         assertTrue(zip!!.size > 0)
@@ -451,7 +466,9 @@ class BrowseViewModelTest {
 
         vm.confirmZip("holiday pack") // no .zip suffix — appended automatically
 
-        await { vm.state.value.result != null }
+        // Same race as zipSelected: await the archive showing up in the listing,
+        // not just the result dialog.
+        await { vm.state.value.result != null && vm.state.value.items.any { it.name == "holiday pack.zip" } }
         assertNull(vm.state.value.pendingZipFiles)
         assertNotNull(
             "archive should use the typed name",
@@ -548,5 +565,164 @@ class BrowseViewModelTest {
         await { vm.state.value.trashCount >= 2 }
         assertTrue("trashCount should be >= 2 (got ${vm.state.value.trashCount})",
             vm.state.value.trashCount >= 2)
+    }
+
+    // -------------------------------------------------------------------------
+    // P2.1 / P2.8 audit follow-ups: search-cycle and stale-load regressions.
+    // These use a daemon-thread IO dispatcher plus a gated FileRepository double
+    // (same pattern as the GatedMedia race tests) so the interleaving below is
+    // deterministic, not timing-dependent.
+    // -------------------------------------------------------------------------
+
+    private val raceExecutors = mutableListOf<ExecutorService>()
+
+    /** Daemon threads: a parked latch must never keep the test JVM alive after a failure. */
+    private fun raceIoDispatcher(): CoroutineDispatcher =
+        Executors.newFixedThreadPool(2) { r -> Thread(r, "browse-race-io").apply { isDaemon = true } }
+            .also { raceExecutors += it }
+            .asCoroutineDispatcher()
+
+    @After
+    fun tearDownRaceExecutors() {
+        raceExecutors.forEach { it.shutdownNow() }
+    }
+
+    /**
+     * FileRepository double that can park one list() call on a latch so a load or a
+     * search can be held mid-flight deterministically. The snapshot is taken BEFORE
+     * parking, so a released stale load carries older data than a newer load that ran
+     * while it was parked.
+     */
+    private class GatedFileRepo(context: Context) : FileRepository(context) {
+        val listCalls = AtomicInteger(0)
+        private val armed = AtomicBoolean(false)
+        /** Fires when the gated list() call is parked. */
+        val parked = CountDownLatch(1)
+        private val release = CountDownLatch(1)
+
+        /** Parks the NEXT list() call (exactly one) until [releaseGate] is called. */
+        fun armGate() = armed.set(true)
+
+        fun releaseGate() = release.countDown()
+
+        override fun list(dir: File, showHidden: Boolean): List<FileItem> {
+            val result = super.list(dir, showHidden)
+            listCalls.incrementAndGet()
+            if (armed.compareAndSet(true, false)) {
+                parked.countDown()
+                release.await()
+            }
+            return result
+        }
+    }
+
+    private fun listingOf(vm: BrowseViewModel) = vm.state.value.items.map { it.name }
+
+    @Test
+    fun `search in a tree with a symlink back to an ancestor terminates`() = runTest {
+        val nested = File(dir, "nested").apply { mkdirs() }
+        File(nested, "needle.txt").writeText("x")
+        val link = File(dir, "loop")
+        try {
+            Files.createSymbolicLink(link.toPath(), dir.toPath())
+        } catch (_: Exception) {
+            assumeTrue("filesystem does not support symbolic links", false)
+        }
+        // Real background IO thread: if the traversal ever spun forever, the awaited
+        // condition below fails with a clear timeout instead of freezing the runner.
+        val vm = BrowseViewModel(container, ioDispatcher = raceIoDispatcher())
+        vm.openDir(dir)
+        await { listingOf(vm).isNotEmpty() }
+
+        vm.setQuery("needle")
+        // Without the cycle guard this search never returns: the "loop" symlink points
+        // back at the root and the cap is never reached (1 match < the configured limit).
+        await { !vm.state.value.searching && listingOf(vm) == listOf("needle.txt") }
+        assertFalse(vm.state.value.searchCapped)
+    }
+
+    @Test
+    fun `directory symlinks surface in search by name but are never recursed into`() = runTest {
+        val nested = File(dir, "nested").apply { mkdirs() }
+        File(nested, "buried.txt").writeText("x")
+        val link = File(dir, "loop")
+        try {
+            Files.createSymbolicLink(link.toPath(), dir.toPath())
+        } catch (_: Exception) {
+            assumeTrue("filesystem does not support symbolic links", false)
+        }
+        val vm = BrowseViewModel(container, ioDispatcher = raceIoDispatcher())
+        vm.openDir(dir)
+        await { listingOf(vm).isNotEmpty() }
+
+        vm.setQuery("loop")
+        // "loop" itself matches by name; recursing into it (the old behaviour) would
+        // revisit the root forever and never return.
+        await { !vm.state.value.searching && listingOf(vm) == listOf("loop") }
+        assertTrue(vm.state.value.items.single().isDir) // still shown as a folder item
+
+        vm.setQuery("buried")
+        // Real subfolders are still traversed — the policy only skips symlinked ones.
+        await { !vm.state.value.searching && listingOf(vm) == listOf("buried.txt") }
+    }
+
+    @Test
+    fun `cancelling a search stops the traversal at the next checkpoint`() = runTest {
+        val sub = File(dir, "sub").apply { mkdirs() }
+        File(sub, "needle.txt").writeText("x")
+        val repo = GatedFileRepo(ApplicationProvider.getApplicationContext())
+        val vm = BrowseViewModel(container, ioDispatcher = raceIoDispatcher(), fileRepo = repo)
+        vm.openDir(dir)
+        await { listingOf(vm) == listOf("sub") }
+        assertEquals(1, repo.listCalls.get())
+
+        // Park the search inside its first directory listing — a RUNNING query, not an
+        // undispatched one (same trick as the GatedMedia race tests).
+        repo.armGate()
+        vm.setQuery("needle")
+        assertTrue("search never reached its first directory", repo.parked.await(10, TimeUnit.SECONDS))
+        assertEquals(2, repo.listCalls.get())
+
+        // Cancel by clearing the query while the traversal is parked mid-directory.
+        vm.setQuery("")
+        // The cancel-path load() is the 3rd list() call; wait for it to land (the listing
+        // itself may already read [sub] from openDir, so count the call, not the state).
+        await { repo.listCalls.get() >= 3 && !vm.state.value.loading }
+
+        // Release the parked traversal: it must abort at its next ensureActive()
+        // checkpoint — no further directories listed, no search result applied.
+        repo.releaseGate()
+        Thread.sleep(250) // beat: an uncheckpointed traversal would have listed `sub` by now
+        assertEquals(
+            "cancelled search kept traversing after release (missing checkpoint)",
+            3, repo.listCalls.get(),
+        )
+        assertEquals(listOf("sub"), listingOf(vm)) // folder listing, not search results
+        assertFalse(vm.state.value.searching)
+        assertEquals("", vm.state.value.query)
+    }
+
+    @Test
+    fun `a slower older load of the same directory cannot overwrite the newer listing`() = runTest {
+        val repo = GatedFileRepo(ApplicationProvider.getApplicationContext())
+        val vm = BrowseViewModel(container, ioDispatcher = raceIoDispatcher(), fileRepo = repo)
+
+        // Load #1 parks inside list() holding the folder snapshot taken right now.
+        File(dir, "first-only.txt").writeText("x")
+        repo.armGate()
+        vm.openDir(dir)
+        assertTrue("first load never parked", repo.parked.await(10, TimeUnit.SECONDS))
+
+        // Load #2 — same directory, rapid refresh — completes while #1 is still parked.
+        File(dir, "second-only.txt").writeText("x")
+        vm.openDir(dir)
+        await { !vm.state.value.loading && listingOf(vm) == listOf("first-only.txt", "second-only.txt") }
+
+        // Release the stale load: its older snapshot (missing second-only.txt) must be
+        // dropped — the newer request's listing is the one that stays.
+        repo.releaseGate()
+        Thread.sleep(250) // beat: a wrongly-applied stale result would have landed by now
+        assertEquals(listOf("first-only.txt", "second-only.txt"), listingOf(vm))
+        assertFalse(vm.state.value.loading)
     }
 }

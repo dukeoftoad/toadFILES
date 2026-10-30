@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -31,10 +32,16 @@ import java.util.zip.ZipOutputStream
  *    finished without a global abort. Limit overruns, bomb ratios, unreadable streams
  *    and cancellation delete the staging tree and leave the destination untouched.
  *  - No accidental overwrite: existing files are skipped unless [replace] is set.
+ *  - All-or-nothing replace publication (audit P2.2): with [replace], every existing
+ *    destination item is renamed to a hidden sibling backup before it is replaced; any
+ *    later item failure, or cancellation, removes everything already published and
+ *    restores the backups, so the destination is never left half-updated. The result
+ *    reports the rollback precisely (a rolled-back run reports no successes).
  *
  * Creation protections: the archive is written to a temporary sibling and renamed into
  * place only on success; a failing source aborts and deletes the incomplete archive
- * instead of publishing it; cancellation checkpoints run per buffer and per directory.
+ * instead of publishing it; cancellation checkpoints run per buffer, per directory and
+ * per published item.
  * Symbolic links are never followed (audit P1.2): links to plain files are stored by
  * content, links to folders and dangling links are skipped with a recorded reason, and
  * a canonical visited-set makes link cycles impossible to recurse into.
@@ -52,6 +59,10 @@ object ZipSupport {
 
     /** Sentinel for global abort conditions; its message is reported verbatim. */
     private class ArchiveAbort(message: String) : IOException(message)
+
+    /** Internal control-flow signal: a replace-mode publication item failed and the run
+     *  must roll back. The specific failure is already recorded in the failures list. */
+    private class PublicationAbort : IOException("publication aborted")
 
     /** Input stream that counts every byte actually consumed from the archive. */
     private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
@@ -105,7 +116,11 @@ object ZipSupport {
         val counts = Counts()
 
         try {
-            val raw = CountingInputStream(FileInputStream(zipFile).buffered(BUFFER_SIZE))
+            // The chain order matters (audit P2.3): the 64 KiB buffer prefetches from the
+            // file BELOW the counter, so `raw.count` advances only for bytes the ZIP layer
+            // actually consumes — the per-entry ratio delta stays real even when a whole
+            // small archive sits inside a single buffer.
+            val raw = CountingInputStream(BufferedInputStream(FileInputStream(zipFile), BUFFER_SIZE))
             ZipInputStream(raw).use { zis ->
                 while (true) {
                     val entry = zis.nextEntry ?: break
@@ -315,79 +330,201 @@ object ZipSupport {
 
     private const val BUFFER_SIZE = 64 * 1024
 
+    /** Hidden backup name prefix for replace-mode publication; mirrors FileOps.
+     *  Dot-prefixed so normal listings skip it. */
+    private const val BACKUP_PREFIX = ".tf-old-"
+
     /**
      * Moves the validated staging tree into [targetDir], file by file, honouring [replace].
      * Directories are merged; files are renamed onto their final paths (same volume, so
      * each move is a fast atomic rename).
+     *
+     * Publication never leaves the destination half-updated (audit P2.2): with [replace]
+     * set, an existing destination item is first renamed to a hidden sibling backup, and
+     * any later item failure — or cancellation — aborts the run and rolls everything
+     * back: published items are removed, folders this run created are deleted and every
+     * backup is renamed back, so the destination ends up exactly as it was. The outcome
+     * is reported precisely through [counts] and [failures] (a rolled-back run reports
+     * no successes). On success the backups are discarded. Cancellation checkpoints run
+     * per staged folder and per published item (audit P2.4).
      */
-    private fun publishStaging(
+    private suspend fun publishStaging(
         staging: File,
         targetDir: File,
         replace: Boolean,
         counts: Counts,
         failures: MutableList<String>,
     ) {
-        val stagingPath = staging.canonicalPath
-        val stack = ArrayDeque<File>()
-        stack.addLast(staging)
-        while (stack.isNotEmpty()) {
-            val dir = stack.removeLast()
-            val children = dir.listFiles()
-            if (children == null) {
-                counts.failed++
-                failures += "Cannot read staged folder ${dir.path.removePrefix(stagingPath)}"
-                continue
-            }
-            for (child in children) {
-                val rel = child.canonicalPath.removePrefix(stagingPath + File.separator)
-                if (rel.isEmpty()) continue // defensive: never map staging itself onto the target
-                val dest = File(targetDir, rel)
-                PathSafety.ensureInside(targetDir, dest)
-                if (child.isDirectory) {
-                    if (dest.exists() && !dest.isDirectory) {
-                        if (replace) {
-                            if (!dest.delete() || !dest.mkdirs()) {
+        val backups = mutableListOf<Pair<File, File>>() // backup -> original it stands in for
+        val published = mutableListOf<File>()           // items moved in without a backup
+        val createdDirs = mutableListOf<File>()         // folders this run brought into existence
+        var completed = false
+        try {
+            val stagingPath = staging.canonicalPath
+            val stack = ArrayDeque<File>()
+            stack.addLast(staging)
+            while (stack.isNotEmpty()) {
+                currentCoroutineContext().ensureActive() // audit P2.4: checkpoint per staged folder
+                val dir = stack.removeLast()
+                val children = dir.listFiles()
+                if (children == null) {
+                    counts.failed++
+                    failures += "Cannot read staged folder ${dir.path.removePrefix(stagingPath)}"
+                    continue
+                }
+                for (child in children) {
+                    // audit P2.2 / P2.4: a checkpoint per published item, so cancellation
+                    // is honoured between moves and is rolled back like any other failure.
+                    currentCoroutineContext().ensureActive()
+                    val rel = child.canonicalPath.removePrefix(stagingPath + File.separator)
+                    if (rel.isEmpty()) continue // defensive: never map staging itself onto the target
+                    val dest = File(targetDir, rel)
+                    PathSafety.ensureInside(targetDir, dest)
+                    if (child.isDirectory) {
+                        if (dest.exists() && !dest.isDirectory) {
+                            if (!replace) {
+                                counts.skipped++
+                                failures += "Kept file ${dest.name}; archive has a folder with that name"
+                                continue
+                            }
+                            val backup = backupItem(dest)
+                            if (backup == null) {
                                 counts.failed++
                                 failures += "Cannot replace ${dest.name} with a folder"
-                                continue
+                                throw PublicationAbort()
                             }
-                        } else {
-                            counts.skipped++
-                            failures += "Kept file ${dest.name}; archive has a folder with that name"
-                            continue
-                        }
-                    }
-                    if (!dest.isDirectory && !dest.mkdirs()) {
-                        counts.failed++
-                        failures += "Cannot create ${dest.name}"
-                        continue
-                    }
-                    stack.addLast(child)
-                } else {
-                    if (dest.exists()) {
-                        if (!replace) {
-                            counts.skipped++
-                            continue
-                        }
-                        if (dest.isDirectory) {
-                            if (!FileOps.deleteRecursively(dest)) {
+                            backups += backup to dest
+                            if (!mkdirsTracked(dest, targetDir, createdDirs)) {
                                 counts.failed++
-                                failures += "Could not replace ${dest.name}"
+                                failures += "Cannot create ${dest.name}"
+                                throw PublicationAbort()
+                            }
+                        } else if (!dest.isDirectory && !mkdirsTracked(dest, targetDir, createdDirs)) {
+                            counts.failed++
+                            failures += "Cannot create ${dest.name}"
+                            if (replace) throw PublicationAbort()
+                            continue
+                        }
+                        stack.addLast(child)
+                    } else {
+                        var backedUp = false
+                        if (dest.exists()) {
+                            if (!replace) {
+                                counts.skipped++
                                 continue
                             }
+                            val backup = backupItem(dest)
+                            if (backup == null) {
+                                counts.failed++
+                                failures += "Could not back up $rel for replacement"
+                                throw PublicationAbort()
+                            }
+                            backups += backup to dest
+                            backedUp = true
+                        }
+                        val parent = dest.parentFile
+                        if (parent != null && !parent.isDirectory &&
+                            !mkdirsTracked(parent, targetDir, createdDirs)
+                        ) {
+                            counts.failed++
+                            failures += "$rel: cannot create its folder"
+                            if (replace) throw PublicationAbort()
+                            continue
+                        }
+                        try {
+                            Files.move(child.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                            counts.moved++
+                            if (!backedUp) published += dest
+                        } catch (e: Exception) {
+                            counts.failed++
+                            failures += "$rel: ${e.message ?: "publish failed"}"
+                            if (replace) throw PublicationAbort()
                         }
                     }
-                    dest.parentFile?.let { if (!it.isDirectory) it.mkdirs() }
-                    try {
-                        Files.move(child.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                        counts.moved++
-                    } catch (e: Exception) {
-                        counts.failed++
-                        failures += "$rel: ${e.message ?: "publish failed"}"
+                }
+            }
+            completed = true
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            rollbackPublication(targetDir, "cancelled", backups, published, createdDirs, counts, failures)
+            throw ce
+        } catch (_: PublicationAbort) {
+            rollbackPublication(targetDir, "failed", backups, published, createdDirs, counts, failures)
+        } catch (e: Exception) {
+            counts.failed++
+            failures += "${targetDir.name}: ${e.message ?: "publish failed"}"
+            rollbackPublication(targetDir, "failed", backups, published, createdDirs, counts, failures)
+        } finally {
+            if (completed) {
+                for ((backup, _) in backups) {
+                    if (backup.exists() && !FileOps.deleteRecursively(backup)) {
+                        failures += "Could not discard the backup ${backup.name}"
                     }
                 }
             }
         }
+    }
+
+    /** Renames [item] aside to a hidden sibling backup in its own parent (an atomic
+     *  same-directory rename), or returns null when the rename failed. */
+    private fun backupItem(item: File): File? {
+        val parent = item.parentFile ?: return null
+        val backup = File(parent, PathSafety.uniqueName(parent, BACKUP_PREFIX + item.name))
+        return if (item.renameTo(backup)) backup else null
+    }
+
+    /** [File.mkdirs] that remembers every level it had to create in [createdDirs] (top
+     *  down), so a rollback can remove them again deepest first. The walk stops at
+     *  [stopAt], which is known to exist. Returns false when [dir] could not be made. */
+    private fun mkdirsTracked(dir: File, stopAt: File, createdDirs: MutableList<File>): Boolean {
+        val missing = ArrayDeque<File>()
+        var d: File? = dir
+        while (d != null && d != stopAt && !d.isDirectory) {
+            missing.addFirst(d)
+            d = d.parentFile
+        }
+        if (missing.isEmpty()) return dir.isDirectory
+        if (!missing.first().mkdirs()) return false
+        createdDirs += missing
+        return true
+    }
+
+    /**
+     * Undoes a partially applied publication: removes everything this run moved in,
+     * deletes the folders it created (deepest first), then renames every backup back to
+     * its original path. Best-effort and honest — anything that cannot be undone is
+     * reported in [failures]. [counts.moved] is zeroed: nothing published survived.
+     */
+    private fun rollbackPublication(
+        targetDir: File,
+        reason: String,
+        backups: List<Pair<File, File>>,
+        published: List<File>,
+        createdDirs: List<File>,
+        counts: Counts,
+        failures: MutableList<String>,
+    ) {
+        counts.moved = 0
+        var removed = 0
+        for (item in published.asReversed()) {
+            if (FileOps.deleteRecursively(item)) removed++
+            else failures += "Could not roll back ${item.name}"
+        }
+        for (dir in createdDirs.asReversed()) {
+            if (dir.exists() && !FileOps.deleteRecursively(dir)) {
+                failures += "Could not roll back folder ${dir.name}"
+            }
+        }
+        var restored = 0
+        for ((backup, original) in backups.asReversed()) {
+            if (original.exists() && !FileOps.deleteRecursively(original)) {
+                failures += "Could not roll back ${original.name}; previous version kept as ${backup.name}"
+                continue
+            }
+            if (backup.renameTo(original)) restored++
+            else failures += "Could not restore the previous ${original.name}; old copy kept as ${backup.name}"
+        }
+        failures += "Publication into ${targetDir.name} $reason and was rolled back: " +
+            "$removed published item(s) removed, $restored replaced item(s) restored"
     }
 
     /** Same "(1)"-style suffixing as [PathSafety.uniqueName], but purely name-based for entry names. */
