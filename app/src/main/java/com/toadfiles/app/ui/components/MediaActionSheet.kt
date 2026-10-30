@@ -41,9 +41,9 @@ import com.toadfiles.app.domain.Format
  * Action sheet for MediaStore entries (Categories drill-in, Recent), opened from a row's
  * overflow button. Mirrors the [FileActionSheet] used in Browse, trimmed to the actions that
  * make sense for media-library rows: everything works on the content URI, and path-dependent
- * actions (delete to trash, copy path, show in folder) are only offered when the on-disk
- * path is known. Actions that don't apply are hidden, never rendered disabled. Multi-select
- * is started by long-pressing a row, so the sheet needs no "Select more" entry.
+ * actions (delete to trash, copy path, show in folder, extract) are only offered when the
+ * on-disk path is known. Actions that don't apply are hidden, never rendered disabled.
+ * Multi-select is started by long-pressing a row, so the sheet needs no "Select more" entry.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,6 +56,7 @@ fun MediaActionSheet(
     onDelete: (() -> Unit)?,
     onDetails: () -> Unit,
     onCopyPath: (() -> Unit)?,
+    onExtract: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -109,6 +110,11 @@ fun MediaActionSheet(
                 MediaSheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
             }
             MediaSheetRow(Icons.Outlined.Info, "Details", onClick = onDetails)
+            // Path-dependent like the rows above: only for archives with a known on-disk
+            // path, and only for .zip (the format ZipSupport actually handles).
+            if (onExtract != null && entry.name.lowercase().endsWith(".zip")) {
+                MediaSheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = onExtract)
+            }
 
             Spacer(Modifier.height(8.dp))
         }

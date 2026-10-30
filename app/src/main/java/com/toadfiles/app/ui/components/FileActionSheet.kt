@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreHoriz
@@ -45,7 +46,7 @@ import com.toadfiles.app.domain.Format
  * not shown — we never render a disabled row that hints at features the user can't reach.
  *
  * The sheet is deliberately narrow: Open / Share / Rename / Copy / Move / Delete /
- * Details / Zip / Favorite / Pin to Home / Copy path / Open with. Multi-select is
+ * Zip / Favorite / Pin to Home / Properties / Copy path / Open with. Multi-select is
  * started by long-pressing a row (Google Files style) — no extra entry point needed —
  * and the bulk toolbar (select-all, bulk zip, …) takes over from there.
  */
@@ -64,6 +65,7 @@ fun FileActionSheet(
     onDetails: () -> Unit,
     onZip: () -> Unit,
     onExtract: (() -> Unit)?,
+    onExtractTo: (() -> Unit)? = null,
     onToggleFavorite: () -> Unit,
     onCopyPath: () -> Unit,
     onOpenWith: () -> Unit,
@@ -118,13 +120,17 @@ fun FileActionSheet(
             SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = onCopy)
             SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
 
-            // Organize: Delete / Details / Zip
+            // Organize: Delete / Zip
             SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
-            SheetRow(Icons.Outlined.Info, "Details", onClick = onDetails)
             if (item.isDir) {
                 SheetRow(Icons.Outlined.Archive, "Zip this folder", onClick = onZip)
             } else if (item.name.lowercase().endsWith(".zip")) {
                 SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = { onExtract?.invoke() })
+                // Destination picking is optional plumbing: hide the row when a screen
+                // can't handle it, like every other non-applicable action here.
+                if (onExtractTo != null) {
+                    SheetRow(Icons.Outlined.FolderOpen, "Extract to…", onClick = onExtractTo)
+                }
             } else {
                 SheetRow(Icons.Outlined.Archive, "Zip this file", onClick = onZip)
             }
@@ -142,6 +148,8 @@ fun FileActionSheet(
                     onClick = onTogglePin,
                 )
             }
+            // Read-only properties sheet; offered for files and folders alike.
+            SheetRow(Icons.Outlined.Info, "Properties", onClick = onDetails)
             if (!item.isDir) {
                 SheetRow(Icons.Outlined.ContentPaste, "Copy path", onClick = onCopyPath)
                 SheetRow(Icons.Outlined.MoreHoriz, "Open with…", onClick = onOpenWith)

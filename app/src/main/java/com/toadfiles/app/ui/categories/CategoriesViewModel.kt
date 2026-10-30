@@ -7,7 +7,11 @@ import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
+import com.toadfiles.app.domain.OpProgress
+import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.domain.ZipSupport
+import com.toadfiles.app.ui.components.OpRunner
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,6 +32,10 @@ data class CategoriesUiState(
     val pendingDelete: List<MediaRepository.MediaEntry>? = null,
     val detailsOf: MediaRepository.MediaEntry? = null,
     val toast: String? = null,
+    // extract op (same op/progress/result model as Browse)
+    val progress: Pair<String, OpProgress>? = null,
+    val result: OpResult? = null,
+    val resultTitle: String = "",
 )
 
 /**
@@ -50,6 +58,9 @@ class CategoriesViewModel(
     private var entriesSeq = 0L
     private var summariesJob: Job? = null
     private var entriesJob: Job? = null
+
+    /** Shared op plumbing (audit 7.3): launches the extract, owns cancel/dispose. */
+    private val ops = OpRunner(viewModelScope, ioDispatcher)
 
     init {
         refresh()
@@ -146,6 +157,41 @@ class CategoriesViewModel(
         }
     }
 
+    // ---------- zip extract ----------
+
+    /**
+     * Extracts an archive row into a sibling folder named after it — the same
+     * ZipSupport op (with progress + result) Browse runs, surfaced where the user
+     * found the file. Only offered for .zip entries with an on-disk path.
+     */
+    fun extractZip(file: File) {
+        val dir = file.parentFile ?: run {
+            requestToast("Could not extract this archive")
+            return
+        }
+        val target = File(dir, file.nameWithoutExtension)
+        if (target.exists()) {
+            requestToast("A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
+            return
+        }
+        _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
+        ops.run(
+            op = { onP -> ZipSupport.extract(file, target, false, onProgress = onP) },
+            onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
+            onDone = { r ->
+                _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
+                // Re-list the open category + summaries, like confirmDelete does, so any
+                // newly scanned files show up where the user is looking.
+                _state.value.selected?.let { open(it) }
+                refresh()
+            },
+        )
+    }
+
+    fun cancelOp() = ops.cancel { _state.update { it.copy(progress = null) } }
+
+    fun dismissResult() = _state.update { it.copy(result = null) }
+
     // ---------- details ----------
 
     fun requestDetails(entry: MediaRepository.MediaEntry) =
@@ -158,6 +204,13 @@ class CategoriesViewModel(
     }
 
     fun consumeToast() = _state.update { it.copy(toast = null) }
+
+    override fun onCleared() {
+        summariesJob?.cancel()
+        entriesJob?.cancel()
+        ops.dispose()
+        super.onCleared()
+    }
 
     companion object {
         /** Query cap shared with the screen so it can disclose truncation honestly. */

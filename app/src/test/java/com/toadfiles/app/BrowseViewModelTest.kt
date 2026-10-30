@@ -4,14 +4,20 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
+import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
+import com.toadfiles.app.domain.Format
+import com.toadfiles.app.domain.PropertiesBuilder
 import com.toadfiles.app.ui.browse.BrowseViewModel
+import com.toadfiles.app.ui.browse.OpKind
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -30,6 +36,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.junit.Assume.assumeTrue
 import java.io.File
+import java.io.FileOutputStream
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -37,6 +44,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import kotlin.coroutines.resume
 
 /**
  * BrowseViewModel end-to-end on the JVM: real files, real DataStore, real trash —
@@ -490,6 +500,107 @@ class BrowseViewModelTest {
         assertTrue(vm.state.value.items.none { it.name.endsWith(".zip") })
     }
 
+    /** Minimal archive builder (same shape as ZipSupportTest's private helper). */
+    private fun makeZip(out: File, entries: Map<String, ByteArray>) {
+        ZipOutputStream(FileOutputStream(out)).use { zos ->
+            entries.forEach { (name, content) ->
+                zos.putNextEntry(ZipEntry(name))
+                zos.write(content)
+                zos.closeEntry()
+            }
+        }
+    }
+
+    @Test
+    fun `extractZip without a target keeps extracting into a sibling folder`() = runTest {
+        val zip = File(dir, "plain.zip")
+        makeZip(zip, mapOf("a.txt" to "A".toByteArray(), "sub/b.txt" to "B".toByteArray()))
+        vm.openDir(dir)
+
+        vm.extractZip(zip)
+
+        await { vm.state.value.result != null && vm.state.value.items.any { it.name == "plain" } }
+        assertEquals(0, vm.state.value.result!!.failed)
+        assertEquals("A", File(dir, "plain/a.txt").readText())
+        assertEquals("B", File(dir, "plain/sub/b.txt").readText())
+        assertNull(vm.state.value.progress)
+        assertEquals("Extracting", vm.state.value.resultTitle)
+    }
+
+    @Test
+    fun `extractZip default still refuses when the sibling folder exists`() = runTest {
+        val zip = File(dir, "plain.zip")
+        makeZip(zip, mapOf("a.txt" to "A".toByteArray()))
+        File(dir, "plain").mkdirs()
+        vm.openDir(dir)
+
+        vm.extractZip(zip)
+
+        assertEquals(
+            "A folder named \"plain\" already exists. Rename or move it before extracting.",
+            vm.state.value.toast,
+        )
+        assertNull(vm.state.value.result)
+        assertNull(vm.state.value.progress)
+        assertFalse("nothing may be extracted on refusal", File(dir, "plain/a.txt").exists())
+    }
+
+    @Test
+    fun `extractZip with a target name extracts into that folder under the current directory`() = runTest {
+        // The archive lives in a subfolder (a search-style row): "Extract to…" must
+        // land the content under the CURRENT directory, not the archive's parent.
+        val nested = File(dir, "nested").apply { mkdirs() }
+        val zip = File(nested, "pack.zip")
+        makeZip(zip, mapOf("one.txt" to "hello".toByteArray()))
+        vm.openDir(dir)
+
+        vm.extractZip(zip, targetName = "unpacked")
+
+        await { vm.state.value.result != null && vm.state.value.items.any { it.name == "unpacked" } }
+        assertEquals(0, vm.state.value.result!!.failed)
+        assertEquals("hello", File(dir, "unpacked/one.txt").readText())
+    }
+
+    @Test
+    fun `extractZip to an existing folder name asks via the conflict dialog and Replace overwrites`() = runTest {
+        val zip = File(dir, "pack.zip")
+        makeZip(zip, mapOf("same.txt" to "NEW".toByteArray()))
+        File(dir, "unpacked").apply { mkdirs() }.resolve("same.txt").writeText("OLD")
+        vm.openDir(dir)
+
+        vm.extractZip(zip, targetName = "unpacked")
+
+        // Same collision flow as paste: no silent overwrite, the dialog decides.
+        assertNotNull(vm.state.value.pendingConflict)
+        assertEquals(OpKind.ZIP_EXTRACT, vm.state.value.pendingConflict!!.op)
+        assertNull(vm.state.value.result)
+        assertNull(vm.state.value.progress)
+
+        vm.resolveConflict(ConflictStrategy.REPLACE)
+
+        await { vm.state.value.result != null && vm.state.value.items.isNotEmpty() }
+        assertEquals("NEW", File(dir, "unpacked/same.txt").readText())
+        assertNull(vm.state.value.pendingConflict)
+    }
+
+    @Test
+    fun `extractZip conflict Keep both extracts into a uniquely named sibling folder`() = runTest {
+        val zip = File(dir, "pack.zip")
+        makeZip(zip, mapOf("n.txt" to "N".toByteArray()))
+        File(dir, "unpacked").apply { mkdirs() }.resolve("n.txt").writeText("OLD")
+        vm.openDir(dir)
+
+        vm.extractZip(zip, targetName = "unpacked")
+        assertNotNull(vm.state.value.pendingConflict)
+        vm.resolveConflict(ConflictStrategy.RENAME)
+
+        await { vm.state.value.result != null }
+        assertEquals(0, vm.state.value.result!!.failed)
+        assertEquals("N", File(dir, "unpacked (1)/n.txt").readText())
+        // The pre-existing folder is untouched.
+        assertEquals("OLD", File(dir, "unpacked/n.txt").readText())
+    }
+
     @Test
     fun `clearing the search restores the folder listing`() = runTest {
         val nested = File(dir, "nested").apply { mkdirs() }
@@ -724,5 +835,91 @@ class BrowseViewModelTest {
         Thread.sleep(250) // beat: a wrongly-applied stale result would have landed by now
         assertEquals(listOf("first-only.txt", "second-only.txt"), listingOf(vm))
         assertFalse(vm.state.value.loading)
+    }
+
+    // -------------------------------------------------------------------------
+    // Properties sheet: state wiring, real folder computation, cancel-on-dismiss.
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `requestProperties sets state and computes file properties`() = runTest {
+        val f = File(dir, "note.txt").apply { writeText("x".repeat(2048)) }
+
+        vm.requestProperties(f)
+
+        assertEquals(f, vm.state.value.pendingProperties)
+        await { vm.state.value.propertiesDetail != null }
+        val d = vm.state.value.propertiesDetail!!
+        assertEquals(Format.size(2048), d.sizeText)
+        assertEquals(2048L, d.sizeBytes)
+        assertEquals(0, d.fileCount) // files carry no contents counts
+        assertEquals(0, d.dirCount)
+        assertNull(d.error)
+    }
+
+    @Test
+    fun `requestProperties computes folder size and contents with the real helpers`() = runTest {
+        val sub = File(dir, "library").apply { mkdirs() }
+        File(sub, "a.txt").writeText("x".repeat(1024))
+        File(sub, "b.txt").writeText("x".repeat(1024))
+        File(sub, "nested").mkdirs()
+        File(sub, "nested/c.bin").writeText("x".repeat(512))
+
+        vm.requestProperties(sub)
+
+        assertEquals(sub, vm.state.value.pendingProperties)
+        await { vm.state.value.propertiesDetail != null }
+        val d = vm.state.value.propertiesDetail!!
+        // Real FileOps.sizeOf + PropertiesBuilder counts over the temp tree.
+        assertEquals(2560L, d.sizeBytes)
+        assertEquals(Format.size(2560), d.sizeText)
+        assertEquals(3, d.fileCount)
+        assertEquals(1, d.dirCount)
+        assertNull(d.error)
+    }
+
+    /**
+     * Gated counts walk: parks the properties computation mid-flight like [GatedFileRepo]
+     * parks a list(), but as a cancellable suspension — so a dismissal that actually
+     * cancels the job can never reach the post-park code, even after the gate is released.
+     */
+    private class GatedPropertiesBuilder : PropertiesBuilder() {
+        val entered = CountDownLatch(1)
+        private var parked: CancellableContinuation<Unit>? = null
+        /** Set only when the walk was released and ran to completion (i.e. NOT cancelled). */
+        val finished = AtomicBoolean(false)
+
+        /** Releases the parked computation; a no-op when dismiss already cancelled the job. */
+        fun release() {
+            parked?.resume(Unit)
+        }
+
+        override suspend fun countEntries(root: File): PropertiesBuilder.Counts {
+            entered.countDown()
+            suspendCancellableCoroutine<Unit> { cont -> parked = cont }
+            finished.set(true)
+            return super.countEntries(root)
+        }
+    }
+
+    @Test
+    fun `dismissProperties cancels the in-flight folder computation`() = runTest {
+        val gated = GatedPropertiesBuilder()
+        val vm = BrowseViewModel(container, ioDispatcher = dispatcher, propertiesBuilder = gated)
+        val sub = File(dir, "big").apply { mkdirs() }
+        File(sub, "f.bin").writeText("x")
+
+        vm.requestProperties(sub)
+        assertTrue("computation never reached the counts walk", gated.entered.await(10, TimeUnit.SECONDS))
+        assertEquals(sub, vm.state.value.pendingProperties)
+        assertNull(vm.state.value.propertiesDetail)
+
+        // Dismiss while parked mid-computation, then release the gate: the cancelled job
+        // must never resume past its parking point (no walk completion, no detail applied).
+        vm.dismissProperties()
+        gated.release()
+        assertFalse("cancelled computation kept running after release", gated.finished.get())
+        assertNull(vm.state.value.pendingProperties)
+        assertNull(vm.state.value.propertiesDetail)
     }
 }

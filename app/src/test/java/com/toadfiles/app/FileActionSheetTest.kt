@@ -38,7 +38,11 @@ class FileActionSheetTest {
         return FileItem(file = f, name = name, isDir = isDir, size = 1024L, lastModified = 1L)
     }
 
-    private fun renderSheet(item: FileItem, isFavorite: Boolean = false) {
+    private fun renderSheet(
+        item: FileItem,
+        isFavorite: Boolean = false,
+        onExtractTo: (() -> Unit)? = null,
+    ) {
         compose.setContent {
             ToadTheme {
                 FileActionSheet(
@@ -47,6 +51,7 @@ class FileActionSheetTest {
                     onOpen = {}, onShare = {}, onRename = {}, onCopy = {}, onMove = {},
                     onDelete = {}, onDetails = {}, onZip = {},
                     onExtract = null,
+                    onExtractTo = onExtractTo,
                     onToggleFavorite = {}, onCopyPath = {}, onOpenWith = {},
                     onDismiss = {},
                 )
@@ -77,7 +82,7 @@ class FileActionSheetTest {
         assertRowShown("Copy to…")
         assertRowShown("Move to…")
         assertRowShown("Delete")
-        assertRowShown("Details")
+        assertRowShown("Properties")
         assertRowShown("Add favorite")
         // "Select more" is gone: long-press starts multi-select now.
         // File-only actions
@@ -108,10 +113,40 @@ class FileActionSheetTest {
     }
 
     @Test
+    fun `zip sheet shows Extract to alongside Extract here when the screen can pick a destination`() {
+        renderSheet(fileItem("archive.zip", isDir = false), onExtractTo = {})
+        assertRowShown("Extract here")
+        assertRowShown("Extract to…")
+    }
+
+    @Test
+    fun `Extract to is hidden when no destination callback is wired`() {
+        // Screens without destination picking pass null — the row must not hint at it.
+        renderSheet(fileItem("archive.zip", isDir = false), onExtractTo = null)
+        assertRowShown("Extract here")
+        assertRowHidden("Extract to…")
+    }
+
+    @Test
     fun `favorite state toggles the favorite row label`() {
         renderSheet(fileItem("x.txt", isDir = false), isFavorite = true)
         assertRowShown("Remove favorite")
         // The "Add favorite" copy should be gone when isFavorite is true.
         assertRowHidden("Add favorite")
+    }
+
+    @Test
+    fun `properties row shows for a file`() {
+        // The old "Details" label is gone: the row opens the read-only properties sheet.
+        renderSheet(fileItem("report.pdf", isDir = false))
+        assertRowShown("Properties")
+        assertRowHidden("Details")
+    }
+
+    @Test
+    fun `properties row shows for a folder`() {
+        renderSheet(fileItem("Pictures", isDir = true))
+        assertRowShown("Properties")
+        assertRowHidden("Details")
     }
 }
