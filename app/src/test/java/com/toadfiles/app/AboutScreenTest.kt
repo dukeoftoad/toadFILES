@@ -21,14 +21,10 @@ import org.robolectric.annotation.Config
  *
  * Coverage:
  *  - the screen renders with the app name and version label
- *  - the diagnostics toggle row is present
- *  - the storage, category-count, changelog and credits sections appear
+ *  - the storage, category-count, updates, changelog and credits sections appear
+ *  - the update panel shows its "Check for updates" action in the Idle state
  *  - the changelog "What's new" heading renders
  *  - the OSS credits "Open-source credits" heading renders
- *
- * We don't drive the diagnostics switch by clicking — Robolectric switches don't reliably
- * emit onCheckedChange without an animator. The Settings repository has a unit test that
- * proves the toggle persists; here we only assert the UI shows the right labels.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(application = ToadApp::class, sdk = [35])
@@ -73,20 +69,6 @@ class AboutScreenTest {
     }
 
     @Test
-    fun `About shows the diagnostics toggle card`() {
-        render()
-        // We assert only the card title 'Diagnostics' is rendered. The disclaimer paragraph
-        // below it is one long Text node; matching its lead substring with substringEquals
-        // isn't supported in the compose-ui-test version pinned by this project (BOM
-        // 2025.11.00). The card title is sufficient: it's the only "Diagnostics" Text node
-        // in the tree, so its presence proves the entire card (with disclaimer + Switch) is
-        // rendered.
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Diagnostics").fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
-    @Test
     fun `About shows the changelog and OSS credits headings`() {
         render()
         compose.waitUntil(5_000) {
@@ -94,6 +76,22 @@ class AboutScreenTest {
         }
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Open-source credits").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun `About shows the Updates card with the user-initiated check action`() {
+        render()
+        // The update panel starts in the Idle state: card title + check button. No
+        // network happens here — checking only ever runs when the button is tapped.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Updates").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Check for updates").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Installed").fetchSemanticsNodes().isNotEmpty()
         }
     }
 }

@@ -40,12 +40,6 @@ data class ToadSettings(
     val searchResultLimit: Int = SEARCH_LIMIT_DEFAULT,
     /** When true, in-folder tree search also opens small text files and matches their contents. */
     val contentSearch: Boolean = false,
-    /**
-     * Toggle for any future diagnostic / crash-report upload. toadFILES has no internet
-     * permission so this is effectively a no-op today, but it's the user-visible knob that
-     * signals intent for the privacy promise ("no diagnostics by default").
-     */
-    val diagnosticsEnabled: Boolean = false,
     /** Folders the user explicitly pinned to Home's Quick access. */
     val quickPins: Set<String> = emptySet(),
     /** Folders the user removed from Quick access (defaults or auto "most used" entries). */
@@ -83,7 +77,6 @@ class SettingsRepository(
         val FAVORITES = stringSetPreferencesKey("favorites")
         val SEARCH_LIMIT = intPreferencesKey("search_limit")
         val CONTENT_SEARCH = booleanPreferencesKey("content_search")
-        val DIAGNOSTICS = booleanPreferencesKey("diagnostics_enabled")
         val QUICK_PINS = stringSetPreferencesKey("quick_pins")
         val QUICK_HIDDEN = stringSetPreferencesKey("quick_hidden")
         val FOLDER_USES = stringSetPreferencesKey("folder_uses")
@@ -109,7 +102,6 @@ class SettingsRepository(
                 ToadSettings.SEARCH_LIMIT_MAX,
             ) ?: ToadSettings.SEARCH_LIMIT_DEFAULT,
             contentSearch = p[Keys.CONTENT_SEARCH] ?: false,
-            diagnosticsEnabled = p[Keys.DIAGNOSTICS] ?: false,
             quickPins = p[Keys.QUICK_PINS] ?: emptySet(),
             quickHidden = p[Keys.QUICK_HIDDEN] ?: emptySet(),
         )
@@ -126,7 +118,6 @@ class SettingsRepository(
         it[Keys.SEARCH_LIMIT] = limit.coerceIn(ToadSettings.SEARCH_LIMIT_MIN, ToadSettings.SEARCH_LIMIT_MAX)
     }
     suspend fun setContentSearch(enabled: Boolean) = store.edit { it[Keys.CONTENT_SEARCH] = enabled }
-    suspend fun setDiagnosticsEnabled(enabled: Boolean) = store.edit { it[Keys.DIAGNOSTICS] = enabled }
 
     // ---------- Quick access (Home) ----------
 

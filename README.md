@@ -70,7 +70,7 @@ app/src/main/java/com/toadfiles/app/
 ├── domain/    # pure Kotlin: models, sorting, path safety, file ops, ZIP handling, AccentColor
 ├── data/      # java.io, MediaStore, DataStore wrappers
 ├── ui/        # Compose screens and shared components (FileActionSheet, MediaActionSheet, dialogs)
-│   ├── about/      # About page (version/build, storage, credits, changelog, diagnostics)
+│   ├── about/      # About page (version/build, storage, credits, changelog)
 │   ├── home/       # Home dashboard: hero storage card, quick access, favorites, recent feed
 │   ├── browse/     # Folder listing: search, filter, sort, multi-select, zip, clipboard
 │   ├── categories/ # Media-library grid + thumbnail drill-ins with multi-select

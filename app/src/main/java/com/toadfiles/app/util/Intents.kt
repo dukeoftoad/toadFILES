@@ -176,7 +176,8 @@ object Intents {
      * Standard Android share for on-disk files: ACTION_SEND (one file) or
      * ACTION_SEND_MULTIPLE (several) via FileProvider content URIs, behind the system
      * share sheet. The receiving app is chosen by the user; toadFILES itself never
-     * uploads anything (no INTERNET permission).
+     * uploads anything (its only network use is the user-initiated update check —
+     * see the manifest permission comments).
      */
     fun shareFiles(context: Context, files: List<File>): Boolean {
         if (files.isEmpty()) return false
@@ -266,6 +267,10 @@ object Intents {
      * [InstallResult.SETTINGS_FAILED] when even the settings screen could not be opened
      * (no retry path — the pending APK should be dropped), [InstallResult.FAILED] when the
      * handoff itself failed.
+     *
+     * Thin wrapper over [installApkFromUri]: same gate, same outcomes, same intent —
+     * only the URI source differs (FileProvider here, a DownloadManager content URI
+     * for the self-update flow).
      */
     fun installApk(context: Context, file: File): InstallResult {
         if (!file.exists()) return InstallResult.FAILED
@@ -274,6 +279,18 @@ object Intents {
         } catch (_: Exception) {
             return InstallResult.FAILED
         }
+        return installApkFromUri(context, uri)
+    }
+
+    /**
+     * URI twin of [installApk]: hands an APK already available as a content URI to the
+     * system installer, with the exact same "Install unknown apps" gate and outcome
+     * contract. Used by the self-update flow, whose APK comes out of a completed
+     * DownloadManager job as content://downloads/… — such a URI is served to the
+     * installer by the download system itself, so no FileProvider round-trip is needed
+     * (and an Android/data path could never pass [contentUri]/[UriGuard] anyway).
+     */
+    fun installApkFromUri(context: Context, uri: Uri): InstallResult {
         if (!canRequestPackageInstalls(context)) {
             // Distinct outcome: "go flip the toggle in Settings" is only honest if we
             // actually took the user there. If both settings intents fail, say so.
@@ -287,6 +304,10 @@ object Intents {
             setDataAndTypeAndNormalize(uri, "application/vnd.android.package-archive")
             clipData = ClipData.newRawUri(null, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // The self-update handoff can run from the application context after the
+            // download finishes; NEW_TASK keeps that legal, and is a no-op difference
+            // when launched from an activity.
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return try {
             context.startActivity(intent) // no chooser: this must reach the installer
@@ -294,6 +315,30 @@ object Intents {
         } catch (_: Exception) {
             // Permission is already granted here; this is a real handoff failure.
             InstallResult.FAILED
+        }
+    }
+
+    /**
+     * Opens an https/http URL in the user's browser (used by About → "View on GitHub").
+     * No Custom Tabs dependency — the plain ACTION_VIEW launch resolves whatever
+     * browser the user has. User-initiated only; refuses non-web schemes so this
+     * helper can never be talked into launching file/content intents. Returns an
+     * honest false when the URL is not a web URL or nothing can handle it.
+     */
+    fun openUrl(context: Context, url: String): Boolean {
+        val scheme = try {
+            Uri.parse(url).scheme?.lowercase()
+        } catch (_: Exception) {
+            null
+        }
+        if (scheme != "https" && scheme != "http") return false
+        return try {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 

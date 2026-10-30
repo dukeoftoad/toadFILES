@@ -66,7 +66,8 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.EmptyState
-import com.toadfiles.app.ui.components.MediaActionSheet
+import com.toadfiles.app.ui.components.MediaEntryActionSheet
+import com.toadfiles.app.ui.components.MediaOpOverlays
 import com.toadfiles.app.util.Intents
 
 /**
@@ -224,58 +225,18 @@ fun RecentScreen(
         }
     }
 
-    // Long-press action sheet — the same one the Categories drill-in uses.
-    actionSheetFor?.let { entry ->
-        MediaActionSheet(
-            entry = entry,
-            onOpen = {
-                actionSheetFor = null
-                if (!Intents.openContent(context, entry.uri, entry.mime)) {
-                    vm.requestToast("No app can open this file")
-                }
-            },
-            onOpenWith = {
-                actionSheetFor = null
-                if (!Intents.openContentWith(context, entry.uri, entry.mime)) {
-                    vm.requestToast("No app can open this file")
-                }
-            },
-            onShare = {
-                actionSheetFor = null
-                if (!Intents.shareUris(context, listOf(entry.uri), entry.mime)) {
-                    vm.requestToast("Could not share this item")
-                }
-            },
-            onShowInFolder = entry.data?.let { path ->
-                {
-                    actionSheetFor = null
-                    val parent = java.io.File(path).parentFile
-                    if (parent != null && parent.isDirectory) onShowInFolder(parent.absolutePath)
-                }
-            },
-            onDelete = entry.data?.let {
-                {
-                    actionSheetFor = null
-                    vm.requestDelete(listOf(entry))
-                }
-            },
-            onDetails = {
-                actionSheetFor = null
-                vm.requestDetails(entry)
-            },
-            onCopyPath = entry.data?.let { path ->
-                {
-                    actionSheetFor = null
-                    if (Intents.copyPathToClipboard(context, java.io.File(path))) {
-                        vm.requestToast("Path copied to clipboard")
-                    } else {
-                        vm.requestToast("Could not copy the path")
-                    }
-                }
-            },
-            onDismiss = { actionSheetFor = null },
-        )
-    }
+    // Long-press action sheet — the same one the Categories drill-in uses, with the
+    // shared wiring from ui/components (audit 7.3).
+    MediaEntryActionSheet(
+        entry = actionSheetFor,
+        onDismiss = { actionSheetFor = null },
+        open = { e -> Intents.openContent(context, e.uri, e.mime) },
+        onShowInFolder = onShowInFolder,
+        toast = vm::requestToast,
+        requestDelete = { e -> vm.requestDelete(listOf(e)) },
+        onDetails = vm::requestDetails,
+        onExtract = vm::extractZip,
+    )
 
     state.pendingDelete?.let { entries ->
         AlertDialog(
@@ -307,6 +268,15 @@ fun RecentScreen(
             confirmButton = { TextButton(onClick = { vm.dismissDetails() }) { Text("Close") } },
         )
     }
+
+    // Extract progress + result: the same op model Browse shows, shared wiring (audit 7.3).
+    MediaOpOverlays(
+        progress = state.progress,
+        result = state.result,
+        resultTitle = state.resultTitle,
+        onCancel = { vm.cancelOp() },
+        onDismissResult = { vm.dismissResult() },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

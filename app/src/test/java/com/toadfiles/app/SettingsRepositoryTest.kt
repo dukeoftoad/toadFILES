@@ -224,30 +224,6 @@ class SettingsRepositoryTest {
         assertEquals(AccentColor.PURPLE, repo.settings.first().accentColor)
     }
 
-    // ---- v1.4: diagnostics toggle ----
-
-    @Test
-    fun `diagnostics defaults off`() = runTest {
-        assertEquals(false, newRepo().settings.first().diagnosticsEnabled)
-    }
-
-    @Test
-    fun `setDiagnosticsEnabled persists and reads back`() = runTest {
-        val repo = newRepo()
-        repo.setDiagnosticsEnabled(true)
-        assertEquals(true, repo.settings.first().diagnosticsEnabled)
-        repo.setDiagnosticsEnabled(false)
-        assertEquals(false, repo.settings.first().diagnosticsEnabled)
-    }
-
-    @Test
-    fun `diagnostics toggle survives an unrelated write`() = runTest {
-        val repo = newRepo()
-        repo.setDiagnosticsEnabled(true)
-        repo.setThemeMode(ThemeMode.DARK)
-        assertEquals(true, repo.settings.first().diagnosticsEnabled)
-    }
-
     @Test
     fun `quick pins toggle and always unhide`() = runTest {
         val repo = newRepo()
