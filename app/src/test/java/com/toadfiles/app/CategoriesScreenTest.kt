@@ -1,0 +1,140 @@
+package com.toadfiles.app
+
+import android.os.Environment
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Dp
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.decode.BitmapFactoryDecoder
+import com.toadfiles.app.ToadApp
+import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.screenshots.FakeMediaProvider
+import com.toadfiles.app.screenshots.MediaRow
+import com.toadfiles.app.ui.categories.CategoriesScreen
+import com.toadfiles.app.ui.theme.ToadTheme
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowContentResolver
+import java.io.ByteArrayOutputStream
+import java.io.File
+import javax.imageio.ImageIO
+
+/**
+ * P2.4 regression: the Categories drill-in must expose a reachable per-item action
+ * sheet. Long-press is reserved for multi-select, so rows (docs/audio/archives/apks)
+ * and visual grid cells (images/videos) each render a ⋮ affordance that opens the
+ * MediaActionSheet — the old code wired the sheet but never rendered any trigger.
+ */
+@RunWith(AndroidJUnit4::class)
+@Config(application = ToadApp::class, sdk = [35])
+class CategoriesScreenTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    private val media = FakeMediaProvider()
+    private val rows = mutableListOf<MediaRow>()
+    private var rowId = 1L
+
+    @Before
+    fun setUp() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        ToadViewModelFactory.init(app)
+
+        // Coil's default decoder is not functional under Robolectric — same swap the
+        // screenshot test uses so thumbnails load without crashing the composition.
+        SingletonImageLoader.setSafe { ctx ->
+            ImageLoader.Builder(ctx)
+                .components { add(BitmapFactoryDecoder.Factory()) }
+                .build()
+        }
+
+        val root = Environment.getExternalStorageDirectory().apply { mkdirs() }
+        val docs = File(root, "Documents").apply { mkdirs() }
+        val cam = File(root, "DCIM/Camera").apply { mkdirs() }
+        val pdf = File(docs, "quarterly-report.pdf").apply { writeBytes(ByteArray(4_096) { 3 }) }
+        val jpg = File(cam, "IMG_1.jpg").apply { writeBytes(png()) }
+
+        val now = System.currentTimeMillis() / 1000L
+        rows += MediaRow(rowId++, pdf.name, pdf.length(), now, "application/pdf", pdf.path, 6)
+        rows += MediaRow(rowId++, jpg.name, jpg.length(), now - 60, "image/jpeg", jpg.path, 1)
+        media.rowsList = rows.toList()
+        ShadowContentResolver.registerProviderInternal("media", media)
+    }
+
+    private fun render() {
+        compose.setContent {
+            ToadTheme {
+                CategoriesScreen(bottomPadding = Dp(0f), onBack = {}, onShowInFolder = {})
+            }
+        }
+    }
+
+    private fun openDrillIn(tileLabel: String) {
+        render()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Media library").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText(tileLabel).performClick()
+    }
+
+    @Test
+    fun `document rows expose the per-item action sheet`() {
+        openDrillIn("Documents")
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("quarterly-report.pdf").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // The row's ⋮ affordance is rendered and opens the action sheet.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("More actions").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodesWithContentDescription("More actions")[0].performClick()
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Open with…").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Details").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun `image grid cells expose the per-item action sheet`() {
+        openDrillIn("Images")
+        // Visual cells show the file name as the image's content description, not text.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("IMG_1.jpg").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // The visual cell's ⋮ affordance is rendered and opens the action sheet.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("More actions").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodesWithContentDescription("More actions")[0].performClick()
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Open with…").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    /** Tiny real PNG so the grid cell's AsyncImage has decodable content. */
+    private fun png(): ByteArray {
+        val img = java.awt.image.BufferedImage(32, 32, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        val g = img.createGraphics()
+        g.fillRect(0, 0, 32, 32)
+        g.dispose()
+        val out = ByteArrayOutputStream()
+        ImageIO.write(img, "png", out)
+        return out.toByteArray()
+    }
+}

@@ -16,21 +16,38 @@ import java.io.File
  *
  * Intent patterns follow the ones used by the major open-source file managers
  * (Material Files, Simple File Manager, Amaze):
- *  - OPEN uses a direct ACTION_VIEW launch. With more than one capable app the system
- *    resolver shows the standard "Just once / Always" chooser, which is how users
- *    expect to pin a default handler for a file type.
+ *  - OPEN uses a direct ACTION_VIEW launch. Whether the system resolver appears is
+ *    Android's call, not ours: it only shows when more than one app can handle the
+ *    type and the user has not pinned a default yet; with a saved default (or a
+ *    single handler) the file opens straight into that app. No picker is promised
+ *    for plain "Open" — "Open with" forces a one-time chooser instead.
  *  - SHARE uses ACTION_SEND / ACTION_SEND_MULTIPLE behind the system share sheet,
- *    with ClipData + FLAG_GRANT_READ_URI_PERMISSION so every target gets read access.
+ *    with ClipData (every URI, not just the first) + FLAG_GRANT_READ_URI_PERMISSION
+ *    on both the send intent and the chooser, so every target gets read access to
+ *    every item.
  *  - INSTALL gates on canRequestPackageInstalls() and walks the user to the exact
  *    Android settings toggle when it is off (several OEM installers otherwise fail
- *    silently or auto-deny).
+ *    silently or auto-deny). Permission-missing, settings-open-failure and
+ *    installer-launch-failure are reported as distinct outcomes.
  */
 object Intents {
 
     const val PROVIDER_AUTHORITY = "com.toadfiles.app.fileprovider"
 
     /** Outcome of handing an APK to the system installer. */
-    enum class InstallResult { STARTED, NEEDS_PERMISSION, FAILED }
+    enum class InstallResult {
+        /** The package installer was launched. */
+        STARTED,
+
+        /** "Install unknown apps" was off; the settings toggle was opened — a retry is valid. */
+        NEEDS_PERMISSION,
+
+        /** The permission was missing AND the settings screen could not be opened — no retry path. */
+        SETTINGS_FAILED,
+
+        /** The handoff itself failed (missing file, URI trouble, or a throwing launch after permission was granted). */
+        FAILED,
+    }
 
     fun mimeOf(file: File): String {
         val ext = file.extension.lowercase()
@@ -40,15 +57,28 @@ object Intents {
         return mapped ?: "application/octet-stream"
     }
 
-    fun contentUri(context: Context, file: File): Uri =
-        FileProvider.getUriForFile(context, PROVIDER_AUTHORITY, file)
+    /**
+     * Content URI for sharing/opening a real file. The provider config keeps a root-path
+     * catch-all for OEM removable volumes, so [UriGuard] is the second line of defence:
+     * system/internal locations (/data, /proc, /sys, …) are refused before a URI exists.
+     * Throws IllegalArgumentException for refused paths; every caller catches it and
+     * reports an honest failure or skips the item.
+     */
+    fun contentUri(context: Context, file: File): Uri {
+        require(UriGuard.isShareablePath(file.absolutePath)) {
+            "Refusing to hand a system path to other apps: ${file.absolutePath}"
+        }
+        return FileProvider.getUriForFile(context, PROVIDER_AUTHORITY, file)
+    }
 
     // ---------- open ----------
 
     /**
-     * Opens a real file with an external app via a direct ACTION_VIEW launch. When several
-     * apps can handle the type the system shows its own "Just once / Always" resolver
-     * (feature: remember the default handler). Returns false if nothing can open it.
+     * Opens a real file with an external app via a direct ACTION_VIEW launch. The system
+     * resolver shows up on its own when several apps can handle the type and no default
+     * is saved; with a pinned default (or a single handler) the file opens directly.
+     * That resolver behavior is platform-dependent and is NOT guaranteed by this call.
+     * Returns false if nothing can open it.
      */
     fun openFile(context: Context, file: File): Boolean {
         if (!file.exists()) return false
@@ -66,7 +96,10 @@ object Intents {
         }
     }
 
-    /** Same as [openFile] but forces the chooser so the user picks the handler each time. */
+    /**
+     * Same as [openFile] but forces a ONE-TIME chooser so the user picks the handler each
+     * time. A forced chooser never writes a default — that is exactly its point.
+     */
     fun openWith(context: Context, file: File): Boolean {
         if (!file.exists()) return false
         val uri = try {
@@ -76,7 +109,7 @@ object Intents {
         }
         val intent = viewIntent(uri, mimeOf(file))
         return try {
-            context.startActivity(Intent.createChooser(intent, "Open with"))
+            context.startActivity(chooserAround(intent, listOf(uri), "Open with"))
             true
         } catch (_: Exception) {
             false
@@ -85,8 +118,9 @@ object Intents {
 
     /**
      * Opens a MediaStore-backed content URI (Categories / Recent tabs). Direct launch, no
-     * chooser — "Just once / Always" comes from the system resolver. MediaStore URIs are
-     * already world-readable through grants, so no FileProvider round-trip is needed.
+     * chooser — the system resolver appears on its own terms (multiple handlers, no saved
+     * default), exactly as in [openFile]. MediaStore URIs are already world-readable
+     * through grants, so no FileProvider round-trip is needed.
      */
     fun openContent(context: Context, uri: Uri, mime: String): Boolean {
         val intent = viewIntent(uri, mime)
@@ -98,11 +132,11 @@ object Intents {
         }
     }
 
-    /** Same as [openContent] but always shows the chooser. */
+    /** Same as [openContent] but always shows the one-time chooser. */
     fun openContentWith(context: Context, uri: Uri, mime: String): Boolean {
         val intent = viewIntent(uri, mime)
         return try {
-            context.startActivity(Intent.createChooser(intent, "Open with"))
+            context.startActivity(chooserAround(intent, listOf(uri), "Open with"))
             true
         } catch (_: Exception) {
             false
@@ -116,6 +150,24 @@ object Intents {
         clipData = ClipData.newRawUri(null, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
+
+    /** A read-grant clip carrying EVERY uri — not just the first. */
+    private fun grantClip(uris: List<Uri>): ClipData {
+        val clip = ClipData.newRawUri(null, uris.first())
+        for (u in uris.drop(1)) clip.addItem(ClipData.Item(u))
+        return clip
+    }
+
+    /**
+     * Wraps [intent] in a chooser that carries the same URIs and read grant. Some OEM
+     * share/resolve sheets derive their grants from the chooser intent itself, so the
+     * grant must survive on both wrappers, not only the inner intent.
+     */
+    private fun chooserAround(intent: Intent, uris: List<Uri>, title: String): Intent =
+        Intent.createChooser(intent, title).apply {
+            clipData = grantClip(uris)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
 
     // ---------- share ----------
 
@@ -143,6 +195,10 @@ object Intents {
     /**
      * Standard Android share for content URIs (MediaStore rows from Categories / Recent).
      * All URIs must share one mime type family; pass the most common one.
+     *
+     * ClipData carries EVERY uri: on several Android versions the grant a receiver ends up
+     * with is derived from ClipData, so a first-item-only clip silently makes items 2..n
+     * unreadable for the receiving app even though they ride along in EXTRA_STREAM.
      */
     fun shareUris(context: Context, uris: List<Uri>, mime: String): Boolean {
         if (uris.isEmpty()) return false
@@ -159,9 +215,9 @@ object Intents {
                 }
             }
             // Forward read access to whichever app the user picks from the share sheet.
-            intent.clipData = ClipData.newRawUri(null, uris.first())
+            intent.clipData = grantClip(uris)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            context.startActivity(Intent.createChooser(intent, "Share via"))
+            context.startActivity(chooserAround(intent, uris, "Share via"))
             true
         } catch (_: Exception) {
             false
@@ -205,7 +261,10 @@ object Intents {
      * auto-deny without it, so we check first and walk the user straight to the toggle
      * instead of firing an intent into the void. Returns [InstallResult.STARTED] when the
      * installer was launched, [InstallResult.NEEDS_PERMISSION] when the user was taken to
-     * the settings toggle, [InstallResult.FAILED] when the handoff itself failed.
+     * the settings toggle (the pending APK should be kept — a retry is valid),
+     * [InstallResult.SETTINGS_FAILED] when even the settings screen could not be opened
+     * (no retry path — the pending APK should be dropped), [InstallResult.FAILED] when the
+     * handoff itself failed.
      */
     fun installApk(context: Context, file: File): InstallResult {
         if (!file.exists()) return InstallResult.FAILED
@@ -215,8 +274,13 @@ object Intents {
             return InstallResult.FAILED
         }
         if (!canRequestPackageInstalls(context)) {
-            openInstallPermissionSettings(context)
-            return InstallResult.NEEDS_PERMISSION
+            // Distinct outcome: "go flip the toggle in Settings" is only honest if we
+            // actually took the user there. If both settings intents fail, say so.
+            return if (openInstallPermissionSettings(context)) {
+                InstallResult.NEEDS_PERMISSION
+            } else {
+                InstallResult.SETTINGS_FAILED
+            }
         }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndTypeAndNormalize(uri, "application/vnd.android.package-archive")
@@ -227,9 +291,8 @@ object Intents {
             context.startActivity(intent) // no chooser: this must reach the installer
             InstallResult.STARTED
         } catch (_: Exception) {
-            // Some ROMs resolve but then refuse; take the user to the toggle as a fallback.
-            openInstallPermissionSettings(context)
-            InstallResult.NEEDS_PERMISSION
+            // Permission is already granted here; this is a real handoff failure.
+            InstallResult.FAILED
         }
     }
 
@@ -239,7 +302,7 @@ object Intents {
         false
     }
 
-    /** Opens the "Install unknown apps" screen for this app so the user can flip the toggle. */
+    /** Opens the "Install unknown apps" screen for this app; false when both attempts fail. */
     private fun openInstallPermissionSettings(context: Context): Boolean = try {
         context.startActivity(
             Intent(

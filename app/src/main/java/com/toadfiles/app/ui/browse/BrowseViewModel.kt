@@ -402,7 +402,7 @@ class BrowseViewModel(
     fun rename(file: File, newName: String) {
         viewModelScope.launch(ioDispatcher) {
             val dest = FileOps.rename(file, newName)
-            if (dest != null) remapFavorites(file.path, dest.path)
+            if (dest != null) remapSavedPaths(file.path, dest.path)
             _state.update {
                 it.copy(
                     pendingRename = null,
@@ -416,19 +416,20 @@ class BrowseViewModel(
         }
     }
 
-    /** Favorites pointing at (or under) a renamed/moved path keep working. */
-    private suspend fun remapFavorites(oldPath: String, newPath: String) {
-        val favs = _state.value.favoritePaths
-        if (favs.any { it == oldPath || it.startsWith("$oldPath/") }) {
-            settingsRepo.remapFavorites(oldPath, newPath)
-        }
+    /**
+     * Everything saved against (or under) a renamed/moved path keeps working: favorites,
+     * Quick access pins, hidden marks and "most used" folder-use counters are remapped
+     * in one atomic transaction (see [SettingsRepository.remapSavedPaths]).
+     */
+    private suspend fun remapSavedPaths(oldPath: String, newPath: String) {
+        settingsRepo.remapSavedPaths(oldPath, newPath)
     }
 
     private suspend fun remapMovedFavorites(sources: List<File>, target: File) {
         for (src in sources) {
             if (src.exists()) continue
             val dest = File(target, src.name)
-            if (dest.exists()) remapFavorites(src.path, dest.path)
+            if (dest.exists()) remapSavedPaths(src.path, dest.path)
         }
     }
 
@@ -441,15 +442,15 @@ class BrowseViewModel(
         _state.update { it.copy(pendingDelete = null, progress = "Deleting" to OpProgress(0, files.size, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
             val roots = container.fileRepo.roots().map { it.dir }
-            val trashed = Trash.trash(files, roots)
+            val result = Trash.trash(files, roots)
             val failed = files.count { it.exists() }
             _state.update {
                 it.copy(
                     progress = null,
-                    lastTrashed = trashed.takeIf { t -> t.isNotEmpty() },
+                    lastTrashed = result.moved.takeIf { t -> t.isNotEmpty() },
                     toast = when {
-                        trashed.isEmpty() -> "Could not move anything to trash"
-                        failed > 0 -> "Moved ${trashed.size} of ${files.size} to trash ($failed failed)"
+                        result.moved.isEmpty() -> "Could not move anything to trash"
+                        failed > 0 -> "Moved ${result.moved.size} of ${files.size} to trash ($failed failed)"
                         else -> null // the undo snackbar reports success instead
                     },
                 )
@@ -609,10 +610,15 @@ class BrowseViewModel(
         val dir = file.parentFile ?: return
         val targetName = file.nameWithoutExtension
         val target = File(dir, targetName)
-        val replace = target.exists()
+        if (target.exists()) {
+            _state.update {
+                it.copy(toast = "A folder named \"$targetName\" already exists. Rename or move it before extracting.")
+            }
+            return
+        }
         _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ZipSupport.extract(file, target, replace) { p ->
+            val r = ZipSupport.extract(file, target, false) { p ->
                 _state.update { it.copy(progress = "Extracting" to p) }
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }

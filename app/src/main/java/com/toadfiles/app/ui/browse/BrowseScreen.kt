@@ -524,13 +524,19 @@ fun BrowseScreen(
                 when (Intents.installApk(context, apk)) {
                     Intents.InstallResult.STARTED -> Unit // the installer took over
                     Intents.InstallResult.NEEDS_PERMISSION -> vm.requestToast(
-                        "Allow \"Install unknown apps\" for toadFILES in the screen that just opened, then tap Install again"
+                        "Allow \"Install unknown apps\" for toadFILES, return here, then tap Install again"
                     )
-                    Intents.InstallResult.FAILED -> vm.requestToast(
-                        "Could not start the installer"
-                    )
+                    Intents.InstallResult.SETTINGS_FAILED -> {
+                        // Settings never opened, so there is no toggle to come back from.
+                        vm.requestToast("Could not open Android's install-permission settings")
+                        pendingInstallApk = null
+                    }
+                    Intents.InstallResult.FAILED -> {
+                        vm.requestToast("Could not start the installer")
+                        pendingInstallApk = null
+                    }
                 }
-                pendingInstallApk = null
+                if (Intents.hasInstallPermission(context)) pendingInstallApk = null
             },
             onDismiss = { pendingInstallApk = null },
         )

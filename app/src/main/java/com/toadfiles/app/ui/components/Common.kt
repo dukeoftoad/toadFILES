@@ -188,11 +188,16 @@ fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
     FilterMode.APKS -> Icons.Outlined.InstallMobile
 }
 
-/** Video thumbnail from MediaMetadataRetriever with a tiny in-memory cache (no extra dependency). */
+/**
+ * Video thumbnail from MediaMetadataRetriever with a tiny in-memory cache (no extra dependency).
+ * The state keys on the file's identity stamp (path + mtime/size), so a video replaced in
+ * place re-decodes its frame instead of showing a stale one (audit finding P3.2).
+ */
 @Composable
 fun VideoThumb(path: String, modifier: Modifier = Modifier) {
-    var bitmap by remember(path) { mutableStateOf(VideoThumbs.peek(path)) }
-    LaunchedEffect(path) {
+    val stamp = VideoThumbs.stampFor(path)
+    var bitmap by remember(path, stamp) { mutableStateOf(VideoThumbs.peek(path, stamp)) }
+    LaunchedEffect(path, stamp) {
         if (bitmap == null) bitmap = VideoThumbs.load(File(path))
     }
     val current = bitmap
