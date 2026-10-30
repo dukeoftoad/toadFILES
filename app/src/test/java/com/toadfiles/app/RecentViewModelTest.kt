@@ -74,6 +74,25 @@ class RecentViewModelTest {
     }
 
     @Test
+    fun `filter tabs switch the query and reload`() = runTest {
+        await { !vm.state.value.loading }
+        assertNull(vm.state.value.filter)
+
+        vm.setFilter(com.toadfiles.app.domain.FileCategory.IMAGES)
+        assertEquals(com.toadfiles.app.domain.FileCategory.IMAGES, vm.state.value.filter)
+        await { !vm.state.value.loading }
+
+        // Back to "All" — the filter clears and the list settles again.
+        vm.setFilter(null)
+        assertNull(vm.state.value.filter)
+        await { !vm.state.value.loading }
+
+        // Setting the same filter twice is a no-op (no reload churn).
+        vm.setFilter(null)
+        assertNull(vm.state.value.filter)
+    }
+
+    @Test
     fun `toast is consumed after being shown`() = runTest {
         vm.requestToast("Moved 1 item(s) to trash")
         assertEquals("Moved 1 item(s) to trash", vm.state.value.toast)

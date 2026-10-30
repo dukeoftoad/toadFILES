@@ -423,6 +423,64 @@ class BrowseViewModelTest {
     }
 
     @Test
+    fun `zip flow asks for a name and zips under the typed name`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("zip me") }
+        vm.openDir(dir)
+
+        vm.requestZip(listOf(f))
+        assertEquals(listOf(f), vm.state.value.pendingZipFiles)
+        assertEquals("doc.zip", vm.state.value.pendingZipName)
+
+        vm.confirmZip("holiday pack") // no .zip suffix — appended automatically
+
+        await { vm.state.value.result != null }
+        assertNull(vm.state.value.pendingZipFiles)
+        assertNotNull(
+            "archive should use the typed name",
+            vm.state.value.items.firstOrNull { it.name == "holiday pack.zip" },
+        )
+    }
+
+    @Test
+    fun `confirmZip rejects names that try to escape the folder`() = runTest {
+        val f = File(dir, "x.txt").apply { writeText("x") }
+        vm.openDir(dir)
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("../evil.zip")
+
+        // Dialog stays open, nothing is written, the user is told why.
+        assertNotNull(vm.state.value.pendingZipFiles)
+        assertEquals("Enter a valid archive name", vm.state.value.toast)
+        assertTrue(vm.state.value.items.none { it.name.endsWith(".zip") })
+    }
+
+    @Test
+    fun `clearing the search restores the folder listing`() = runTest {
+        val nested = File(dir, "nested").apply { mkdirs() }
+        File(nested, "needle.txt").writeText("x")
+        File(dir, "regular.txt").writeText("x")
+        vm.openDir(dir)
+        testScheduler.advanceUntilIdle()
+
+        vm.setQuery("needle")
+        testScheduler.advanceTimeBy(301)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("needle.txt"), vm.state.value.items.map { it.name })
+
+        vm.setQuery("")
+        testScheduler.advanceUntilIdle()
+
+        // Folder contents come back — no stale search results.
+        val names = vm.state.value.items.map { it.name }
+        assertTrue("regular.txt" in names)
+        assertFalse("needle.txt" in names) // it lives in a subfolder, not this listing
+        assertFalse(vm.state.value.searching)
+        assertEquals("", vm.state.value.query)
+    }
+
+
+    @Test
     fun `dismissResult clears the result dialog`() = runTest {
         val f = File(dir, "t.txt").apply { writeText("x") }
         vm.openDir(dir)

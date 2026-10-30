@@ -46,7 +46,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -75,6 +74,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.os.Environment
@@ -106,7 +106,6 @@ fun BrowseScreen(
     initialDir: String,
     bottomPadding: Dp,
     onNavigateUp: () -> Unit,
-    onOpenTrash: () -> Unit,
     vm: BrowseViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -125,6 +124,8 @@ fun BrowseScreen(
 
     var pendingInstallApk by remember { mutableStateOf<File?>(null) }
     var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
+    /** A zip the user tapped: offer extract-or-open instead of guessing. */
+    var pendingZipTap by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
@@ -205,10 +206,10 @@ fun BrowseScreen(
                                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Zip ${state.selection.size} item(s)") },
+                                text = { Text("Zip ${state.selection.size} item(s)…") },
                                 onClick = {
                                     moreMenuOpen = false
-                                    vm.zipSelected(state.selection.toList())
+                                    vm.requestZip(state.selection.toList())
                                 },
                                 leadingIcon = { Icon(Icons.Outlined.Archive, null) },
                             )
@@ -362,22 +363,8 @@ fun BrowseScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 2.dp),
                     )
-                    // "Recently deleted" chip: surfaces trash items while the user is browsing
-                    // the file tree. Hidden when trash is empty, never shown in selection mode.
-                    if (!selectionMode && state.trashCount > 0) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            AssistChip(
-                                onClick = onOpenTrash,
-                                label = { Text("Recently deleted: ${state.trashCount}") },
-                                leadingIcon = { Icon(Icons.Outlined.Delete, null) },
-                            )
-                        }
-                    }
+                    // The trash lives behind Home's trash button and Settings —
+                    // the listing itself stays clean.
                     if (state.searchCapped) {
                         Text(
                             "Reached the ${state.settings.searchResultLimit}-result limit. " +
@@ -396,20 +383,17 @@ fun BrowseScreen(
                         selectionMode -> vm.toggleSelection(item)
                         item.isDir -> vm.openDir(item.file)
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
+                        item.name.lowercase().endsWith(".zip") -> pendingZipTap = item.file
                         else -> if (!Intents.openFile(context, item.file)) {
                             vm.requestToast("No app can open this file")
                         }
                     }
                 }
                 val longPressItem: (FileItem) -> Unit = { item ->
-                    if (selectionMode) {
-                        // Already in multi-select: long-press just toggles membership.
-                        vm.toggleSelection(item)
-                    } else {
-                        // Mi Files-style: open the per-item action sheet. Selection mode is
-                        // entered explicitly via the "Select more" sheet row, not by long-press.
-                        pendingActionSheet = item
-                    }
+                    // Press-and-hold starts multi-select (Google Files style); while
+                    // already selecting it keeps toggling rows. The per-item action
+                    // sheet stays one tap away on the row's ⋮ button.
+                    vm.toggleSelection(item)
                 }
 
                 when {
@@ -456,6 +440,7 @@ fun BrowseScreen(
                                         "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
                                     onClick = { openItem(item) },
                                     onLongClick = { longPressItem(item) },
+                                    onMore = { pendingActionSheet = item },
                                 )
                             }
                             item { Spacer(Modifier.height(80.dp)) }
@@ -496,6 +481,37 @@ fun BrowseScreen(
             confirmLabel = "Rename",
             onConfirm = { vm.rename(file, it) },
             onDismiss = { vm.dismissRename() },
+        )
+    }
+    // Archive-name dialog: zips are always named by the user, never a silent "archive.zip".
+    state.pendingZipFiles?.let { files ->
+        NameInputDialog(
+            title = "Zip ${files.size} item(s)",
+            initialValue = state.pendingZipName,
+            confirmLabel = "Zip",
+            onConfirm = { vm.confirmZip(it) },
+            onDismiss = { vm.dismissZipDialog() },
+        )
+    }
+    // Tapping a zip asks what to do: extract (most common) or open with a viewer app.
+    pendingZipTap?.let { zip ->
+        AlertDialog(
+            onDismissRequest = { pendingZipTap = null },
+            title = { Text(zip.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = { Text("Extract this archive into a new folder here, or open it with an app.") },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = {
+                        pendingZipTap = null
+                        if (!Intents.openFile(context, zip)) vm.requestToast("No app can open this file")
+                    }) { Text("Open") }
+                    TextButton(onClick = {
+                        pendingZipTap = null
+                        vm.extractZip(zip)
+                    }) { Text("Extract here") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingZipTap = null }) { Text("Cancel") } },
         )
     }
     pendingInstallApk?.let { apk ->
@@ -562,9 +578,8 @@ fun BrowseScreen(
         )
     }
 
-    // Long-press per-file action sheet (Mi Files style). Each row reuses the existing vm
-    // hook so the sheet is purely UI glue, not a new behavior path. The sheet's actions
-    // dismiss it; "Select more" enters multi-select with this item pre-selected.
+    // Per-file action sheet (the row's ⋮ button). Each action reuses an existing vm
+    // hook so the sheet is purely UI glue, not a new behavior path.
     pendingActionSheet?.let { item ->
         // "Open" mirrors the row-tap behaviour: directory navigates, apk shows the install
         // confirm dialog, anything else is handed to ACTION_VIEW. Inlined here because the
@@ -617,7 +632,7 @@ fun BrowseScreen(
             },
             onZip = {
                 pendingActionSheet = null
-                vm.zipSelected(listOf(item.file))
+                vm.requestZip(listOf(item.file))
             },
             onExtract = if (item.name.lowercase().endsWith(".zip")) {
                 {
@@ -643,10 +658,13 @@ fun BrowseScreen(
                     vm.requestToast("No app can open this file")
                 }
             },
-            onSelect = {
-                pendingActionSheet = null
-                vm.toggleSelection(item)
-            },
+            pinnedToHome = item.file.path in state.quickPins,
+            onTogglePin = if (item.isDir) {
+                {
+                    pendingActionSheet = null
+                    vm.toggleQuickPin(item.file.path)
+                }
+            } else null,
             onDismiss = { pendingActionSheet = null },
         )
     }

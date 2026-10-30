@@ -48,7 +48,7 @@ class FileActionSheetTest {
                     onDelete = {}, onDetails = {}, onZip = {},
                     onExtract = null,
                     onToggleFavorite = {}, onCopyPath = {}, onOpenWith = {},
-                    onSelect = {}, onDismiss = {},
+                    onDismiss = {},
                 )
             }
         }
@@ -79,7 +79,7 @@ class FileActionSheetTest {
         assertRowShown("Delete")
         assertRowShown("Details")
         assertRowShown("Add favorite")
-        assertRowShown("Select more")
+        // "Select more" is gone: long-press starts multi-select now.
         // File-only actions
         assertRowShown("Copy path")
         assertRowShown("Open with…")

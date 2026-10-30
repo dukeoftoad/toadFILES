@@ -61,17 +61,62 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `quick links list only standard folders that exist`() = runTest {
+    fun `quick access shows defaults and puts user pins first`() = runTest {
         File(externalDir, "Download").mkdirs()
         File(externalDir, "Documents").mkdirs()
-        File(externalDir, "Random").mkdirs()
+        // Unique name: the class-wide DataStore is shared between tests, so pins from
+        // earlier tests (e.g. Download) may still be around — don't assume "first overall".
+        val pinned = File(externalDir, "Random-${System.nanoTime()}").apply { mkdirs() }
 
-        vm.refreshQuickLinks()
+        container.settingsRepo.toggleQuickPin(pinned.path)
+        // Wait for the PIN specifically — the row may already show plain defaults.
+        await { vm.state.value.quickAccess.any { it.dir.path == pinned.path } }
 
-        val names = vm.state.value.quickLinks.map { it.first }
+        val entries = vm.state.value.quickAccess
+        // Our pin is present and pinned…
+        val mine = entries.first { it.dir.path == pinned.path }
+        assertTrue(mine.pinned)
+        // …every pinned entry precedes every non-pinned one…
+        val lastPin = entries.indexOfLast { it.pinned }
+        val firstNonPin = entries.indexOfFirst { !it.pinned }
+        assertTrue(firstNonPin == -1 || lastPin < firstNonPin)
+        // …and standard folders that exist fill the rest.
+        val names = entries.map { it.label }
         assertTrue("Download" in names)
         assertTrue("Documents" in names)
-        assertTrue("Random" !in names)
+        // A random unpinned folder never appears on its own.
+        assertFalse(entries.any { !it.pinned && it.dir.path == pinned.path })
+    }
+
+    @Test
+    fun `removing a quick folder hides it until re-pinned`() = runTest {
+        val dl = File(externalDir, "Download").apply { mkdirs() }
+        vm.refresh() // re-entering Home rebuilds Quick access from disk
+        await { vm.state.value.quickAccess.any { it.dir.path == dl.path } }
+
+        container.settingsRepo.hideFromQuickAccess(dl.path)
+
+        await { vm.state.value.quickAccess.none { it.dir.path == dl.path } }
+
+        // Re-pinning unhides it again.
+        container.settingsRepo.toggleQuickPin(dl.path)
+        await { vm.state.value.quickAccess.any { it.dir.path == dl.path } }
+
+        // Leave the shared class-wide DataStore clean for other tests.
+        container.settingsRepo.toggleQuickPin(dl.path)
+        await { vm.state.value.quickAccess.any { it.dir.path == dl.path } } // still visible as a default
+    }
+
+    @Test
+    fun `most used folders surface automatically after repeated visits`() = runTest {
+        val work = File(externalDir, "Work").apply { mkdirs() }
+        repeat(3) { container.settingsRepo.recordFolderUse(work.path) }
+
+        await {
+            vm.state.value.quickAccess.any {
+                it.dir.path == work.path && it.source == com.toadfiles.app.ui.home.QuickAccessEntry.Source.MOST_USED
+            }
+        }
     }
 
     @Test
