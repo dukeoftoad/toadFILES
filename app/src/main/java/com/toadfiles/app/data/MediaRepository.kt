@@ -84,7 +84,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                     val data = if (iData >= 0) c.getString(iData) else null
                     // Same trash-hiding rule as recent(): renamed-away files can linger
                     // in the media index and would otherwise appear inside categories.
-                    if (data != null && isTrashPath(data)) continue
+                    if (data != null && (isTrashPath(data) || !File(data).exists())) continue
                     out += MediaEntry(
                         id = id,
                         uri = ContentUrisHelper.uriFor(category, id),
@@ -146,7 +146,7 @@ class MediaRepository(private val resolver: ContentResolver) {
                     val data = if (iData >= 0) c.getString(iData) else null
                     // Renaming a file into the trash does not always update the media index
                     // immediately, so trashed files can still surface as "recent". Hide them.
-                    if (data != null && isTrashPath(data)) continue
+                    if (data != null && (isTrashPath(data) || !File(data).exists())) continue
                     out += MediaEntry(
                         id = id,
                         uri = ContentUrisHelper.uriFor(category, id),

@@ -227,9 +227,8 @@ object Intents {
             context.startActivity(intent) // no chooser: this must reach the installer
             InstallResult.STARTED
         } catch (_: Exception) {
-            // Some ROMs resolve but then refuse; take the user to the toggle as a fallback.
-            openInstallPermissionSettings(context)
-            InstallResult.NEEDS_PERMISSION
+            // Permission is already granted here; this is a real handoff failure.
+            InstallResult.FAILED
         }
     }
 

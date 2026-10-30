@@ -609,10 +609,15 @@ class BrowseViewModel(
         val dir = file.parentFile ?: return
         val targetName = file.nameWithoutExtension
         val target = File(dir, targetName)
-        val replace = target.exists()
+        if (target.exists()) {
+            _state.update {
+                it.copy(toast = "A folder named \"$targetName\" already exists. Rename or move it before extracting.")
+            }
+            return
+        }
         _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ZipSupport.extract(file, target, replace) { p ->
+            val r = ZipSupport.extract(file, target, false) { p ->
                 _state.update { it.copy(progress = "Extracting" to p) }
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
