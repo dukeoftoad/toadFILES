@@ -48,6 +48,8 @@ class RecentViewModel(
         _state.update { it.copy(loading = true) }
         viewModelScope.launch(ioDispatcher) {
             val entries = if (filter == null) {
+                val indexed = container.mediaRepo.recent(limit = 400)
+                container.mediaRepo.deleteStale(indexed)
                 container.mediaRepo.recent(limit = 400)
             } else {
                 container.mediaRepo.list(filter, limit = 400)
