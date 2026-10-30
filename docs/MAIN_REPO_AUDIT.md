@@ -236,6 +236,8 @@ The repository contains 6 instrumentation tests, but the Android workflow runs l
 
 **Fix:** add an emulator matrix (at minimum API 29, 30/33 and 36) for the critical instrumentation suite. Keep device/OEM checks as a documented manual release checklist.
 
+**Status (2026-10-30):** implemented on `pr1/e-ci` — `android.yml` gained an `instrumented` job running `connectedDebugAndroidTest` on emulators for API 29, 33 and 36, gated behind the lint/unit-test build job. Device/OEM-specific storage behavior remains a manual release checklist.
+
 ---
 
 ## 5. P3 — Lower-priority defects and product polish
@@ -251,6 +253,8 @@ The guard rejects any name containing the substring `..`, not only a path compon
 **File:** `app/src/main/java/com/toadfiles/app/util/VideoThumbs.kt`.
 
 The cache key is only the file path. Replacing a video in place keeps the old cached frame until LRU eviction. Include file modification time/size in the cache key or invalidate after file operations.
+
+**Status (2026-10-30):** implemented on `pr1/e-ci` — `VideoThumbs` now keys entries by path + mtime/size (`VideoThumbKeys`), and the `VideoThumb` composable re-keys its state on that stamp, so replaced videos re-decode instead of serving stale frames. Key math is covered by `VideoThumbKeysTest`.
 
 ### P3.3 Diagnostics preference is a no-op
 
