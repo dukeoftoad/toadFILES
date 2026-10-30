@@ -297,6 +297,57 @@ These changes are **not in main** until reviewed and merged. The report findings
 4. **Fix state and UI correctness:** Recent empty-filter tabs, Categories overflow actions, request-generation guards, folder-use hydration and Quick access remapping.
 5. **Correct counts and coverage:** archive MIME coverage, paging/true counts, emulator CI, regression tests.
 
-## 9. Audit limitations
+## 9. Proposed solution and implementation plan
 
-This is a repository-wide **static audit**, not formal verification or a complete runtime QA sign-off. A source-level finding can be confirmed from code, but device-specific behavior (especially storage permission enforcement, removable volumes, MediaStore grants and package installer behavior) still needs emulator/device reproduction. No source fixes were made as part of this audit-only update; this commit updates the report on the existing PR branch.
+The safest approach is to treat filesystem integrity as the first milestone, then correct Android provider/intent behavior, and finally close UI/state/scale gaps. Avoid broad refactors until the destructive-operation invariants below are covered by tests.
+
+### 9.1 P1 remediation designs
+
+| Finding | Proposed implementation | Required acceptance checks |
+|---|---|---|
+| Symlink traversal during delete | Centralize path classification with NIO no-follow checks. If the selected node is a symlink, unlink the link itself; recurse only into confirmed real directories. Make the same no-follow policy explicit in size/copy/ZIP/trash helpers. | External target contents survive deletion; dangling links are removed; cycles terminate; ordinary nested directory deletion still works. |
+| ZIP limits bypassed by unknown sizes | Count every emitted byte from the extraction buffer, per entry and across the archive. Enforce limits regardless of ZIP header sizes; use overflow-safe arithmetic. Extract into a fresh staging directory and publish only after complete validation. | Data-descriptor/unknown-size entries hit byte and ratio limits; oversized archives leave no published partial tree; cancellation cleans staging. |
+| Destructive REPLACE | Copy to a unique sibling staging path; verify completion; move the old destination to a backup; atomically promote staging where supported; restore backup on promotion failure. Keep same-volume operations atomic where possible and document fallback semantics. | Injected read/write/full-disk/cancellation failures preserve the old destination byte-for-byte; successful replace leaves exactly one complete new destination. |
+| Trash sidecar ordering | Use a transaction-like sequence: prepare metadata temp file, move payload, atomically commit metadata; on commit failure move payload back. For permanent deletion, delete payload first and metadata only after success. Return structured per-item outcomes. | Metadata-write failure restores original path; payload-delete failure retains metadata; retry is safe and idempotent. |
+| Generic MediaStore URI | Generate generic row URIs through `MediaStore.Files.getContentUri(volumeName, id)`; carry the actual volume name rather than hard-coding external where available. Correct the unit test to compare with the platform API. | Instrumented tests can open, share and delete representative document/archive/APK rows on supported API levels. |
+
+### 9.2 P2/P3 implementation proposals
+
+| Area | Proposed implementation |
+|---|---|
+| Stale MediaStore rows | Put existence validation and best-effort stale-row cleanup in the shared repository query path so Home, Recent and category queries use the same behavior. Do not perform filesystem/provider work on the main thread. |
+| Trash sidecar naming | Move metadata into a dedicated metadata directory keyed by a stable item ID, or use an explicit record format. Never infer that a payload is metadata from its filename suffix. Add migration handling for existing sidecars. |
+| Multi-file sharing | Build ClipData containing every URI and preserve read-grant flags on the chooser and target intent. Verify each URI from a receiving test activity. |
+| Categories actions | Add a visible overflow affordance to list rows and grid cells, wire it to the same action sheet, and cover each category presentation with Compose tests. |
+| Recent empty state | Keep filter controls rendered independently of result content; show empty/loading/error states beneath the persistent filter row. |
+| Stale asynchronous results | Track and cancel the active query job per screen, or use a monotonically increasing request token. Apply results only when the token and selected category/filter still match. |
+| Folder-use persistence | Serialize initial DataStore hydration and writes with a Mutex or shared deferred initialization. Do not persist the in-memory map until hydration has completed. |
+| Quick access path remapping | Implement one subtree-aware remap transaction covering favorites, pins, hidden paths and usage counters for rename and move. |
+| Media category completeness and scale | Expand archive MIME/extension coverage; separate true aggregate counts from capped previews; add Paging or explicit truncation affordances to long lists. |
+| Cooperative cancellation | Thread cancellation checkpoints through recursive directory walks and every streaming buffer loop. Ensure cancellation closes streams and removes temporary outputs before returning. |
+| ZIP partial outputs | Write each extracted entry to a temporary sibling and rename only after successful close. If ZIP creation fails while an entry is open, abort and delete the incomplete archive rather than returning it as valid. |
+| FileProvider scope | Replace the root-wide mapping with the narrowest supported shared-storage roots. Where OEM removable volumes require a broad mapping, enforce canonical-path allowlists before generating a URI. |
+| Open-with semantics | Choose and document one supported contract: platform resolver behavior, or an in-app picker with app/file-type preference persistence. Do not promise a persistent “Always” option from a forced chooser. |
+| APK installer fallback | Treat permission-state, settings-launch and installer-launch failures as distinct outcomes. Check whether settings actually opened and retain pending selection only while a permission retry is valid. |
+| Removable volumes | Prefer supported APIs/SAF; isolate any legacy reflection behind a compatibility adapter and report unavailable volumes explicitly. Test API 26–29 and representative OEM devices. |
+| Instrumentation CI | Add emulator-backed `connectedDebugAndroidTest` jobs for representative platform versions (at least API 29, 33 and 36); keep device/OEM-only checks in a release checklist. |
+| ZIP filename validation | Normalize entry paths and reject only absolute paths, drive prefixes and actual parent-traversal components; allow harmless names containing `..`. |
+| Video thumbnail cache | Include stable file identity plus size/modified time in the cache key, or invalidate affected paths after replace/move/delete. |
+| Diagnostics preference | Remove the inert switch or label it explicitly as reserved until a real local diagnostics capability exists. |
+
+### 9.3 Delivery sequence
+
+1. **Data safety patch:** symlink-safe traversal, transactional REPLACE, trash metadata ordering, and regression/fault-injection tests.
+2. **Archive hardening patch:** actual-byte quotas, staging extraction, partial-output cleanup, safe ZIP creation failure handling and cancellation.
+3. **Android integration patch:** MediaStore URI correction, complete ClipData grants, FileProvider scope, installer outcomes and removable-volume compatibility tests.
+4. **State and UI patch:** request cancellation/tokens, DataStore hydration serialization, Quick access remapping, persistent Recent filters and reachable Categories actions.
+5. **Scale and release confidence:** MIME coverage, paging/count correctness, emulator instrumentation CI, then a device/OEM release checklist.
+
+Keep each milestone independently reviewable. Do not mark a P1 resolved based only on a code change: require its regression test and, for provider/permission behavior, an instrumented or device-level check. The existing PR's current fixes should be revalidated against these acceptance checks; this proposal does not claim the remaining findings are implemented.
+
+---
+
+## 10. Audit limitations
+
+
+This is a repository-wide **static audit**, not formal verification or a complete runtime QA sign-off. A source-level finding can be confirmed from code, but device-specific behavior (especially storage permission enforcement, removable volumes, MediaStore grants and package installer behavior) still needs emulator/device reproduction. The proposals above are a remediation plan, not implemented fixes. Only the separately listed PR changes are present on this branch.
