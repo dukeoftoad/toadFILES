@@ -232,3 +232,62 @@ The audited main commit has a failing JVM test (`TrashViewModelTest` at line 61)
 ## 6. Limitations
 
 This report is a focused post-merge static re-audit plus inspection of the latest GitHub Actions results. It is not formal verification, a full device compatibility matrix, or a substitute for runtime reproduction. Findings marked P1/P2 are based on source control flow and should be converted into regression tests before being marked resolved. The audit branch contains documentation only; no production code was changed by this re-audit.
+
+
+## 7. Product scope, feature gaps and lightweight review
+
+**Platform baseline requested for this review:** target API 36 (Android 16), minimum Android 15 (API 35). **Repository mismatch:** app/build.gradle.kts currently has targetSdk = 36 but minSdk = 26 (Android 8.0); the README likewise advertises Android 8.0+. This report therefore distinguishes the requested API 35 minimum from the actual shipped configuration. Do not claim Android 15 is the enforced minimum until minSdk and the compatibility code are deliberately changed and tested.
+
+### 7.1 High-value gaps (not automatically release blockers)
+
+| Gap | Why it matters | Lean implementation direction |
+|---|---|---|
+| Reliable Android 15/16 storage and removable-volume validation | API 35/36 behavior, permission flows, USB/SD mount/unmount and provider URI behavior are not proven by JVM tests. | Add focused API 35/36 instrumentation for permission return, volume discovery, hot-unplug, rename/move and share/open. Avoid adding a broad abstraction until device tests expose a real OEM difference. |
+| SAF/document-provider support (optional) | Current product is built around direct filesystem paths and all-files access; cloud/document providers and apps exposing only content:// trees are not equivalent to mounted folders. | Decide explicitly whether this app is a local mounted-storage manager only. If broader provider support is wanted, add a narrow SAF adapter for user-granted trees rather than replacing the working filesystem layer wholesale. |
+| Operation recovery and transparent partial results | Existing P1/P2 findings show crash recovery, cancellation and cross-volume move reporting need stronger guarantees. | Prioritize recovery, truthful per-item results and undo/retry before adding more file actions. |
+| Accessibility and large-screen validation | The README/screenshots establish the main screen set, but this audit did not establish TalkBack semantics, keyboard/focus behavior, tablet layouts or font-scale behavior. | Add Compose accessibility checks and a small set of API 35/36 UI tests at large font scale, landscape and tablet widths. Treat this as a validation gap, not a claim that every screen currently fails. |
+| Batch copy/move consistency | README explicitly describes multi-select batch share/delete/ZIP, while batch copy/move is not listed as supported in that interaction summary. | Consider batch copy/move only if user demand warrants it; reuse the existing per-item FileOps result model and do not build a second operation engine. |
+
+Intentional non-features should remain intentional: no network permission, cloud sync, ads, analytics, account system or automatic startup filesystem scan. Those absences support the app's privacy and fast-startup positioning; adding them would increase attack surface, dependencies and maintenance without strengthening the core file-manager job. An encrypted vault is already described as planned, not delivered; do not advertise it as an existing capability.
+
+### 7.2 Existing features with overlapping value
+
+These are product simplification opportunities, not defects by themselves. Confirm usage/feedback before removing them.
+
+1. **Three overlapping Home discovery mechanisms — simplify.** Manual pinned Quick Access, Favorites and automatically ranked Most Used can all become competing ways to reach the same folders. Keep one compact Quick Access surface with user-pinned entries first and an optional small “frequent” subsection. Preserve file favorites if users rely on favoriting individual files; avoid duplicating folder shortcuts in multiple sections.
+2. **Home storage hero vs. Storage screen — avoid duplicate dashboards.** Keep a concise free/used summary on Home and leave detailed per-volume/media/trash/biggest-folder analysis in Storage. Do not add a second detailed breakdown to Home.
+3. **Categories vs. Browse filters vs. Recent — define distinct jobs.** Browse should remain the authoritative filesystem view; Recent is a time-ordered activity/discovery view; Categories is useful mainly for media thumbnail galleries. Avoid implementing separate file-operation logic or duplicate sorting/filter state in each. If Categories usage is low, make it a lightweight filtered view over shared repository/actions rather than a parallel media manager.
+4. **Theme choice surface — keep one source of truth.** Dynamic color and seven hand-tuned accents are user-visible polish, but expand test/maintenance combinations. Retain system/dynamic color plus a small curated palette; remove individual palette options only if feedback shows they are unused. Do not create separate theme engines per screen.
+5. **Search-inside-text — keep opt-in and bounded.** This is a niche, potentially expensive feature. Keep disabled by default, enforce strict file-size/encoding/time limits, and expose cancellation; do not run content indexing in the background.
+
+### 7.3 Remove, defer or consolidate low-value implementation
+
+| Candidate | Recommendation | Reason / guardrail |
+|---|---|---|
+| Diagnostics placeholder/toggle | Remove or hide until diagnostics actually work. | A non-functional control creates false expectations and dead UI state. Reintroduce only with a defined export, privacy review and tests. |
+| android:requestLegacyExternalStorage="true" | Remove. | It is obsolete/ignored for modern target levels and misleading in a target-36 app. Verify legacy API behavior before removal if minSdk remains 26. |
+| Legacy storage permission and API 26–29 compatibility paths | Conditional on adopting minSdk 35. Remove READ/WRITE_EXTERNAL_STORAGE declarations, pre-R permission flow and hidden StorageVolume.getPath() reflection only after minSdk is actually raised to 35 and old-device support is intentionally dropped. | Do not remove these while minSdk = 26; doing so would break the currently declared support range. Re-test SD/USB volumes on API 35/36. |
+| Broad <root-path path="."> FileProvider mapping | Replace with the narrowest canonical roots that support the intended primary/removable volumes. | This is a security fix, not merely cleanup; coordinate with P1.1 and test every share/open flow. |
+| Duplicate screen-specific file action implementations | Consolidate behind the existing shared action sheets/repository operations. | Avoid parallel implementations that drift in permission checks, trash behavior and result reporting. Do not add a new generic framework unless it removes demonstrable duplication. |
+| Large extended icon dependency | Measure release APK and method/resource impact before changing. If meaningful, replace with a small curated icon set. | R8/resource shrinking may already remove unused code; removing the dependency without measuring could save little while increasing custom asset maintenance. |
+
+### 7.4 Dependencies and weight — measured approach
+
+- Keep Coil Compose while thumbnail grids exist; keep Coil video only while video-frame thumbnails are used. Do not replace a working image loader with custom bitmap/cache code merely to chase theoretical size savings.
+- Keep DataStore for persisted settings and coroutines for IO/state. They support core app behavior and are not obvious dead weight.
+- Keep Roborazzi, Robolectric and AndroidX test dependencies in test configurations; they do not belong in the release runtime. They provide value through visual and behavior regression coverage.
+- material-icons-extended is a plausible APK/build-weight optimization candidate, but quantify the minified release APK and dependency graph first. Do not call it a proven bloat issue from source inspection alone.
+- The app's no-network design is a concrete lightweight/security advantage. Avoid adding analytics, crash-upload SDKs, remote config, cloud backup or ad SDKs unless the product direction changes explicitly.
+
+### 7.5 API 35 minimum decision and migration checklist
+
+If Android 15 is the intended minimum, make the support contract real in a separate implementation change:
+
+- [ ] Change minSdk from 26 to 35; update README/install documentation and release metadata consistently.
+- [ ] Remove obsolete pre-Android-11 permission and volume-discovery branches only after confirming they are unreachable under the new minSdk.
+- [ ] Remove requestLegacyExternalStorage and re-check manifest permission declarations.
+- [ ] Test fresh install, upgrade, denied/revoked all-files access, permission return, primary storage, SD/USB volumes, share/open/install intents, trash and restore on API 35 and 36.
+- [ ] Update CI emulator matrix to focus on API 35 and 36 (retain older API jobs only if they serve a deliberate compatibility target); make the required device checks blocking after stable runs.
+- [ ] Publish the loss of Android 8–14 compatibility prominently; do not silently strand existing users.
+
+**Recommendation:** do not add more headline features before closing the P1 security/data-loss risks and getting main CI green. For a lean release, retain the core local file workflow, media thumbnails, Recent, Trash and essential storage overview; consolidate overlapping Home shortcuts, remove the non-working diagnostics control, and defer vault/SAF/cloud-like expansions until there is a clear product requirement. This section is a source-informed product review; it is not evidence of measured user adoption or APK-size profiling.
