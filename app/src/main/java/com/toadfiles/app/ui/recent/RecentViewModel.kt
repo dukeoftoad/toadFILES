@@ -119,16 +119,16 @@ class RecentViewModel(
             val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
             val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            val trashed = withPath.filter { (_, f) -> f.exists() }
+            val result = withPath.filter { (_, f) -> f.exists() }
                 .map { (_, f) -> f }
                 .let { Trash.trash(it, roots) }
             container.mediaRepo.deleteStale(entries)
             _state.update {
                 it.copy(
                     toast = when {
-                        trashed.size == entries.size -> "Moved ${trashed.size} item(s) to trash"
-                        noPath > 0 -> "Moved ${trashed.size} to trash · $noPath had no on-disk path"
-                        else -> "Moved ${trashed.size} of ${entries.size} to trash"
+                        result.moved.size == entries.size -> "Moved ${result.moved.size} item(s) to trash"
+                        noPath > 0 -> "Moved ${result.moved.size} to trash · $noPath had no on-disk path"
+                        else -> "Moved ${result.moved.size} of ${entries.size} to trash"
                     },
                 )
             }

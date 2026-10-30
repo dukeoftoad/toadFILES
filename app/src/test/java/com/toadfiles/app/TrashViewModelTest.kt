@@ -58,12 +58,12 @@ class TrashViewModelTest {
     private fun seedTrash(name: String, trashedAt: Long? = null): File {
         val src = File(volume, name).apply { writeText("trash me") }
         val trashed = Trash.trash(listOf(src), listOf(volume))
-        assertEquals(1, trashed.size)
+        assertEquals(1, trashed.moved.size)
         if (trashedAt != null) {
-            File(trashed[0].parentFile, trashed[0].name + ".tfmeta")
+            File(File(trashed.moved[0].parentFile, Trash.META_DIR_NAME), trashed.moved[0].name + ".tfmeta")
                 .writeText("origin=${src.absolutePath}\ntrashedAt=$trashedAt")
         }
-        return trashed[0]
+        return trashed.moved[0]
     }
 
     @Test

@@ -442,15 +442,15 @@ class BrowseViewModel(
         _state.update { it.copy(pendingDelete = null, progress = "Deleting" to OpProgress(0, files.size, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
             val roots = container.fileRepo.roots().map { it.dir }
-            val trashed = Trash.trash(files, roots)
+            val result = Trash.trash(files, roots)
             val failed = files.count { it.exists() }
             _state.update {
                 it.copy(
                     progress = null,
-                    lastTrashed = trashed.takeIf { t -> t.isNotEmpty() },
+                    lastTrashed = result.moved.takeIf { t -> t.isNotEmpty() },
                     toast = when {
-                        trashed.isEmpty() -> "Could not move anything to trash"
-                        failed > 0 -> "Moved ${trashed.size} of ${files.size} to trash ($failed failed)"
+                        result.moved.isEmpty() -> "Could not move anything to trash"
+                        failed > 0 -> "Moved ${result.moved.size} of ${files.size} to trash ($failed failed)"
                         else -> null // the undo snackbar reports success instead
                     },
                 )
