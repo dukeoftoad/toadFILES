@@ -44,16 +44,23 @@ class StorageViewModel(
     val state: StateFlow<StorageUiState> = _state
 
     private var analyzeJob: Job? = null
+    private var refreshJob: Job? = null
+
+    /** Monotonically increasing request id; only the newest refresh may apply its result. */
+    private var refreshSeq = 0L
 
     init {
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch(ioDispatcher) {
+        val token = ++refreshSeq
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch(ioDispatcher) {
             val roots = container.fileRepo.roots()
             val media = runCatching { container.mediaRepo.summaries() }.getOrDefault(emptyList())
             val trashEntries = runCatching { Trash.entries(roots.map { it.dir }) }.getOrDefault(emptyList())
+            if (token != refreshSeq) return@launch // superseded by a newer refresh
             _state.update {
                 it.copy(
                     roots = roots,

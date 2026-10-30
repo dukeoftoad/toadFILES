@@ -3,6 +3,7 @@ package com.toadfiles.app.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.FileItem
@@ -10,6 +11,7 @@ import com.toadfiles.app.domain.StorageStats
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -58,6 +60,8 @@ data class HomeUiState(
 class HomeViewModel(
     private val container: AppContainer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Injectable for tests; production uses the container's MediaStore-backed repository. */
+    private val media: MediaQuerySource = container.mediaRepo,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HomeUiState())
@@ -68,6 +72,14 @@ class HomeViewModel(
 
     /** Latest live folder-use counts (in-memory, persisted on app stop). */
     private var lastUses: Map<String, Int> = emptyMap()
+
+    /** Request ids + live jobs per lane, so an older query can never overwrite newer state. */
+    private var recentSeq = 0L
+    private var favoritesSeq = 0L
+    private var quickAccessSeq = 0L
+    private var recentJob: Job? = null
+    private var favoritesJob: Job? = null
+    private var quickAccessJob: Job? = null
 
     init {
         refreshStorage()
@@ -105,7 +117,9 @@ class HomeViewModel(
      * standard folders that still exist. Everything respects the user's removals.
      */
     private fun rebuildQuickAccess(s: ToadSettings, uses: Map<String, Int>) {
-        viewModelScope.launch(ioDispatcher) {
+        val token = ++quickAccessSeq
+        quickAccessJob?.cancel()
+        quickAccessJob = viewModelScope.launch(ioDispatcher) {
             val defaults = container.fileRepo.quickLinks()
             val defaultPaths = defaults.map { it.second.path }.toSet()
 
@@ -141,7 +155,10 @@ class HomeViewModel(
                     out += QuickAccessEntry(name, dir, pinned = false, source = QuickAccessEntry.Source.DEFAULT)
                 }
             }
-            _state.update { it.copy(quickAccess = out.take(10)) }
+            _state.update { s ->
+                if (token != quickAccessSeq) s // a newer settings snapshot took over
+                else s.copy(quickAccess = out.take(10))
+            }
 
             // Editor candidates: pins + defaults + most used + top-level folders.
             val topDirs = container.fileRepo.primaryRoot()
@@ -162,7 +179,10 @@ class HomeViewModel(
                         isDefault = f.path in defaultPaths,
                     )
                 }
-            _state.update { it.copy(quickCandidates = candidates) }
+            _state.update { s ->
+                if (token != quickAccessSeq) s // a newer settings snapshot took over
+                else s.copy(quickCandidates = candidates)
+            }
         }
     }
 
@@ -186,19 +206,25 @@ class HomeViewModel(
 
     /** Smart-recent files from the OS media library, newest first. Bounded to keep the list cheap. */
     fun refreshRecent() {
+        val token = ++recentSeq
         _state.update { it.copy(loadingRecent = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val recents = container.mediaRepo.recent(limit = RECENT_LIMIT)
+        recentJob?.cancel()
+        recentJob = viewModelScope.launch(ioDispatcher) {
+            val recents = media.recent(limit = RECENT_LIMIT)
+            if (token != recentSeq) return@launch // superseded by a newer refresh
             _state.update { it.copy(recentFiles = recents, loadingRecent = false) }
         }
     }
 
     private fun refreshFavorites(paths: Set<String>) {
-        viewModelScope.launch(ioDispatcher) {
+        val token = ++favoritesSeq
+        favoritesJob?.cancel()
+        favoritesJob = viewModelScope.launch(ioDispatcher) {
             val items = paths.mapNotNull { p ->
                 val f = File(p)
                 if (f.exists()) FileItem(f, f.name, f.isDirectory, f.length(), f.lastModified()) else null
             }.sortedBy { it.name.lowercase() }
+            if (token != favoritesSeq) return@launch // a newer settings emission took over
             _state.update { it.copy(favorites = items) }
         }
     }

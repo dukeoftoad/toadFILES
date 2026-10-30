@@ -16,9 +16,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -302,5 +304,123 @@ class SettingsRepositoryTest {
             mapOf("/storage/emulated/0/ok" to 3, "/storage/emulated/0/warm" to 1),
             repo.folderUses.value,
         )
+    }
+
+    // ---- P2.7: hydration must be serialized against persistence ----
+
+    @Test
+    fun `persistFolderUses hydrates first so an early stop cannot erase saved counts`() = runTest {
+        val store = newStore()
+        // A previous session saved its history.
+        store.edit {
+            it[stringSetPreferencesKey("folder_uses")] = setOf("7|/storage/emulated/0/Download")
+        }
+        val repo = SettingsRepository(store = store)
+        // App is stopped before the initial read completed: persisting the still-empty
+        // in-memory map would wipe the history. The repository must hydrate first.
+        repo.persistFolderUses()
+
+        val repo2 = SettingsRepository(store = store)
+        assertEquals(emptyMap<String, Int>(), repo2.folderUses.value) // not loaded yet
+        repo2.recordFolderUse("/warmup") // triggers the hydrate
+        assertEquals(7, repo2.folderUses.value["/storage/emulated/0/Download"])
+        assertEquals(1, repo2.folderUses.value["/warmup"])
+    }
+
+    @Test
+    fun `concurrent first loads hydrate exactly once and keep every count`() = runTest {
+        val store = newStore()
+        store.edit {
+            it[stringSetPreferencesKey("folder_uses")] = setOf("3|/storage/emulated/0/A")
+        }
+        val repo = SettingsRepository(store = store)
+        // Startup races: HomeViewModel reloads, a Browse visit records a use, and
+        // MainActivity.onStop persists — all before the first read finishes.
+        kotlinx.coroutines.coroutineScope {
+            launch { repo.reloadFolderUses() }
+            launch { repo.reloadFolderUses() }
+            launch { repo.recordFolderUse("/storage/emulated/0/B") }
+        }
+        assertEquals(3, repo.folderUses.value["/storage/emulated/0/A"])
+        assertEquals(1, repo.folderUses.value["/storage/emulated/0/B"])
+    }
+
+    // ---- P2.8: one subtree remap for favorites + quick access + usage counters ----
+
+    @Test
+    fun `remapSavedPaths rewrites favorites pins hidden marks and usage counters`() = runTest {
+        val repo = newRepo()
+        val old = "/storage/emulated/0/Projects"
+        repo.toggleFavorite("$old/notes.txt")            // favorite descendant
+        repo.toggleQuickPin(old)                         // exact pin
+        repo.toggleQuickPin("/storage/emulated/0/Other") // untouched pin
+        repo.hideFromQuickAccess("$old/secret")          // hidden descendant
+        repo.recordFolderUse(old)                        // usage counter, exact
+        repo.recordFolderUse("$old/sub")                 // usage counter, descendant
+        repo.recordFolderUse("/storage/emulated/0/Download") // untouched counter
+
+        repo.remapSavedPaths(old, "/storage/emulated/0/Work")
+
+        val s = repo.settings.first()
+        assertEquals(setOf("/storage/emulated/0/Work/notes.txt"), s.favorites)
+        assertEquals(setOf("/storage/emulated/0/Work", "/storage/emulated/0/Other"), s.quickPins)
+        assertEquals(setOf("/storage/emulated/0/Work/secret"), s.quickHidden)
+
+        // Live counters are remapped with their counts intact.
+        assertEquals(1, repo.folderUses.value["/storage/emulated/0/Work"])
+        assertEquals(1, repo.folderUses.value["/storage/emulated/0/Work/sub"])
+        assertEquals(1, repo.folderUses.value["/storage/emulated/0/Download"])
+        assertNull(repo.folderUses.value[old])
+        assertNull(repo.folderUses.value["$old/sub"])
+    }
+
+    @Test
+    fun `remapSavedPaths rewrites persisted folder uses on disk`() = runTest {
+        val store = newStore()
+        store.edit {
+            it[stringSetPreferencesKey("folder_uses")] = setOf(
+                "4|/vol/Old",
+                "2|/vol/Old/nested",
+                "9|/vol/Keep",
+            )
+        }
+        val repo = SettingsRepository(store = store)
+        repo.remapSavedPaths("/vol/Old", "/vol/New")
+
+        // A fresh repository hydrates the rewritten disk state, not the old paths.
+        val repo2 = SettingsRepository(store = store)
+        repo2.recordFolderUse("/warmup")
+        assertEquals(4, repo2.folderUses.value["/vol/New"])
+        assertEquals(2, repo2.folderUses.value["/vol/New/nested"])
+        assertEquals(9, repo2.folderUses.value["/vol/Keep"])
+        assertNull(repo2.folderUses.value["/vol/Old"])
+    }
+
+    @Test
+    fun `remapSavedPaths flushes remapped live counts for the next session`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        repo.recordFolderUse("/vol/Old")
+        repo.remapSavedPaths("/vol/Old", "/vol/New")
+        repo.persistFolderUses()
+
+        val repo2 = SettingsRepository(store = store)
+        repo2.recordFolderUse("/warmup")
+        assertEquals(1, repo2.folderUses.value["/vol/New"])
+        assertNull(repo2.folderUses.value["/vol/Old"])
+    }
+
+    @Test
+    fun `remapSavedPaths is a no-op when nothing matches`() = runTest {
+        val repo = newRepo()
+        repo.toggleFavorite("/vol/keep.txt")
+        repo.toggleQuickPin("/vol/keep-folder")
+
+        repo.remapSavedPaths("/somewhere-else", "/new-place")
+
+        val s = repo.settings.first()
+        assertEquals(setOf("/vol/keep.txt"), s.favorites)
+        assertEquals(setOf("/vol/keep-folder"), s.quickPins)
+        assertTrue(s.quickHidden.isEmpty())
     }
 }

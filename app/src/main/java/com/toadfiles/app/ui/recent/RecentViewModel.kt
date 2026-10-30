@@ -3,11 +3,13 @@ package com.toadfiles.app.ui.recent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -34,27 +36,39 @@ data class RecentUiState(
 class RecentViewModel(
     private val container: AppContainer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Injectable for tests; production uses the container's MediaStore-backed repository. */
+    private val media: MediaQuerySource = container.mediaRepo,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RecentUiState())
     val state: StateFlow<RecentUiState> = _state
+
+    /** Monotonically increasing request id; only the newest query may apply its result. */
+    private var requestSeq = 0L
+    private var queryJob: Job? = null
 
     init {
         refresh()
     }
 
     fun refresh() {
+        val token = ++requestSeq
         val filter = _state.value.filter
         _state.update { it.copy(loading = true) }
-        viewModelScope.launch(ioDispatcher) {
+        queryJob?.cancel()
+        queryJob = viewModelScope.launch(ioDispatcher) {
             val entries = if (filter == null) {
-                val indexed = container.mediaRepo.recent(limit = 400)
-                container.mediaRepo.deleteStale(indexed)
-                container.mediaRepo.recent(limit = 400)
+                val indexed = media.recent(limit = 400)
+                media.deleteStale(indexed)
+                media.recent(limit = 400)
             } else {
-                container.mediaRepo.list(filter, limit = 400)
+                media.list(filter, limit = 400)
             }
             _state.update { s ->
+                // A slow older query must never overwrite a newer result: drop the
+                // outcome when a newer request started or the filter moved on while
+                // this one was in flight.
+                if (token != requestSeq || s.filter != filter) return@update s
                 // Drop selections that no longer exist after a refresh.
                 val live = entries.map { it.uri.toString() }.toSet()
                 s.copy(entries = entries, loading = false, selection = s.selection.intersect(live))
