@@ -7,6 +7,7 @@ import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -34,15 +35,23 @@ class TrashViewModel(
     private val volumeRoots: List<File>
         get() = container.fileRepo.roots().map { it.dir }
 
+    /** Monotonically increasing request id; only the newest refresh may apply its result. */
+    private var refreshSeq = 0L
+    private var refreshJob: Job? = null
+
     init {
         refresh(purgeFirst = true)
     }
 
     fun refresh(purgeFirst: Boolean = false) {
+        val token = ++refreshSeq
         _state.update { it.copy(loading = true) }
-        viewModelScope.launch(ioDispatcher) {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch(ioDispatcher) {
             if (purgeFirst) Trash.purge(volumeRoots)
-            _state.update { it.copy(entries = Trash.entries(volumeRoots), loading = false) }
+            val entries = Trash.entries(volumeRoots)
+            if (token != refreshSeq) return@launch // superseded by a newer refresh
+            _state.update { it.copy(entries = entries, loading = false) }
         }
     }
 

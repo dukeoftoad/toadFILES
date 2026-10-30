@@ -3,12 +3,14 @@ package com.toadfiles.app.ui.categories
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -36,28 +38,46 @@ data class CategoriesUiState(
 class CategoriesViewModel(
     private val container: AppContainer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Injectable for tests; production uses the container's MediaStore-backed repository. */
+    private val media: MediaQuerySource = container.mediaRepo,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(CategoriesUiState())
     val state: StateFlow<CategoriesUiState> = _state
+
+    /** Request ids + live jobs per query lane: the grid summaries and the drill-in entries. */
+    private var summariesSeq = 0L
+    private var entriesSeq = 0L
+    private var summariesJob: Job? = null
+    private var entriesJob: Job? = null
 
     init {
         refresh()
     }
 
     fun refresh() {
+        val token = ++summariesSeq
         _state.update { it.copy(loading = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val summaries = runCatching { container.mediaRepo.summaries() }.getOrDefault(emptyList())
+        summariesJob?.cancel()
+        summariesJob = viewModelScope.launch(ioDispatcher) {
+            val summaries = runCatching { media.summaries() }.getOrDefault(emptyList())
+            if (token != summariesSeq) return@launch // superseded by a newer refresh
             _state.update { it.copy(summaries = summaries, loading = false) }
         }
     }
 
     fun open(category: FileCategory) {
+        val token = ++entriesSeq
         _state.update { it.copy(selected = category, entries = emptyList(), selection = emptySet(), entriesLoading = true) }
-        viewModelScope.launch(ioDispatcher) {
-            val entries = runCatching { container.mediaRepo.list(category) }.getOrDefault(emptyList())
-            _state.update { it.copy(entries = entries, entriesLoading = false) }
+        entriesJob?.cancel()
+        entriesJob = viewModelScope.launch(ioDispatcher) {
+            val entries = runCatching { media.list(category, limit = 1000) }.getOrDefault(emptyList())
+            _state.update { s ->
+                // Rapid category switches can finish out of order — apply only when this
+                // is still the newest drill-in request for the category still on screen.
+                if (token != entriesSeq || s.selected != category) return@update s
+                s.copy(entries = entries, entriesLoading = false)
+            }
         }
     }
 
@@ -107,11 +127,11 @@ class CategoriesViewModel(
             val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
             val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            val trashed = withPath.filter { (_, f) -> f.exists() }
+            val result = withPath.filter { (_, f) -> f.exists() }
                 .map { (_, f) -> f }
                 .let { Trash.trash(it, roots) }
             container.mediaRepo.deleteStale(entries)
-            val ok = trashed.size
+            val ok = result.moved.size
             _state.update {
                 it.copy(
                     toast = when {

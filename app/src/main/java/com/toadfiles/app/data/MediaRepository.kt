@@ -11,10 +11,22 @@ import com.toadfiles.app.domain.Trash
 import java.io.File
 
 /**
+ * Read-side contract over the OS media library used by the screen ViewModels. Exists so
+ * tests can substitute a delayed/controllable fake and prove that out-of-order query
+ * results never overwrite newer screen state.
+ */
+interface MediaQuerySource {
+    fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry>
+    fun recent(limit: Int): List<MediaRepository.MediaEntry>
+    fun summaries(): List<CategorySummary>
+    fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int
+}
+
+/**
  * MediaStore-backed category and recent-file queries. Real and on-demand, the OS
  * already keeps the index so there is no manual filesystem scanning here.
  */
-class MediaRepository(private val resolver: ContentResolver) {
+class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource {
 
     data class MediaEntry(
         val id: Long,
@@ -36,7 +48,7 @@ class MediaRepository(private val resolver: ContentResolver) {
      * never deleted here: their files still exist inside the trash folder.
      */
     @Suppress("DEPRECATION") // DATA is deprecated but is the only way back to a real path
-    fun list(category: FileCategory, limit: Int): List<MediaEntry> {
+    override fun list(category: FileCategory, limit: Int): List<MediaEntry> {
         val out = mutableListOf<MediaEntry>()
         val stale = mutableListOf<MediaEntry>()
         val (selection, args) = selectionFor(category)
@@ -100,13 +112,13 @@ class MediaRepository(private val resolver: ContentResolver) {
      * the MediaStore index as-is; ghost rows whose files vanished are reconciled by
      * [list] and [recent] as users browse.
      */
-    fun summaries(): List<CategorySummary> =
+    override fun summaries(): List<CategorySummary> =
         FileCategory.entries.map { c ->
             val (count, bytes) = totalsFor(c)
             CategorySummary(c, count, bytes)
         }
 
-    fun recent(limit: Int): List<MediaEntry> {
+    override fun recent(limit: Int): List<MediaEntry> {
         val out = mutableListOf<MediaEntry>()
         val stale = mutableListOf<MediaEntry>()
         try {
@@ -173,7 +185,7 @@ class MediaRepository(private val resolver: ContentResolver) {
      * Best-effort: rows we are not allowed to touch are skipped, never crash.
      * Returns how many rows were dropped.
      */
-    fun deleteStale(entries: List<MediaEntry>): Int {
+    override fun deleteStale(entries: List<MediaEntry>): Int {
         var dropped = 0
         for (e in entries) {
             val path = e.data ?: continue
