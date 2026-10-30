@@ -7,6 +7,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -141,71 +142,72 @@ fun RecentScreen(
             }
         },
     ) { padding ->
-        when {
-            state.loading && state.entries.isEmpty() -> Row(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(24.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) { CircularProgressIndicator() }
-
-            state.entries.isEmpty() -> EmptyState(
-                if (state.filter == null) {
-                    "No recent files reported by the system media library"
-                } else {
-                    "No recent ${state.filter!!.label.lowercase()} found"
-                },
-                Modifier.padding(padding),
-            )
-
-            else -> LazyColumn(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Type filter tabs (All + every category) render independently of the result
+            // state: picking a filter with no results must never hide the only way back
+            // to "All" (the old empty state swallowed the whole filter row).
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(vertical = 6.dp),
             ) {
-                // Type filter tabs: All + every category.
                 item {
-                    LazyRow(
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = state.filter == null,
-                                onClick = { vm.setFilter(null) },
-                                label = { Text("All") },
-                            )
-                        }
-                        items(FileCategory.entries) { c ->
-                            FilterChip(
-                                selected = state.filter == c,
-                                onClick = { vm.setFilter(c) },
-                                label = { Text(c.label) },
-                            )
-                        }
-                    }
-                }
-                items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
-                    RecentRow(
-                        e = e,
-                        selected = e.uri.toString() in state.selection,
-                        onClick = {
-                            if (inSelection) {
-                                vm.toggleSelection(e)
-                            } else if (!Intents.openContent(context, e.uri, e.mime)) {
-                                vm.requestToast("No app can open this file")
-                            }
-                        },
-                        // Press-and-hold starts multi-select, like Browse; the row's
-                        // ⋮ keeps the action sheet one tap away.
-                        onLongClick = { vm.toggleSelection(e) },
-                        onMore = { actionSheetFor = e },
+                    FilterChip(
+                        selected = state.filter == null,
+                        onClick = { vm.setFilter(null) },
+                        label = { Text("All") },
                     )
                 }
-                item { Spacer(Modifier.height(16.dp)) }
+                items(FileCategory.entries) { c ->
+                    FilterChip(
+                        selected = state.filter == c,
+                        onClick = { vm.setFilter(c) },
+                        label = { Text(c.label) },
+                    )
+                }
+            }
+            when {
+                state.loading && state.entries.isEmpty() -> Row(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) { CircularProgressIndicator() }
+
+                state.entries.isEmpty() -> EmptyState(
+                    if (state.filter == null) {
+                        "No recent files reported by the system media library"
+                    } else {
+                        "No recent ${state.filter!!.label.lowercase()} found"
+                    },
+                    Modifier.fillMaxSize(),
+                )
+
+                else -> LazyColumn(Modifier.fillMaxSize()) {
+                    items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
+                        RecentRow(
+                            e = e,
+                            selected = e.uri.toString() in state.selection,
+                            onClick = {
+                                if (inSelection) {
+                                    vm.toggleSelection(e)
+                                } else if (!Intents.openContent(context, e.uri, e.mime)) {
+                                    vm.requestToast("No app can open this file")
+                                }
+                            },
+                            // Press-and-hold starts multi-select, like Browse; the row's
+                            // ⋮ keeps the action sheet one tap away.
+                            onLongClick = { vm.toggleSelection(e) },
+                            onMore = { actionSheetFor = e },
+                        )
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
             }
         }
     }

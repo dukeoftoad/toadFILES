@@ -2,6 +2,7 @@ package com.toadfiles.app.ui.categories
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -465,6 +466,7 @@ private fun CategoryEntries(
                     selected = e.uri.toString() in state.selection,
                     onClick = { onEntryTap(e) },
                     onLongClick = { onEntryLongPress(e) },
+                    onMore = { onEntryMore(e) },
                 )
             }
         }
@@ -484,7 +486,11 @@ private fun CategoryEntries(
     }
 }
 
-/** Square thumbnail cell for image/video grids, with a selection check overlay. */
+/**
+ * Square thumbnail cell for image/video grids, with a selection check overlay and a
+ * discoverable ⋮ affordance for the per-item action sheet (long-press starts
+ * multi-select, so the sheet needs its own always-visible trigger).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaGridCell(
@@ -492,6 +498,7 @@ private fun MediaGridCell(
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onMore: () -> Unit,
 ) {
     Box(
         Modifier
@@ -530,6 +537,27 @@ private fun MediaGridCell(
                     contentDescription = "Selected",
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.padding(4.dp),
+                )
+            }
+        } else {
+            // Overflow affordance for the per-entry action sheet. The scrim disc keeps
+            // it visible over any thumbnail; it sits where the selection check goes,
+            // and the two never render at the same time.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f))
+                    .clickable(onClickLabel = "More actions") { onMore() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.MoreVert,
+                    contentDescription = "More actions",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
                 )
             }
         }
@@ -581,6 +609,17 @@ private fun MediaRow(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            // Row overflow: the action sheet lives here because long-press
+            // is reserved for starting multi-select.
+            if (!selected) {
+                IconButton(onClick = onMore) {
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "More actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (selected) {
                 Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)

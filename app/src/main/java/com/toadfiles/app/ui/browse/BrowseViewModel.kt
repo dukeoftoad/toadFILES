@@ -402,7 +402,7 @@ class BrowseViewModel(
     fun rename(file: File, newName: String) {
         viewModelScope.launch(ioDispatcher) {
             val dest = FileOps.rename(file, newName)
-            if (dest != null) remapFavorites(file.path, dest.path)
+            if (dest != null) remapSavedPaths(file.path, dest.path)
             _state.update {
                 it.copy(
                     pendingRename = null,
@@ -416,19 +416,20 @@ class BrowseViewModel(
         }
     }
 
-    /** Favorites pointing at (or under) a renamed/moved path keep working. */
-    private suspend fun remapFavorites(oldPath: String, newPath: String) {
-        val favs = _state.value.favoritePaths
-        if (favs.any { it == oldPath || it.startsWith("$oldPath/") }) {
-            settingsRepo.remapFavorites(oldPath, newPath)
-        }
+    /**
+     * Everything saved against (or under) a renamed/moved path keeps working: favorites,
+     * Quick access pins, hidden marks and "most used" folder-use counters are remapped
+     * in one atomic transaction (see [SettingsRepository.remapSavedPaths]).
+     */
+    private suspend fun remapSavedPaths(oldPath: String, newPath: String) {
+        settingsRepo.remapSavedPaths(oldPath, newPath)
     }
 
     private suspend fun remapMovedFavorites(sources: List<File>, target: File) {
         for (src in sources) {
             if (src.exists()) continue
             val dest = File(target, src.name)
-            if (dest.exists()) remapFavorites(src.path, dest.path)
+            if (dest.exists()) remapSavedPaths(src.path, dest.path)
         }
     }
 
