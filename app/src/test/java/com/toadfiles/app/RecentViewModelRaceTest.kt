@@ -69,6 +69,7 @@ class RecentViewModelRaceTest {
 
     /** Applies only when told to; everything else answers instantly and empty. */
     private class GatedMedia : MediaQuerySource {
+        val imagesParked = CountDownLatch(1)
         val imagesGate = CountDownLatch(1)
         val imagesReturned = AtomicInteger()
         val videosEntry = entry(2, "video.mp4", FileCategory.VIDEOS)
@@ -76,6 +77,9 @@ class RecentViewModelRaceTest {
         override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> =
             when (category) {
                 FileCategory.IMAGES -> {
+                    // Prove the query really reached the gate before the test moves on,
+                    // otherwise cancel-before-start makes the release below never happen.
+                    imagesParked.countDown()
                     imagesGate.await()
                     imagesReturned.incrementAndGet()
                     listOf(entry(1, "image.jpg", FileCategory.IMAGES))
@@ -118,6 +122,10 @@ class RecentViewModelRaceTest {
 
         // User picks Images — that query parks on the latch.
         vm.setFilter(FileCategory.IMAGES)
+        // Deterministic: wait until the Images query is actually parked, so the newer
+        // filter below cancels a RUNNING query (the stale-result case), not an
+        // undispatched one.
+        assertTrue(media.imagesParked.await(10, TimeUnit.SECONDS))
         // User gives up and picks Videos — fast query lands while Images is still pending.
         vm.setFilter(FileCategory.VIDEOS)
 

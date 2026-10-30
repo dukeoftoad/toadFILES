@@ -57,8 +57,19 @@ object Intents {
         return mapped ?: "application/octet-stream"
     }
 
-    fun contentUri(context: Context, file: File): Uri =
-        FileProvider.getUriForFile(context, PROVIDER_AUTHORITY, file)
+    /**
+     * Content URI for sharing/opening a real file. The provider config keeps a root-path
+     * catch-all for OEM removable volumes, so [UriGuard] is the second line of defence:
+     * system/internal locations (/data, /proc, /sys, …) are refused before a URI exists.
+     * Throws IllegalArgumentException for refused paths; every caller catches it and
+     * reports an honest failure or skips the item.
+     */
+    fun contentUri(context: Context, file: File): Uri {
+        require(UriGuard.isShareablePath(file.absolutePath)) {
+            "Refusing to hand a system path to other apps: ${file.absolutePath}"
+        }
+        return FileProvider.getUriForFile(context, PROVIDER_AUTHORITY, file)
+    }
 
     // ---------- open ----------
 
