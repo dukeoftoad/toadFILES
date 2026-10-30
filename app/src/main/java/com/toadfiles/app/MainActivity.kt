@@ -42,8 +42,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.ui.ToadNavHost
 import com.toadfiles.app.ui.theme.ToadTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -83,6 +85,15 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Flush the in-memory "most used" folder counts to DataStore while we're
+        // backgrounded — visits are never persisted one by one.
+        (application as? ToadApp)?.container?.appScope?.launch(Dispatchers.IO) {
+            runCatching { container.settingsRepo.persistFolderUses() }
         }
     }
 

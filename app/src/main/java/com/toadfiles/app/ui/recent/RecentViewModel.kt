@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class RecentUiState(
+    /** Active type filter; null = All. */
+    val filter: FileCategory? = null,
     val entries: List<MediaRepository.MediaEntry> = emptyList(),
     val loading: Boolean = false,
     /** Multi-select, keyed by content-uri string. */
@@ -41,15 +44,27 @@ class RecentViewModel(
     }
 
     fun refresh() {
+        val filter = _state.value.filter
         _state.update { it.copy(loading = true) }
         viewModelScope.launch(ioDispatcher) {
-            val entries = container.mediaRepo.recent()
+            val entries = if (filter == null) {
+                container.mediaRepo.recent(limit = 400)
+            } else {
+                container.mediaRepo.list(filter, limit = 400)
+            }
             _state.update { s ->
                 // Drop selections that no longer exist after a refresh.
                 val live = entries.map { it.uri.toString() }.toSet()
                 s.copy(entries = entries, loading = false, selection = s.selection.intersect(live))
             }
         }
+    }
+
+    /** Switches the type filter tab (All / Images / Videos / …) and reloads. */
+    fun setFilter(filter: FileCategory?) {
+        if (_state.value.filter == filter) return
+        _state.update { it.copy(filter = filter) }
+        refresh()
     }
 
     // ---------- multi-select ----------

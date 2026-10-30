@@ -20,7 +20,7 @@ import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -45,15 +45,16 @@ import com.toadfiles.app.domain.Format
  * not shown — we never render a disabled row that hints at features the user can't reach.
  *
  * The sheet is deliberately narrow: Open / Share / Rename / Copy / Move / Delete /
- * Details / Zip / Favorite / Copy path / Open with / Select. Anything fancier lives in
- * the Browse multi-select toolbar (select-all, bulk zip, etc.) which is reached via the
- * "Select more" action here.
+ * Details / Zip / Favorite / Pin to Home / Copy path / Open with. Multi-select is
+ * started by long-pressing a row (Google Files style) — no extra entry point needed —
+ * and the bulk toolbar (select-all, bulk zip, …) takes over from there.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileActionSheet(
     item: FileItem,
     isFavorite: Boolean,
+    pinnedToHome: Boolean = false,
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onRename: () -> Unit,
@@ -66,7 +67,7 @@ fun FileActionSheet(
     onToggleFavorite: () -> Unit,
     onCopyPath: () -> Unit,
     onOpenWith: () -> Unit,
-    onSelect: () -> Unit,
+    onTogglePin: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -134,13 +135,17 @@ fun FileActionSheet(
                 if (isFavorite) "Remove favorite" else "Add favorite",
                 onClick = onToggleFavorite,
             )
+            if (item.isDir && onTogglePin != null) {
+                SheetRow(
+                    Icons.Outlined.PushPin,
+                    if (pinnedToHome) "Unpin from Home" else "Pin to Home",
+                    onClick = onTogglePin,
+                )
+            }
             if (!item.isDir) {
                 SheetRow(Icons.Outlined.ContentPaste, "Copy path", onClick = onCopyPath)
                 SheetRow(Icons.Outlined.MoreHoriz, "Open with…", onClick = onOpenWith)
             }
-
-            // Multi-select entry point
-            SheetRow(Icons.Outlined.SelectAll, "Select more", onClick = onSelect)
 
             Spacer(Modifier.height(8.dp))
         }

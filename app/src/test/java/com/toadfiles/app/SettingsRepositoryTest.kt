@@ -3,6 +3,7 @@ package com.toadfiles.app
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.toadfiles.app.data.SettingsRepository
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.data.ToadSettings
@@ -239,5 +240,67 @@ class SettingsRepositoryTest {
         repo.setDiagnosticsEnabled(true)
         repo.setThemeMode(ThemeMode.DARK)
         assertEquals(true, repo.settings.first().diagnosticsEnabled)
+    }
+
+    @Test
+    fun `quick pins toggle and always unhide`() = runTest {
+        val repo = newRepo()
+        val path = "/storage/emulated/0/Movies"
+
+        repo.toggleQuickPin(path)
+        assertEquals(setOf(path), repo.settings.first().quickPins)
+
+        // Hiding removes the pin; re-pinning clears the hidden mark.
+        repo.hideFromQuickAccess(path)
+        assertTrue(repo.settings.first().quickPins.isEmpty())
+        assertEquals(setOf(path), repo.settings.first().quickHidden)
+
+        repo.toggleQuickPin(path)
+        assertEquals(setOf(path), repo.settings.first().quickPins)
+        assertTrue(repo.settings.first().quickHidden.isEmpty())
+    }
+
+    @Test
+    fun `folder use counts accumulate in memory and survive persist-reload`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        val a = "/storage/emulated/0/Download"
+        val b = "/storage/emulated/0/DCIM"
+
+        repo.recordFolderUse(a)
+        repo.recordFolderUse(a)
+        repo.recordFolderUse(b)
+
+        // Live counts are visible immediately, without any disk write.
+        assertEquals(mapOf(a to 2, b to 1), repo.folderUses.value)
+
+        // Persist, then a fresh repository on the same store hydrates them back.
+        repo.persistFolderUses()
+        val repo2 = SettingsRepository(store = store)
+        assertEquals(emptyMap<String, Int>(), repo2.folderUses.value) // not loaded yet
+        repo2.recordFolderUse("/warmup") // triggers the hydrate
+        assertEquals(2, repo2.folderUses.value[a])
+        assertEquals(1, repo2.folderUses.value[b])
+        assertEquals(1, repo2.folderUses.value["/warmup"])
+    }
+
+    @Test
+    fun `folder use entries with junk are ignored on read`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit {
+            it[stringSetPreferencesKey("folder_uses")] = setOf(
+                "3|/storage/emulated/0/ok",
+                "not-a-count|/x",
+                "5|",
+                "missing-separator",
+            )
+        }
+        // Recording triggers the hydrate from disk; junk lines must be skipped.
+        repo.recordFolderUse("/storage/emulated/0/warm")
+        assertEquals(
+            mapOf("/storage/emulated/0/ok" to 3, "/storage/emulated/0/warm" to 1),
+            repo.folderUses.value,
+        )
     }
 }

@@ -113,7 +113,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     initialDir = entry.arguments?.getString("dir").orEmpty(),
                     bottomPadding = padding.calculateBottomPadding(),
                     onNavigateUp = { navController.popBackStack() },
-                    onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
                 )
             }
             composable(Routes.RECENT) {

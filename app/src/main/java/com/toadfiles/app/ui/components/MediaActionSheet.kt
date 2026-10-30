@@ -16,7 +16,6 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.InstallMobile
-import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Delete
@@ -39,11 +38,12 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.Format
 
 /**
- * Long-press action sheet for MediaStore entries (Categories drill-in, Recent). Mirrors the
- * Mi-Files-style [FileActionSheet] used in Browse, trimmed to the actions that make sense for
- * media-library rows: everything works on the content URI, and path-dependent actions
- * (delete to trash, copy path, show in folder) are only offered when the on-disk path is
- * known. Actions that don't apply are hidden, never rendered disabled.
+ * Action sheet for MediaStore entries (Categories drill-in, Recent), opened from a row's
+ * overflow button. Mirrors the [FileActionSheet] used in Browse, trimmed to the actions that
+ * make sense for media-library rows: everything works on the content URI, and path-dependent
+ * actions (delete to trash, copy path, show in folder) are only offered when the on-disk
+ * path is known. Actions that don't apply are hidden, never rendered disabled. Multi-select
+ * is started by long-pressing a row, so the sheet needs no "Select more" entry.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +56,6 @@ fun MediaActionSheet(
     onDelete: (() -> Unit)?,
     onDetails: () -> Unit,
     onCopyPath: (() -> Unit)?,
-    onSelect: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -110,7 +109,6 @@ fun MediaActionSheet(
                 MediaSheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
             }
             MediaSheetRow(Icons.Outlined.Info, "Details", onClick = onDetails)
-            MediaSheetRow(Icons.Outlined.SelectAll, "Select more", onClick = onSelect)
 
             Spacer(Modifier.height(8.dp))
         }

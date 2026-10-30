@@ -14,8 +14,11 @@ import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import java.io.File
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -40,6 +43,10 @@ data class ToadSettings(
      * signals intent for the privacy promise ("no diagnostics by default").
      */
     val diagnosticsEnabled: Boolean = false,
+    /** Folders the user explicitly pinned to Home's Quick access. */
+    val quickPins: Set<String> = emptySet(),
+    /** Folders the user removed from Quick access (defaults or auto "most used" entries). */
+    val quickHidden: Set<String> = emptySet(),
 ) {
     companion object {
         const val SEARCH_LIMIT_MIN = 10
@@ -55,6 +62,11 @@ class SettingsRepository(
     /** Injectable for tests; production uses the app-wide singleton DataStore. */
     private val store: DataStore<Preferences>,
 ) {
+    companion object {
+        /** Upper bound on how many distinct folders the "most used" tracker remembers. */
+        const val MAX_TRACKED_FOLDERS = 100
+    }
+
     constructor(context: Context) : this(context.dataStore)
 
     private object Keys {
@@ -69,6 +81,9 @@ class SettingsRepository(
         val SEARCH_LIMIT = intPreferencesKey("search_limit")
         val CONTENT_SEARCH = booleanPreferencesKey("content_search")
         val DIAGNOSTICS = booleanPreferencesKey("diagnostics_enabled")
+        val QUICK_PINS = stringSetPreferencesKey("quick_pins")
+        val QUICK_HIDDEN = stringSetPreferencesKey("quick_hidden")
+        val FOLDER_USES = stringSetPreferencesKey("folder_uses")
     }
 
     val settings: Flow<ToadSettings> = store.data.map { p ->
@@ -92,6 +107,8 @@ class SettingsRepository(
             ) ?: ToadSettings.SEARCH_LIMIT_DEFAULT,
             contentSearch = p[Keys.CONTENT_SEARCH] ?: false,
             diagnosticsEnabled = p[Keys.DIAGNOSTICS] ?: false,
+            quickPins = p[Keys.QUICK_PINS] ?: emptySet(),
+            quickHidden = p[Keys.QUICK_HIDDEN] ?: emptySet(),
         )
     }
 
@@ -107,6 +124,73 @@ class SettingsRepository(
     }
     suspend fun setContentSearch(enabled: Boolean) = store.edit { it[Keys.CONTENT_SEARCH] = enabled }
     suspend fun setDiagnosticsEnabled(enabled: Boolean) = store.edit { it[Keys.DIAGNOSTICS] = enabled }
+
+    // ---------- Quick access (Home) ----------
+
+    /** Pins or unpins a folder for Home's Quick access row. */
+    suspend fun toggleQuickPin(path: String) = store.edit { p ->
+        val cur = p[Keys.QUICK_PINS] ?: emptySet()
+        p[Keys.QUICK_PINS] = if (path in cur) cur - path else cur + path
+        // (Re)pinning always makes the folder visible again.
+        p[Keys.QUICK_HIDDEN] = (p[Keys.QUICK_HIDDEN] ?: emptySet()) - path
+    }
+
+    /** Removes a folder from Quick access: unpins it and hides it so defaults/auto entries never resurface it. */
+    suspend fun hideFromQuickAccess(path: String) = store.edit { p ->
+        p[Keys.QUICK_PINS] = (p[Keys.QUICK_PINS] ?: emptySet()) - path
+        p[Keys.QUICK_HIDDEN] = (p[Keys.QUICK_HIDDEN] ?: emptySet()) + path
+    }
+
+    /**
+     * Live "most used" folder counts. Kept in memory while the app runs — a DataStore
+     * write per folder visit would hammer flash and contend with settings writes — and
+     * flushed to disk by [persistFolderUses] when the app goes to the background.
+     */
+    private val _folderUses = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val folderUses: StateFlow<Map<String, Int>> = _folderUses
+    private var usesLoaded = false
+
+    /** Loads persisted counts once (call at startup so previous sessions surface immediately). */
+    suspend fun reloadFolderUses() {
+        if (usesLoaded) return
+        usesLoaded = true
+        _folderUses.value = parseFolderUses(store.data.first()[Keys.FOLDER_USES])
+    }
+
+    /** Counts one folder visit. In-memory only; persists via [persistFolderUses]. */
+    suspend fun recordFolderUse(path: String) {
+        reloadFolderUses()
+        _folderUses.update { uses ->
+            val next = uses + (path to (uses[path] ?: 0) + 1)
+            if (next.size > MAX_TRACKED_FOLDERS) {
+                next.entries.sortedByDescending { it.value }.take(MAX_TRACKED_FOLDERS)
+                    .associate { it.key to it.value }
+            } else {
+                next
+            }
+        }
+    }
+
+    /** Persists the in-memory visit counts (MainActivity.onStop). */
+    suspend fun persistFolderUses() {
+        store.edit { p ->
+            p[Keys.FOLDER_USES] = _folderUses.value.entries
+                .map { "${it.value}|${it.key}" }.toSet()
+        }
+    }
+
+    private fun parseFolderUses(raw: Set<String>?): Map<String, Int> {
+        if (raw.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, Int>()
+        for (entry in raw) {
+            val sep = entry.indexOf('|')
+            if (sep <= 0) continue
+            val count = entry.substring(0, sep).toIntOrNull() ?: continue
+            val path = entry.substring(sep + 1)
+            if (path.isNotEmpty()) out[path] = count
+        }
+        return out
+    }
 
     suspend fun toggleFavorite(path: String) = store.edit { p ->
         val cur = p[Keys.FAVORITES] ?: emptySet()

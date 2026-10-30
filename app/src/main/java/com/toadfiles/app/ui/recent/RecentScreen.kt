@@ -16,18 +16,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -149,7 +152,11 @@ fun RecentScreen(
             ) { CircularProgressIndicator() }
 
             state.entries.isEmpty() -> EmptyState(
-                "No recent files reported by the system media library",
+                if (state.filter == null) {
+                    "No recent files reported by the system media library"
+                } else {
+                    "No recent ${state.filter!!.label.lowercase()} found"
+                },
                 Modifier.padding(padding),
             )
 
@@ -158,6 +165,29 @@ fun RecentScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
+                // Type filter tabs: All + every category.
+                item {
+                    LazyRow(
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = state.filter == null,
+                                onClick = { vm.setFilter(null) },
+                                label = { Text("All") },
+                            )
+                        }
+                        items(FileCategory.entries) { c ->
+                            FilterChip(
+                                selected = state.filter == c,
+                                onClick = { vm.setFilter(c) },
+                                label = { Text(c.label) },
+                            )
+                        }
+                    }
+                }
                 items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
                     RecentRow(
                         e = e,
@@ -169,9 +199,10 @@ fun RecentScreen(
                                 vm.requestToast("No app can open this file")
                             }
                         },
-                        onLongClick = {
-                            if (inSelection) vm.toggleSelection(e) else actionSheetFor = e
-                        },
+                        // Press-and-hold starts multi-select, like Browse; the row's
+                        // ⋮ keeps the action sheet one tap away.
+                        onLongClick = { vm.toggleSelection(e) },
+                        onMore = { actionSheetFor = e },
                     )
                 }
                 item { Spacer(Modifier.height(16.dp)) }
@@ -228,10 +259,6 @@ fun RecentScreen(
                     }
                 }
             },
-            onSelect = {
-                actionSheetFor = null
-                vm.toggleSelection(entry)
-            },
             onDismiss = { actionSheetFor = null },
         )
     }
@@ -275,6 +302,7 @@ private fun RecentRow(
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onMore: () -> Unit,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
     Surface(color = bg, shape = RoundedCornerShape(12.dp)) {
@@ -327,6 +355,17 @@ private fun RecentRow(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            // Row overflow: the action sheet lives here because long-press
+            // is reserved for starting multi-select.
+            if (!selected) {
+                IconButton(onClick = onMore) {
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "More actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (selected) {
                 Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)

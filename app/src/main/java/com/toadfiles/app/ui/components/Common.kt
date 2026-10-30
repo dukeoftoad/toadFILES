@@ -27,11 +27,13 @@ import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.InstallMobile
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -75,6 +77,7 @@ fun FileRow(
     subtitle: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onMore: (() -> Unit)? = null,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
     else Color.Transparent
@@ -141,6 +144,17 @@ fun FileRow(
             }
             if (isFavorite) {
                 Text("★", color = MaterialTheme.colorScheme.tertiary)
+            }
+            // Row overflow: the single-item action sheet lives here because
+            // long-press is reserved for starting multi-select.
+            if (onMore != null && !selected) {
+                IconButton(onClick = onMore) {
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "More actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (selected) {
                 Checkbox(checked = true, onCheckedChange = null)

@@ -4,19 +4,47 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.StorageStats
+import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** One tile in Home's Quick access grid. */
+data class QuickAccessEntry(
+    val label: String,
+    val dir: File,
+    val pinned: Boolean,
+    val source: Source,
+) {
+    enum class Source { PINNED, MOST_USED, DEFAULT }
+}
+
+/** One row inside the Quick access editor dialog. */
+data class QuickCandidate(
+    val name: String,
+    val path: String,
+    val shown: Boolean,
+    val isDefault: Boolean,
+)
+
 data class HomeUiState(
     val storage: StorageStats? = null,
-    val quickLinks: List<Pair<String, File>> = emptyList(),
+    /**
+     * Quick access tiles: user pins first (most-visited pins first), then up to four
+     * "most used" folders the user never pinned or removed, then the standard folders.
+     * Fully editable — see the editor dialog on Home.
+     */
+    val quickAccess: List<QuickAccessEntry> = emptyList(),
+    /** Candidates for the Quick access editor. */
+    val quickCandidates: List<QuickCandidate> = emptyList(),
     val favorites: List<FileItem> = emptyList(),
     /**
      * Smart-recent feed on Home. Replaces the old Categories section + the standalone Recent
@@ -35,9 +63,16 @@ class HomeViewModel(
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state
 
+    /** Latest settings snapshot, so refresh() can rebuild Quick access without waiting for an emission. */
+    private var lastSettings: ToadSettings = ToadSettings()
+
+    /** Latest live folder-use counts (in-memory, persisted on app stop). */
+    private var lastUses: Map<String, Int> = emptyMap()
+
     init {
         refreshStorage()
-        refreshQuickLinks()
+        // Surface "most used" from previous sessions right away.
+        viewModelScope.launch { container.settingsRepo.reloadFolderUses() }
         refreshRecent()
         viewModelScope.launch {
             // One-shot cleanup of favorites pointing at paths that no longer exist
@@ -46,8 +81,13 @@ class HomeViewModel(
             container.settingsRepo.pruneDeadFavorites()
         }
         viewModelScope.launch {
-            container.settingsRepo.settings.collect { s ->
+            combine(container.settingsRepo.settings, container.settingsRepo.folderUses) { s, uses ->
+                s to uses
+            }.collect { (s, uses) ->
+                lastSettings = s
+                lastUses = uses
                 refreshFavorites(s.favorites)
+                rebuildQuickAccess(s, uses)
             }
         }
     }
@@ -59,11 +99,89 @@ class HomeViewModel(
         }
     }
 
-    fun refreshQuickLinks() {
+    /**
+     * Builds the Quick access row: explicit user pins first (most-visited pins first),
+     * then up to four "most used" folders the user never pinned or removed, then the
+     * standard folders that still exist. Everything respects the user's removals.
+     */
+    private fun rebuildQuickAccess(s: ToadSettings, uses: Map<String, Int>) {
         viewModelScope.launch(ioDispatcher) {
-            val links = container.fileRepo.quickLinks()
-            _state.update { it.copy(quickLinks = links) }
+            val defaults = container.fileRepo.quickLinks()
+            val defaultPaths = defaults.map { it.second.path }.toSet()
+
+            val out = mutableListOf<QuickAccessEntry>()
+            // 1. Pinned folders (existing ones only), most-visited first.
+            s.quickPins.mapNotNull { p -> File(p).takeIf { it.isDirectory } }
+                .sortedWith(
+                    compareByDescending<File> { uses[it.path] ?: 0 }
+                        .thenBy { it.name.lowercase() },
+                )
+                .forEach { out += QuickAccessEntry(it.name, it, pinned = true, source = QuickAccessEntry.Source.PINNED) }
+
+            // 2. Most used (never pinned, never removed), at least two visits, top four.
+            uses.entries
+                .filter { it.value >= 2 }
+                .sortedWith(
+                    compareByDescending<Map.Entry<String, Int>> { it.value }
+                        .thenBy { it.key.lowercase() },
+                )
+                .mapNotNull { (p, _) ->
+                    File(p).takeIf {
+                        it.isDirectory && p !in s.quickPins && p !in s.quickHidden
+                    }
+                }
+                .take(4)
+                .forEach {
+                    out += QuickAccessEntry(it.name, it, pinned = false, source = QuickAccessEntry.Source.MOST_USED)
+                }
+
+            // 3. Standard defaults, unless already shown or removed by the user.
+            defaults.forEach { (name, dir) ->
+                if (dir.path !in s.quickHidden && out.none { it.dir.path == dir.path }) {
+                    out += QuickAccessEntry(name, dir, pinned = false, source = QuickAccessEntry.Source.DEFAULT)
+                }
+            }
+            _state.update { it.copy(quickAccess = out.take(10)) }
+
+            // Editor candidates: pins + defaults + most used + top-level folders.
+            val topDirs = container.fileRepo.primaryRoot()
+                .listFiles()
+                .orEmpty()
+                .filter { it.isDirectory && !it.name.startsWith(".") && it.name != Trash.DIR_NAME }
+                .sortedBy { it.name.lowercase() }
+                .take(15)
+            val candidates = (s.quickPins + defaultPaths + uses.keys + topDirs.map { it.path })
+                .distinct()
+                .mapNotNull { p -> File(p).takeIf { it.isDirectory } }
+                .sortedBy { it.name.lowercase() }
+                .map { f ->
+                    QuickCandidate(
+                        name = defaults.firstOrNull { it.second.path == f.path }?.first ?: f.name,
+                        path = f.path,
+                        shown = f.path !in s.quickHidden,
+                        isDefault = f.path in defaultPaths,
+                    )
+                }
+            _state.update { it.copy(quickCandidates = candidates) }
         }
+    }
+
+    // ---------- quick access editing ----------
+
+    /** Editor checkbox: shown -> pin (and unhide); hidden -> unpin and hide. */
+    fun setQuickShown(path: String, shown: Boolean) {
+        viewModelScope.launch {
+            if (shown) {
+                container.settingsRepo.toggleQuickPin(path)
+            } else {
+                container.settingsRepo.hideFromQuickAccess(path)
+            }
+        }
+    }
+
+    /** Long-press a tile: removes it (unpin + hide). */
+    fun removeQuickAccess(path: String) {
+        viewModelScope.launch { container.settingsRepo.hideFromQuickAccess(path) }
     }
 
     /** Smart-recent files from the OS media library, newest first. Bounded to keep the list cheap. */
@@ -88,8 +206,10 @@ class HomeViewModel(
     /** Re-reads everything that can change while the user is in other tabs. */
     fun refresh() {
         refreshStorage()
-        refreshQuickLinks()
         refreshRecent()
+        // Quick access depends on the disk (new/deleted folders), so rebuild it on
+        // every re-entry — not only when settings change.
+        rebuildQuickAccess(lastSettings, lastUses)
     }
 
     fun toggleFavorite(path: String) {

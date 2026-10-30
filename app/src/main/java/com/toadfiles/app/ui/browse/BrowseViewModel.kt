@@ -44,6 +44,8 @@ data class BrowseUiState(
     val filterMode: FilterMode = FilterMode.ALL,
     val settings: ToadSettings = ToadSettings(),
     val favoritePaths: Set<String> = emptySet(),
+    /** Folders pinned to Home's Quick access (drives the folder sheet's pin label). */
+    val quickPins: Set<String> = emptySet(),
     val clipboard: Clipboard.Clip? = null,
     /** Number of items currently in the trash across all known volumes; -1 means "not loaded". */
     val trashCount: Int = -1,
@@ -51,6 +53,9 @@ data class BrowseUiState(
     val pendingNewFolder: Boolean = false,
     val pendingRename: File? = null,
     val pendingDelete: List<File>? = null,
+    /** Batch waiting for the user to type an archive name in the Zip dialog. */
+    val pendingZipFiles: List<File>? = null,
+    val pendingZipName: String = "",
     val pendingConflict: PendingConflict? = null,
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
@@ -91,9 +96,15 @@ class BrowseViewModel(
                     it.copy(
                         settings = s,
                         favoritePaths = s.favorites,
+                        quickPins = s.quickPins,
                     )
                 }
-                _state.value.dir?.let { d -> load(d) }
+                // Re-list only when a setting that affects the listing changed; other
+                // emissions (quick pins, favorites, …) must not disturb the view.
+                val relevant = Triple(s.showHidden, s.sortMode, s.sortOrder)
+                val changed = relevant != lastListSettings
+                lastListSettings = relevant
+                if (changed) _state.value.dir?.let { d -> load(d) }
             }
         }
         viewModelScope.launch {
@@ -104,7 +115,14 @@ class BrowseViewModel(
         refreshTrashCount()
     }
 
-    fun openDir(dir: File) = load(dir)
+    fun openDir(dir: File) {
+        // Count visits (skipping the trash) so Home's Quick access can surface
+        // most-used folders. In-memory only — the repository batches the disk write.
+        if (dir.isDirectory && dir.name != Trash.DIR_NAME) {
+            viewModelScope.launch { settingsRepo.recordFolderUse(dir.absolutePath) }
+        }
+        load(dir)
+    }
 
     fun load(dir: File) {
         if (browseRoot == null) browseRoot = dir
@@ -344,6 +362,20 @@ class BrowseViewModel(
 
     // ---------- favorites ----------
 
+    /** Pins/unpins a folder for Home's Quick access (folder action sheet). */
+    fun toggleQuickPin(path: String) {
+        viewModelScope.launch {
+            val wasPinned = path in _state.value.quickPins
+            settingsRepo.toggleQuickPin(path)
+            _state.update {
+                it.copy(
+                    toast = if (wasPinned) "Removed from Quick access"
+                    else "Pinned to Quick access on Home",
+                )
+            }
+        }
+    }
+
     fun toggleFavorite(path: String) {
         viewModelScope.launch { settingsRepo.toggleFavorite(path) }
     }
@@ -522,12 +554,49 @@ class BrowseViewModel(
 
     private var opJob: Job? = null
 
+    /** Last (showHidden, sortMode, sortOrder) that triggered a re-list. */
+    private var lastListSettings: Triple<Boolean, SortMode, com.toadfiles.app.domain.SortOrder>? = null
+
     // ---------- zip ----------
 
+    /** Opens the archive-name dialog for a batch (UI flow). */
+    fun requestZip(files: List<File>) {
+        _state.update { it.copy(pendingZipFiles = files, pendingZipName = suggestedZipName(files)) }
+    }
+
+    fun dismissZipDialog() = _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
+
+    /** Suggested archive name: the single item's name, or "archive.zip" for batches. */
+    fun suggestedZipName(files: List<File>): String = when (files.size) {
+        1 -> {
+            val n = files[0].name
+            if (n.lowercase().endsWith(".zip")) n else files[0].nameWithoutExtension + ".zip"
+        }
+        else -> "archive.zip"
+    }
+
+    /** Zips [files] under the user-typed name (".zip" appended when missing, collisions deduped). */
+    fun confirmZip(name: String) {
+        val files = _state.value.pendingZipFiles ?: return
+        val dir = _state.value.dir ?: return
+        val clean = name.trim()
+        if (clean.isEmpty() || clean.contains('/') || clean.contains('\\')) {
+            _state.update { it.copy(toast = "Enter a valid archive name") }
+            return
+        }
+        _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
+        val base = if (clean.lowercase().endsWith(".zip")) clean else "$clean.zip"
+        zipTo(files, File(dir, PathSafety.uniqueName(dir, base)))
+    }
+
+    /** Quick zip with the classic auto name (tests; UI goes through the name dialog). */
     fun zipSelected(files: List<File>) {
         val dir = _state.value.dir ?: return
-        val outName = PathSafety.uniqueName(dir, "archive.zip")
-        val out = File(dir, outName)
+        zipTo(files, File(dir, PathSafety.uniqueName(dir, "archive.zip")))
+    }
+
+    private fun zipTo(files: List<File>, out: File) {
+        val dir = _state.value.dir ?: return
         _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
             val r = ZipSupport.zip(files, out) { p -> _state.update { it.copy(progress = "Zipping" to p) } }

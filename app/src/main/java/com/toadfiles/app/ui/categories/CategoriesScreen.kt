@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
@@ -217,14 +218,17 @@ fun CategoriesScreen(
                     }
                 },
                 onEntryLongPress = { e ->
-                    if (inSelection) vm.toggleSelection(e) else actionSheetFor = e
+                    // Press-and-hold starts multi-select, like Browse; the row's ⋮
+                    // keeps the action sheet one tap away.
+                    vm.toggleSelection(e)
                 },
+                onEntryMore = { e -> actionSheetFor = e },
             )
         }
     }
 
-    // Long-press action sheet (bug 2): the per-row folder/share buttons are gone —
-    // every action now lives here, like the Browse sheet.
+    // Per-entry action sheet (the row's ⋮ button): every action lives here,
+    // like the Browse sheet. Long-press is reserved for multi-select.
     actionSheetFor?.let { entry ->
         MediaActionSheet(
             entry = entry,
@@ -271,10 +275,6 @@ fun CategoriesScreen(
                         vm.requestToast("Could not copy the path")
                     }
                 }
-            },
-            onSelect = {
-                actionSheetFor = null
-                vm.toggleSelection(entry)
             },
             onDismiss = { actionSheetFor = null },
         )
@@ -440,6 +440,7 @@ private fun CategoryEntries(
     modifier: Modifier = Modifier,
     onEntryTap: (MediaRepository.MediaEntry) -> Unit,
     onEntryLongPress: (MediaRepository.MediaEntry) -> Unit,
+    onEntryMore: (MediaRepository.MediaEntry) -> Unit,
 ) {
     val visual = state.selected == FileCategory.IMAGES || state.selected == FileCategory.VIDEOS
     when {
@@ -475,6 +476,7 @@ private fun CategoryEntries(
                     selected = e.uri.toString() in state.selection,
                     onClick = { onEntryTap(e) },
                     onLongClick = { onEntryLongPress(e) },
+                    onMore = { onEntryMore(e) },
                 )
             }
             item { Spacer(Modifier.height(16.dp)) }
@@ -542,6 +544,7 @@ private fun MediaRow(
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onMore: () -> Unit,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
     Surface(color = bg, shape = RoundedCornerShape(12.dp)) {

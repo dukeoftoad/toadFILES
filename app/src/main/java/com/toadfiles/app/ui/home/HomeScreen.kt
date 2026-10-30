@@ -1,7 +1,9 @@
 package com.toadfiles.app.ui.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,7 +29,9 @@ import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Movie
@@ -34,8 +39,10 @@ import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +53,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -85,6 +95,8 @@ fun HomeScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var editorOpen by remember { mutableStateOf(false) }
+    var removeTarget by remember { mutableStateOf<QuickAccessEntry?>(null) }
 
     // Home data (storage, quick links, recents) can change while the user is in another
     // tab — refresh every time this screen re-enters composition.
@@ -190,33 +202,48 @@ fun HomeScreen(
             }
         }
 
-        // ---- Quick access ----
+        // ---- Quick access (user pins + most used + standard folders, all editable) ----
         item {
-            Text(
-                "Quick access",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp),
-            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Quick access",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { editorOpen = true }) {
+                    Icon(Icons.Outlined.Add, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Edit")
+                }
+            }
         }
-        if (state.quickLinks.isEmpty()) {
-            item { EmptyState("No standard folders found") }
+        if (state.quickAccess.isEmpty()) {
+            item { EmptyState("No quick folders yet — tap Edit to pin some") }
         } else {
             item {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(((state.quickLinks.size + 2) / 3 * 100).dp),
+                        .height(((state.quickAccess.size + 2) / 3 * 104).dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     userScrollEnabled = false,
                 ) {
-                    gridItems(state.quickLinks, key = { it.first }) { (name, dir) ->
+                    gridItems(state.quickAccess, key = { it.dir.path }) { q ->
                         QuickTile(
-                            name = name,
-                            icon = quickIconFor(name),
-                            onClick = { onOpenFolder(dir.path) },
+                            name = q.label,
+                            icon = quickIconFor(q.label),
+                            pinned = q.pinned,
+                            mostUsed = q.source == QuickAccessEntry.Source.MOST_USED,
+                            onClick = { onOpenFolder(q.dir.path) },
+                            onLongClick = { removeTarget = q },
                         )
                     }
                 }
@@ -314,6 +341,82 @@ fun HomeScreen(
             )
         }
     }
+
+    // ---- Quick access editing ----
+
+    if (editorOpen) {
+        QuickAccessEditorDialog(
+            candidates = state.quickCandidates,
+            onToggle = { path, shown -> vm.setQuickShown(path, shown) },
+            onDismiss = { editorOpen = false },
+        )
+    }
+
+    removeTarget?.let { q ->
+        AlertDialog(
+            onDismissRequest = { removeTarget = null },
+            title = { Text("Remove \"${q.label}\"?") },
+            text = { Text("It disappears from Quick access. You can add it back any time with Edit.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.removeQuickAccess(q.dir.path)
+                    removeTarget = null
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { removeTarget = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** The "＋ Edit" dialog: check folders on/off for Quick access. */
+@Composable
+private fun QuickAccessEditorDialog(
+    candidates: List<QuickCandidate>,
+    onToggle: (path: String, shown: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Customize Quick access") },
+        text = {
+            Column {
+                Text(
+                    "Checked folders appear on your Home screen. " +
+                        "Folders you open often show up automatically as \"most used\".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(candidates, key = { it.path }) { c ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggle(c.path, !c.shown) }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(c.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    c.path,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Checkbox(
+                                checked = c.shown,
+                                onCheckedChange = { onToggle(c.path, it) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 /** Icon per standard quick-link folder; unknown folders fall back to a folder glyph. */
@@ -327,33 +430,64 @@ private fun quickIconFor(name: String): ImageVector = when (name.lowercase()) {
     else -> Icons.Outlined.Folder
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickTile(name: String, icon: ImageVector, onClick: () -> Unit) {
+private fun QuickTile(
+    name: String,
+    icon: ImageVector,
+    pinned: Boolean,
+    mostUsed: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Card(
         shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 14.dp),
+                .padding(vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = name,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp),
-                )
+            Box {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .background(
+                            if (pinned) MaterialTheme.colorScheme.tertiaryContainer
+                            else MaterialTheme.colorScheme.primaryContainer,
+                            CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = name,
+                        tint = if (pinned) MaterialTheme.colorScheme.onTertiaryContainer
+                        else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                if (pinned) {
+                    Icon(
+                        Icons.Outlined.PushPin,
+                        contentDescription = "Pinned",
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(13.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(name, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(
+                if (mostUsed) "most used" else " ",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+            )
         }
     }
 }
