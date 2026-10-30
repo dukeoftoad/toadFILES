@@ -1,0 +1,302 @@
+# Full codebase audit — toadFILES
+
+**Audit date:** 2026-10-30  
+**Audited baseline:** `main` at `6858540c531b0219ec81cdb347f81623fa5a8286` (v1.6.0, versionCode 8)  
+**Review type:** repository-wide static source, test, configuration and workflow audit  
+**Status:** findings require triage; this document does not claim device-level reproduction.
+
+## 1. Scope and method
+
+I enumerated the complete tracked Git tree (101 files; tree not truncated) and reviewed the application source, test inventory, Android resources, build files, workflows, README and project documentation.
+
+| Area | Files reviewed |
+|---|---:|
+| Production Kotlin under `app/src/main/java` | 38 |
+| JVM/Robolectric test files | 28 |
+| Android instrumentation test files | 2 |
+| Android resources / manifest | 9 |
+| GitHub Actions workflows | 2 |
+| Documentation and screenshots | 8 |
+| Root/build/other tracked files | 14 |
+| **Total** | **101** |
+
+The JVM test tree contains approximately **218 `@Test` methods**; the instrumentation tree contains **6**. The workflow runs lint, JVM unit tests and APK assembly, but does not run the instrumentation suite on an emulator.
+
+The review covered file operations, trash/restore/purge, ZIP create/extract, path safety, MediaStore queries and URI handling, intents/sharing/APK installation, storage roots, settings persistence, all screen ViewModels and major Compose screens/components, thumbnails, navigation, manifest/provider configuration, Gradle and release automation.
+
+This is a static review of the named revision. I did not run an emulator or physical device, inject filesystem failures, or execute the full Gradle suite as part of this audit. Findings are labelled as source-confirmed defects or platform risks requiring runtime validation.
+
+## 2. Executive summary
+
+The codebase has useful separation between data/domain/UI layers and a meaningful JVM regression suite. The principal release risks are concentrated in destructive filesystem paths and provider integration:
+
+- Recursive deletion follows directory symlinks and can delete the symlink target's contents.
+- ZIP extraction's aggregate byte and expansion-ratio guards rely on ZIP header sizes that can be unknown.
+- REPLACE copy/move deletes the old destination before the replacement is known to be complete.
+- Trash metadata is not committed transactionally and can be deleted before the payload.
+- Generic MediaStore file URIs are constructed with a path that does not match Android's Files collection API.
+
+**Severity count:** 5 P1 · 16 P2 · 3 P3
+
+---
+
+## 3. P1 — Fix before a reliability release
+
+### P1.1 Recursive delete follows directory symlinks
+
+**Files:** `app/src/main/java/com/toadfiles/app/domain/FileOps.kt` (especially `deleteRecursively`, around lines 245–250); callers include trash permanent deletion and retention purge.
+
+The implementation tests `file.isDirectory` and then calls `listFiles()`. Both operations follow a symbolic link to a directory. If a user deletes or permanently purges a symlink to a directory, recursion can walk into and delete the linked directory's contents rather than unlinking only the symlink. A dangling symlink has the opposite problem: `exists()` is false, so the method returns success without unlinking it.
+
+**Impact:** potential deletion of files outside the selected tree; incorrect success reporting for dangling links. This also affects `Trash.deleteForever`, `Trash.empty` and automatic purge.
+
+**Fix:** use `java.nio.file.Files.isSymbolicLink(path)` / no-follow link checks before directory traversal. Delete the link itself without descending. Establish one explicit symlink policy and apply it consistently to list, copy, move, size, search, ZIP and trash. Add tests for a directory symlink to an external sibling, a symlink cycle and a dangling link. If symlinks cannot be created on a target Android filesystem, keep a host-JVM test for the domain code.
+
+### P1.2 ZIP extraction limits can be bypassed when entry sizes are unknown
+
+**File:** `app/src/main/java/com/toadfiles/app/domain/ZipSupport.kt`, extraction loop.
+
+The total uncompressed byte counter is incremented only when `entry.size > 0`. The ratio guard runs only when `entry.compressedSize > 0`. ZIP entries whose sizes are unknown when read (for example, data-descriptor entries) therefore bypass both checks. The loop already tracks `written`, but does not add actual output bytes to the aggregate `totalBytes`.
+
+**Impact:** an archive can write much more than `Limits.maxTotalBytes`, consuming storage and potentially exhausting the device. The current ZIP tests cover ordinary extraction, ZIP-slip, replacement and entry count, but not unknown-size entries, actual byte caps or ratio enforcement.
+
+**Fix:** enforce per-entry and aggregate limits using bytes actually emitted, with overflow-safe `Long` arithmetic. Treat unknown compressed size conservatively; never disable the ratio policy because a header field is `-1`. Extract into a staging directory and publish only after the archive succeeds. Delete partial entry files on exceptions and cancellation. Add data-descriptor, oversized-stream, ratio-bomb and partial-cleanup tests.
+
+### P1.3 REPLACE copy/move can destroy the previous destination on failure
+
+**File:** `app/src/main/java/com/toadfiles/app/domain/FileOps.kt`, `copy()` and `move()`.
+
+When the destination exists and the strategy is REPLACE, the code deletes the destination before copying or moving the replacement. Recursive copy writes directly into the final path. If a read/write error, full disk, permission failure or cancellation occurs, the previous good destination is already gone and a partial new tree may remain.
+
+**Impact:** user data loss during an operation explicitly labelled Replace.
+
+**Fix:** stage the replacement in a unique sibling path, verify the copy, move the old destination to a temporary backup, then swap the staged item into place. Restore the backup if the swap fails. Add fault-injection tests for a failure halfway through a file and halfway through a directory tree, and cancellation tests. Keep the original untouched until the replacement is complete.
+
+### P1.4 Trash sidecar writes and deletion are not transactional
+
+**File:** `app/src/main/java/com/toadfiles/app/domain/Trash.kt`.
+
+Two unsafe orderings exist:
+- `trash()` renames the original item into the hidden trash folder and only then writes its `.tfmeta` sidecar. If the sidecar write fails, the payload has moved but the operation omits it from the returned success list; the original path and restore metadata are lost.
+- `deleteForever()` deletes the sidecar before deleting the payload. If payload deletion fails, the item remains in trash without its restore metadata.
+
+**Impact:** items can become stranded in the hidden trash directory and cannot be restored normally. Browse's success/failure count can also be misleading because it checks whether the original source path still exists rather than whether metadata was committed.
+
+**Fix:** write metadata to a temporary file and atomically finalize it; if metadata commit fails, move the payload back. For permanent deletion, remove the payload first and remove metadata only after payload deletion succeeds. Return a structured per-item result (moved, metadata failure, restore failure) rather than only a list of successful paths. Add failure-injection tests.
+
+### P1.5 Generic MediaStore row URIs are malformed
+
+**Files:** `app/src/main/java/com/toadfiles/app/data/MediaRepository.kt`, `ContentUrisHelper.uriFor()`; `app/src/test/java/com/toadfiles/app/ContentUrisHelperTest.kt`.
+
+The generic branch constructs `content://media/external/files/media/$id`. Android's documented `MediaStore.Files.getContentUri(volumeName, rowId)` is built from the Files collection URI `content://media/{volume}/file` with the row ID appended (for external: `content://media/external/file/{id}`). The current unit test asserts the locally hard-coded URI rather than comparing it with the Android API, so it locks in the wrong value.
+
+**Impact:** document/archive/APK entries that use the generic branch can fail to open, share or delete through their MediaStore URI. `deleteStale()` also deletes using the entry URI, so generic rows may not be removable.
+
+**Fix:** use `MediaStore.Files.getContentUri("external", id)` for generic rows (and preserve the actual volume when available). Replace the URI string assertion with a comparison to the platform API and add provider-level open/delete tests for a document, archive and APK.
+
+Platform reference: [Android MediaStore.Files API](https://developer.android.com/reference/android/provider/MediaStore.Files) and [AOSP MediaStore implementation](https://android.googlesource.com/platform/prebuilts/fullsdk/sources/%2B/refs/heads/main/android-35/android/provider/MediaStore.java).
+
+---
+
+## 4. P2 — Important correctness, UX and platform issues
+
+### P2.1 Recent and Home still surface stale MediaStore rows on main
+
+**Files:** `MediaRepository.recent()`, `MediaRepository.list()`, `HomeViewModel.refreshRecent()`, `RecentViewModel.refresh()`.
+
+The main-branch queries hide paths inside the toadFILES trash folder but do not filter records whose non-null backing `DATA` path no longer exists. MediaStore can retain rows after files are moved/deleted, so Home and Recent can display stale items until the media index reconciles.
+
+**Fix/status:** filter missing paths when reading, then best-effort delete stale rows using a valid row URI. PR #1 includes a first-pass stale-row filter/cleanup on its branch; this finding describes the audited main baseline. Verify the Home feed and all category queries are covered by the final implementation.
+
+### P2.2 A real file named with the `.tfmeta` suffix is invisible in Trash
+
+**File:** `app/src/main/java/com/toadfiles/app/domain/Trash.kt`, `entries()`.
+
+The listing skips every child whose name ends with `.tfmeta` to hide metadata sidecars. A user's actual file ending in `.tfmeta` is renamed into trash with a timestamp prefix but still ends in `.tfmeta`, so the UI mistakes the payload for a sidecar. It is hidden from restore and permanent-delete lists and is not purged through normal entry enumeration.
+
+**Fix:** use a dedicated metadata subdirectory or an unambiguous sidecar naming/record format; do not identify sidecars by suffix alone. Add a trash/restore/purge test for files and directories ending in `.tfmeta`.
+
+### P2.3 Multi-file sharing grants ClipData access only to the first URI
+
+**File:** `app/src/main/java/com/toadfiles/app/util/Intents.kt`, `shareUris()`.
+
+For `ACTION_SEND_MULTIPLE`, all URIs are placed in `EXTRA_STREAM`, but ClipData is created from only `uris.first()`. Receivers that rely on URI grants carried by ClipData may be able to read the first item but not the rest.
+
+**Fix:** build ClipData with every URI (first item plus appended items) and retain `FLAG_GRANT_READ_URI_PERMISSION`. Extend tests to assert that all stream URIs are present in ClipData and verify reads from a receiving test activity.
+
+### P2.4 Categories action sheet is wired but has no reachable trigger
+
+**File:** `app/src/main/java/com/toadfiles/app/ui/categories/CategoriesScreen.kt`, `MediaRow()` and `MediaGridCell()`.
+
+The drill-in list passes `onMore = { onEntryMore(e) }` to `MediaRow`, but `MediaRow` never renders a more/overflow button or invokes `onMore`. The image/video grid has no equivalent overflow callback at all. Therefore `actionSheetFor` and `MediaActionSheet` are unreachable from the Categories entries UI.
+
+**Impact:** users cannot reach per-item Open with, details, copy path, show in folder and single-item share/delete actions from Categories. Some actions remain available through multi-select, but that is not equivalent.
+
+**Fix:** render an overflow IconButton in the row and a discoverable item action affordance for visual grid cells; add Compose tests that open the action sheet for every category type.
+
+### P2.5 Recent filter tabs disappear when the selected filter has no results
+
+**File:** `app/src/main/java/com/toadfiles/app/ui/recent/RecentScreen.kt`.
+
+The screen's top-level `when` renders an EmptyState whenever `state.entries.isEmpty()`. The filter chips are only inside the non-empty LazyColumn branch. If a user selects Images and has no images, all filter tabs disappear, leaving no way to switch to Videos/All without leaving the screen.
+
+**Fix:** render the filter row independently of the entries state; show the empty state below it. Add a UI test that selects an empty category and switches back to All.
+
+### P2.6 Asynchronous query results can overwrite newer screen state
+
+**Files:** `RecentViewModel.refresh()`, `CategoriesViewModel.open()/refresh()`, `HomeViewModel.refreshRecent()/refreshFavorites()/rebuildQuickAccess()`, `StorageViewModel.refresh()`, and `TrashViewModel.refresh()`.
+
+These methods launch independent IO jobs and apply results without a request-generation token or cancellation of the previous job. For example, quickly switching Recent from Images to Videos can let the slower Images query finish last and replace the Videos result while the selected filter still says Videos. Rapid category changes can similarly display the wrong category's entries. Rebuilds of Quick access/favorites can apply an older settings snapshot after a newer one.
+
+**Fix:** cancel superseded jobs or attach a monotonically increasing request ID and only apply results for the latest request. For category drill-in, also check the requested category still equals `state.selected`. Add deterministic tests using controllable dispatchers and delayed fake repositories.
+
+### P2.7 Most-used folder history can be overwritten before it loads
+
+**Files:** `SettingsRepository.reloadFolderUses()/persistFolderUses()`; `MainActivity.onStop()`.
+
+`reloadFolderUses()` sets `usesLoaded = true` before awaiting `store.data.first()`. `persistFolderUses()` does not ensure loading has completed and writes the current in-memory map as-is. If the activity stops during startup before the DataStore read completes, the initially empty map can overwrite the previous session's saved history. Concurrent first calls to `reloadFolderUses()` can also observe the flag before the first read finishes.
+
+**Fix:** serialize initial hydration and updates with a Mutex/deferred state; do not persist until hydration completes. Add a test where persist races the initial read and prove previous counts survive.
+
+### P2.8 Quick access paths are not remapped after rename/move
+
+**Files:** `SettingsRepository.remapFavorites()`; `BrowseViewModel.remapFavorites()/remapMovedFavorites()`; Quick access keys `quickPins`, `quickHidden`, and `folder_uses`.
+
+Rename/move only remaps favorites. Quick access pins, hidden paths and most-used folder-use keys are separate persisted path sets/maps and remain tied to the old path.
+
+**Impact:** a renamed or moved folder can disappear from Quick access, reappear as a default, or lose its usage history.
+
+**Fix:** implement one atomic subtree path-remap covering favorites, pins, hidden paths and usage counts; test exact paths and nested descendants for both rename and move.
+
+### P2.9 Media category results are incomplete or misleading at scale
+
+**File:** `app/src/main/java/com/toadfiles/app/data/MediaRepository.kt`.
+
+- `ARCHIVES` queries only four MIME types (ZIP, ZIP-compressed, 7z, RAR), while Browse's archive filter also recognises TAR, GZ, BZ2 and XZ. These formats can appear in Browse but be absent from Categories/Recent archive tabs.
+- `summaries()` counts only the first 2,000 rows per category, but presents that capped number as the category total.
+- Category drill-in defaults to 1,000 rows and Recent uses a fixed 400-row cap without paging or a "more results" indication.
+
+**Fix:** query archive MIME types comprehensively and use extension fallback where MediaStore MIME metadata is inconsistent. Use count/aggregate queries for totals and paging (or visibly disclose truncation) for drill-in/recent lists.
+
+### P2.10 Cancellation is not cooperative inside large filesystem operations
+
+**Files:** `FileOps.copyRecursively()/deleteRecursively()/sizeOf()`, `ZipSupport.addToZip()` and the inner ZIP extraction byte loop, `BrowseViewModel.searchTree()`, `StorageViewModel.analyzeTopLevel()`.
+
+Cancellation is checked between top-level sources/entries, not inside long recursive traversals or a single large file's read/write loop. A user can press Cancel while a huge directory/file is being copied, deleted, sized, searched or zipped and see the UI dismiss the progress overlay while the blocking operation continues.
+
+**Fix:** thread a cancellation/checkpoint callback through recursive/streaming helpers, check coroutine activity per buffer and directory, and clean up staging output on cancellation. Test a deliberately slow stream/tree.
+
+### P2.11 ZIP extraction can leave partial or corrupt output
+
+**File:** `app/src/main/java/com/toadfiles/app/domain/ZipSupport.kt`.
+
+If a stream fails or the expansion-ratio guard throws after an output file has been opened, the partially written file is left in the destination. Extraction continues to later entries and returns a result containing both failures and successful files. ZIP creation similarly catches per-source failures inside the same ZipOutputStream; an exception while an entry is open can leave the archive structure unusable.
+
+**Fix:** write each entry to a temporary file and atomically rename only after its stream closes successfully. On a failed ZIP source, close/abort the archive safely or fail the entire archive and remove it. Test truncated input, IO failure and cancellation.
+
+### P2.12 FileProvider exposes a broad root mapping
+
+**File:** `app/src/main/res/xml/file_paths.xml`.
+
+The provider includes `<root-path name="device_root" path="."/>`, which allows FileProvider URI generation for any path reachable from the filesystem root, not just shared-storage volumes. The provider is non-exported and grants are explicit, which reduces exposure, but the mapping is broader than needed for ordinary files.
+
+**Fix:** use narrowly scoped, volume-aware roots for primary and removable shared storage. If a root mapping is required for OEM removable volumes, add explicit path validation in the URI helper and tests that reject system/internal paths such as `/data` and `/proc`.
+
+### P2.13 File opening does not guarantee the promised “Just once / Always” chooser
+
+**File:** `app/src/main/java/com/toadfiles/app/util/Intents.kt`.
+
+Direct `ACTION_VIEW` can bypass the resolver when only one handler exists or a default is already selected. `openWith()` wraps the intent in `Intent.createChooser()`, which forces a one-time chooser and does not provide the same persistent default-selection UI. The comments and README overstate what the native resolver guarantees.
+
+**Fix:** implement a deliberate app-picker flow with supported per-MIME/file-type persistence, or accurately describe the platform-dependent resolver behavior. Test zero, one and multiple handlers and an already-saved default on API 26, 30, 33 and 36.
+
+### P2.14 APK install failures can be misreported as missing permission
+
+**File:** `app/src/main/java/com/toadfiles/app/util/Intents.kt`, `installApk()`.
+
+If the installer intent throws after `canRequestPackageInstalls()` returned true, the catch block opens unknown-app settings and returns `NEEDS_PERMISSION`. It also ignores the Boolean result from `openInstallPermissionSettings()`, so callers can tell the user settings opened even if both settings intents failed.
+
+**Fix/status:** PR #1 contains a correction on its branch to report post-permission launch exceptions as FAILED and retain the pending APK selection across the settings handoff. Verify the settings-open failure path and retry lifecycle on devices/OEMs before merge.
+
+### P2.15 Removable-volume discovery on pre-Android 11 depends on a hidden API
+
+**File:** `app/src/main/java/com/toadfiles/app/data/FileRepository.kt`, `volumeDir()`.
+
+For API levels below 30, the implementation reflectively calls `StorageVolume.getPath()`, a hidden method. Hidden-API enforcement/OEM differences can make this fail, after which removable volumes are silently omitted and the code may fall back to primary storage only.
+
+**Fix:** validate API 26–29 removable-volume support on representative devices. Prefer supported APIs/SAF for removable volumes where possible; surface an explicit unsupported/unavailable state rather than silently implying all volumes were found.
+
+### P2.16 Instrumented Android tests are not run by CI
+
+**Files:** `.github/workflows/android.yml`; `app/src/androidTest/**`.
+
+The repository contains 6 instrumentation tests, but the Android workflow runs lint, `:app:testDebugUnitTest`, and debug/release assembly only. It does not start an emulator or run `:app:connectedDebugAndroidTest`.
+
+**Impact:** actual Android provider/permission/intent behavior is not covered by the green CI gate. This matters for MediaStore URIs, FileProvider grants, package installation, removable volumes and Android-version differences.
+
+**Fix:** add an emulator matrix (at minimum API 29, 30/33 and 36) for the critical instrumentation suite. Keep device/OEM checks as a documented manual release checklist.
+
+---
+
+## 5. P3 — Lower-priority defects and product polish
+
+### P3.1 ZIP-slip name validation rejects harmless filenames containing two dots
+
+**File:** `PathSafety.isSafeEntryName()`.
+
+The guard rejects any name containing the substring `..`, not only a path component equal to `..`. A legitimate filename such as `release..notes.txt` is skipped. Validate path components after normalisation instead.
+
+### P3.2 Video thumbnail cache does not invalidate changed files
+
+**File:** `app/src/main/java/com/toadfiles/app/util/VideoThumbs.kt`.
+
+The cache key is only the file path. Replacing a video in place keeps the old cached frame until LRU eviction. Include file modification time/size in the cache key or invalidate after file operations.
+
+### P3.3 Diagnostics preference is a no-op
+
+**Files:** `SettingsRepository`, `SettingsScreen`, `AboutScreen`.
+
+The UI correctly states that no diagnostic data is currently collected or transmitted, but the switch only stores a preference and has no diagnostic behavior. Consider labelling it as a future preference or removing it until a real local diagnostics feature exists.
+
+---
+
+## 6. Test coverage gaps mapped to findings
+
+Existing tests cover normal file copy/move/delete, conflict strategies, path traversal, basic ZIP round-trips, trash restore/purge, DataStore persistence, navigation, onboarding and UI screenshots. The gaps that matter most:
+
+| Area | Missing regression coverage |
+|---|---|
+| Recursive filesystem operations | Directory symlink, dangling symlink, symlink cycle, deep nesting, partial copy rollback, cancellation mid-stream |
+| REPLACE semantics | Injected write/read failure proving old destination is preserved |
+| ZIP | Unknown-size/data-descriptor entry, actual byte cap, ratio cap, truncated stream, partial-file cleanup, output archive failure |
+| Trash | Metadata write failure, payload delete failure, `.tfmeta` payload name, sidecar orphan cleanup |
+| MediaStore | Platform-generated generic Files row URI, query/paging behavior, stale-row cleanup, category MIME coverage |
+| Intents | Every URI in ClipData, app-picker behavior with zero/one/multiple handlers, saved defaults, installer settings fallback failure |
+| ViewModels | Out-of-order responses for filters/category changes/refresh; folder-use hydrate/persist race |
+| Android compatibility | API 26/28 removable storage, API 29 scoped-storage behavior, API 30/33/36 media permissions and provider grants |
+
+The existing `ContentUrisHelperTest` currently validates the hard-coded generic URI instead of validating against `MediaStore.Files.getContentUri`; update this test before treating the MediaStore path as covered.
+
+---
+
+## 7. Existing PR #1 changes vs this audit
+
+PR #1 is a separate feature branch based on the audited main revision. It currently contains:
+- Recent missing-path filtering and best-effort stale-row cleanup.
+- APK install handoff state retention and corrected failure classification.
+- A guard against extracting into an existing destination folder.
+- This audit report.
+
+These changes are **not in main** until reviewed and merged. The report findings describe the audited main baseline; verify the PR's implementation and tests before treating any finding as resolved. In particular, the stale-row fix needs to cover Home and category paths as well as the standalone Recent flow.
+
+## 8. Recommended fix order
+
+1. **Protect user data:** symlink-safe delete/traversal, transactional REPLACE, failure-safe trash metadata.
+2. **Harden archive handling:** actual-byte limits, staged extraction, partial-output cleanup and cancellation.
+3. **Repair platform integration:** generic MediaStore URIs, all-URI share grants, installer error paths and Android 26–36 storage/volume tests.
+4. **Fix state and UI correctness:** Recent empty-filter tabs, Categories overflow actions, request-generation guards, folder-use hydration and Quick access remapping.
+5. **Correct counts and coverage:** archive MIME coverage, paging/true counts, emulator CI, regression tests.
+
+## 9. Audit limitations
+
+This is a repository-wide **static audit**, not formal verification or a complete runtime QA sign-off. A source-level finding can be confirmed from code, but device-specific behavior (especially storage permission enforcement, removable volumes, MediaStore grants and package installer behavior) still needs emulator/device reproduction. No source fixes were made as part of this audit-only update; this commit updates the report on the existing PR branch.
