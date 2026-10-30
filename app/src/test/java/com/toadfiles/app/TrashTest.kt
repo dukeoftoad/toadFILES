@@ -270,4 +270,110 @@ class TrashTest {
             dir.setWritable(true)
         }
     }
+
+    // ---------- audit P1.3: crash between payload move and metadata commit ----------
+
+    /** Simulates process death exactly between step 2 (payload rename) and step 3
+     *  (sidecar commit): payload in the trash, valid ".pending" record, no committed
+     *  sidecar. The next entries() must recover it: listed with its real origin and
+     *  restorable (audit P1.3). */
+    @Test
+    fun `pending record after crash is recovered and restorable`() {
+        val vol = volume()
+        // The crash already renamed the origin away: it must NOT exist on disk anymore.
+        val originPath = File(vol, "crashed.txt").absolutePath
+        val dir = trashDir(vol).apply { mkdirs() }
+        metaDir(vol).mkdirs()
+        val payload = File(dir, "123_crashed.txt").apply { writeText("survivor") }
+        val pending = File(metaDir(vol), payload.name + ".tfmeta.pending")
+            .apply { writeText("origin=$originPath\ntrashedAt=123") }
+
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(1, entries.size)
+        assertEquals(originPath, entries[0].originPath)
+        // The pending record was promoted to a committed sidecar…
+        val committed = File(metaDir(vol), payload.name + ".tfmeta")
+        assertTrue(committed.exists())
+        assertFalse(pending.exists())
+
+        // …and restore works without any further recovery pass.
+        val restored = Trash.restore(entries[0].file)
+        assertNotNull(restored)
+        assertEquals(originPath, restored!!.absolutePath)
+        assertEquals("survivor", File(originPath).readText())
+        assertTrue(Trash.entries(listOf(vol)).isEmpty())
+    }
+
+    /** Same crash window, but the item is restored BEFORE any listing ran: the pending
+     *  fallback in readMeta must keep restore working even without promotion. */
+    @Test
+    fun `restore reads the pending record directly after a crash`() {
+        val vol = volume()
+        val originPath = File(vol, "direct.txt").absolutePath
+        val dir = trashDir(vol).apply { mkdirs() }
+        metaDir(vol).mkdirs()
+        val payload = File(dir, "777_direct.txt").apply { writeText("direct") }
+        File(metaDir(vol), payload.name + ".tfmeta.pending")
+            .writeText("origin=$originPath\ntrashedAt=777")
+
+        val restored = Trash.restore(payload)
+        assertNotNull(restored)
+        assertEquals(originPath, restored!!.absolutePath)
+        assertEquals("direct", File(originPath).readText())
+    }
+
+    /** A pending record whose payload never made it (process died BEFORE the payload
+     *  rename) is an orphan: no phantom entry, and the pending file is cleaned up. */
+    @Test
+    fun `orphan pending record without payload is pruned and not listed`() {
+        val vol = volume()
+        trashDir(vol).mkdirs()
+        metaDir(vol).mkdirs()
+        val pending = File(metaDir(vol), "999_ghost.txt.tfmeta.pending")
+            .apply { writeText("origin=/gone/g.txt\ntrashedAt=999") }
+
+        val entries = Trash.entries(listOf(vol))
+        assertTrue(entries.isEmpty())
+        assertFalse(pending.exists())
+    }
+
+    /** Corrupt pending records (invalid schema) are never promoted — but the payload
+     *  is still listed (with unknown origin) instead of being hidden from the user. */
+    @Test
+    fun `corrupt pending record is not promoted but payload stays listed`() {
+        val vol = volume()
+        val dir = trashDir(vol).apply { mkdirs() }
+        metaDir(vol).mkdirs()
+        val payload = File(dir, "555_corrupt.txt").apply { writeText("data") }
+        val pending = File(metaDir(vol), payload.name + ".tfmeta.pending")
+            .apply { writeText("this is not metadata") }
+
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(1, entries.size)
+        // No committed sidecar appeared…
+        assertFalse(File(metaDir(vol), payload.name + ".tfmeta").exists())
+        // …and pruning removed the useless pending record only after the listing kept
+        // the payload visible.
+        assertFalse(pending.exists())
+        assertTrue(payload.exists())
+    }
+
+    /** Audit P2.7: a user's real "*.tfmeta" payload with a same-basename sibling is
+     *  NOT migrated into .meta — only records with the valid metadata schema are. */
+    @Test
+    fun `user tfmeta file with sibling is not mistaken for legacy metadata`() {
+        val vol = volume()
+        val dir = trashDir(vol).apply { mkdirs() }
+        // A user file (already trashed as a payload) that happens to end in .tfmeta…
+        val userPayload = File(dir, "notes.tfmeta").apply { writeText("my own notes, not metadata") }
+        // …and a sibling payload with the basename "notes".
+        File(dir, "notes").apply { writeText("the sibling") }
+
+        val entries = Trash.entries(listOf(vol))
+        val names = entries.map { it.file.name }.toSet()
+        assertTrue("notes.tfmeta" in names)
+        assertTrue("notes" in names)
+        // Nothing was migrated into .meta — the user file is still a payload.
+        assertFalse(File(metaDir(vol), "notes.tfmeta").exists())
+    }
 }
