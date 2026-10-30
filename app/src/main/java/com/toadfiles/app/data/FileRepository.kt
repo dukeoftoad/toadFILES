@@ -21,6 +21,12 @@ class FileRepository(private val context: Context) {
      * Every mounted volume: internal storage plus SD cards and USB drives when present.
      * Only MEDIA_MOUNTED volumes show up here; anything unmounted or still preparing
      * is not browsable.
+     *
+     * Known limitation: below API 30 a volume's directory comes from a best-effort
+     * reflective call to the hidden StorageVolume.getPath() getter (see [volumeDir]).
+     * When that fails, the volume is skipped — pre-R removable storage may therefore
+     * be missing from the list, with only primary storage offered. API-26..29 device
+     * validation of this path is tracked in docs/RELEASE_CHECKLIST.md.
      */
     fun roots(): List<StorageRoot> {
         val out = mutableListOf<StorageRoot>()
@@ -48,7 +54,15 @@ class FileRepository(private val context: Context) {
         return out
     }
 
-    /** Real directory of a volume. The public getter only exists from API 30; older devices need the hidden getter. */
+    /**
+     * Real directory of a volume. The public getter only exists from API 30; older
+     * devices go through the hidden StorageVolume.getPath() reflectively. That is
+     * best-effort by design: if the reflection fails on a pre-R device (OEM
+     * restrictions, framework changes), this returns null and the volume is
+     * silently omitted from [roots], which then falls back to primary-only —
+     * enumeration never crashes. API-26..29 device validation of this fallback
+     * is tracked in docs/RELEASE_CHECKLIST.md.
+     */
     private fun volumeDir(v: StorageVolume): File? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             v.directory
