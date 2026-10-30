@@ -38,6 +38,40 @@ The codebase has useful separation between data/domain/UI layers and a meaningfu
 
 **Severity count:** 5 P1 · 16 P2 · 3 P3
 
+### 2.1 Remediation status on this branch (PR #1, 2026-10-30)
+
+Every finding below has been implemented on `fix/toadfiles-reliability-and-ux` in
+parallel workstreams (`pr1/a-data`, `pr1/b-zip`, `pr1/c-media`, `pr1/d-state`,
+`pr1/d2-intents`, `pr1/e-ci`) with regression tests. Static/IOC-level verification only:
+device/OEM behavior follows `docs/RELEASE_CHECKLIST.md`.
+
+| Finding | Status | Resolution |
+|---|---|---|
+| P1.1 symlink delete | **Fixed** | `FileOps.deleteRecursively` uses `Files.walkFileTree` + no-follow; links unlinked, dangling links removed, cycles impossible; symlink policy applied in `sizeOf`/copy. Tests: external-target survival, dangling link, cycle, nested delete. |
+| P1.2 ZIP limits | **Fixed** | Actual emitted bytes drive per-entry/aggregate caps (overflow-safe); ratio guard via `CountingInputStream` never trusts `-1` headers; extraction into staging dir, published only on success. Tests: data-descriptor bombs, byte/ratio caps, no partial tree. |
+| P1.3 destructive REPLACE | **Fixed** | `swapReplace`: stage → backup old → swap; backup restored on any failure; same for cross-volume move. Tests: injected failure preserves old destination byte-for-byte; cancellation cleans staging. |
+| P1.4 trash ordering | **Fixed** | Sidecar prepared as `.pending`, payload moved, metadata committed atomically; commit failure rolls the payload back (`TrashResult.moved/rolledBack/failed`); `deleteForever` deletes payload first, sidecar only after success. Fault-injection tests. |
+| P1.5 MediaStore URIs | **Fixed** | Generic rows built with `ContentUris.withAppendedId(MediaStore.Files.getContentUri("external"), id)` (2-arg overload is API 29+; minSdk 26). Test compares against the platform API, not a hardcoded string. |
+| P2.1 stale rows | **Fixed** | `list()`/`recent()` collect ghost rows and reconcile (`resolver.delete`) after the cursor closes, capped at 50/query — Home, Recent and categories share the behavior; ViewModels keep their explicit calls. |
+| P2.2 `.tfmeta` payloads | **Fixed** | Sidecars moved to `<trash>/.meta/`; legacy sidecars migrate on first listing; orphan sidecars pruned; a user file named `*.tfmeta` lists/restores/purges normally. Tests. |
+| P2.3 share grants | **Fixed** | `grantClip()` puts EVERY uri in ClipData on the send intent and the chooser wrapper. Test asserts all URIs in clip + extra. |
+| P2.4 categories actions | **Fixed** | Overflow affordance on list rows and grid cells wired to the existing `MediaActionSheet`. |
+| P2.5 recent filter tabs | **Fixed** | Filter row rendered independently of entries; empty state shows beneath it. |
+| P2.6 async overwrites | **Fixed** | `MediaQuerySource` interface + per-VM job cancellation/request tokens in Recent, Categories, Home, Storage, Trash. Deterministic tests with delayed fakes. |
+| P2.7 folder-use race | **Fixed** | Hydration serialized behind a Mutex; `persistFolderUses` awaits hydration; `usesLoaded` set only after the read. Race test proves prior counts survive. |
+| P2.8 quick-access remap | **Fixed** | `SettingsRepository.remapPaths()` remaps favorites, quick pins, hidden paths and folder-use counts (persisted + in-memory) atomically; rename/move wired to it. Tests for exact + nested paths. |
+| P2.9 media scale | **Fixed** | ARCHIVES/APKS match by MIME + extension `LIKE` fallback; `summaries()` uses COUNT/SUM aggregates (true, uncapped totals). Truncation disclosure: drill-in/recent lists show a "first N" footer at the cap. |
+| P2.10 cancellation | **Fixed** | Checkpoints per buffer/directory in FileOps copy/move/delete/size, ZIP extract/create loops, tree search and storage analysis; partial outputs cleaned on cancel. |
+| P2.11 ZIP partial output | **Fixed** | Per-entry temp files promoted after CRC-close; failed creation aborts and deletes the archive; failed/cancelled extraction leaves the destination untouched. Tests: truncated stream, IO failure, cancel. |
+| P2.12 provider scope | **Fixed** | `UriGuard` path denylist (/data, /proc, /sys, /dev, /system, /vendor, /apex, /product) enforced in `Intents.contentUri` before a URI exists; root-path catch-all kept for OEM removable volumes, comment documents the policy. Tests reject system paths. |
+| P2.13 open-with contract | **Fixed** | Docstrings state the real platform contract (resolver appears only with 2+ handlers and no saved default); "Open with" is a one-time chooser that never writes a default; chooser carries the same read grants. |
+| P2.14 installer outcomes | **Fixed** | New `SETTINGS_FAILED` distinct outcome when both settings handoffs fail; `openInstallPermissionSettings` Boolean honored; pending APK retained across the settings round-trip; BrowseScreen handles the new state. Tests with an always-throwing application. |
+| P2.15 removable volumes | **Documented** | Pre-R hidden-getter limitation documented in `FileRepository`; device validation moved to `docs/RELEASE_CHECKLIST.md` §4 (cannot be verified statically). |
+| P2.16 emulator CI | **Fixed** | `instrumented` job runs `connectedDebugAndroidTest` on API 29/33/36 emulators behind the build job; advisory (`continue-on-error`) until green per the checklist promotion policy. |
+| P3.1 ZIP-slip names | **Fixed** | `isSafeEntryName` rejects only whole `..` components (plus absolute/`:`/NUL); `release..notes.txt` now extracts. Tests. |
+| P3.2 thumbnail staleness | **Fixed** | Cache keys include file identity + mtime + size (`VideoThumbKeys`); composables re-key on the stamp. Tests. |
+| P3.3 diagnostics no-op | **Fixed** | Switch relabelled "Diagnostics (planned)" with honest copy ("nothing is collected or transmitted today"). |
+
 ---
 
 ## 3. P1 — Fix before a reliability release

@@ -67,6 +67,7 @@ class CategoriesViewModelRaceTest {
     }
 
     private class GatedMedia : MediaQuerySource {
+        val docsParked = CountDownLatch(1)
         val docsGate = CountDownLatch(1)
         val docsReturned = AtomicInteger()
         val apksEntry = entry(3, "app.apk", FileCategory.APKS)
@@ -74,6 +75,9 @@ class CategoriesViewModelRaceTest {
         override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> =
             when (category) {
                 FileCategory.DOCS -> {
+                    // Prove the query really reached the gate before the test moves on,
+                    // otherwise cancel-before-start makes the release below never happen.
+                    docsParked.countDown()
                     docsGate.await()
                     docsReturned.incrementAndGet()
                     listOf(entry(1, "slow-doc.pdf", FileCategory.DOCS))
@@ -116,6 +120,10 @@ class CategoriesViewModelRaceTest {
 
         // User opens Documents — the query parks on the latch.
         vm.open(FileCategory.DOCS)
+        // Deterministic: wait until the DOCS query is actually parked, so the newer
+        // open() below cancels a RUNNING query (the stale-result case), not an
+        // undispatched one.
+        assertTrue(media.docsParked.await(10, TimeUnit.SECONDS))
         // User backs out and opens APKs — fast query lands while Documents is pending.
         vm.open(FileCategory.APKS)
 

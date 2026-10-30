@@ -71,7 +71,7 @@ class CategoriesViewModel(
         _state.update { it.copy(selected = category, entries = emptyList(), selection = emptySet(), entriesLoading = true) }
         entriesJob?.cancel()
         entriesJob = viewModelScope.launch(ioDispatcher) {
-            val entries = runCatching { media.list(category, limit = 1000) }.getOrDefault(emptyList())
+            val entries = runCatching { media.list(category, limit = QUERY_LIMIT) }.getOrDefault(emptyList())
             _state.update { s ->
                 // Rapid category switches can finish out of order — apply only when this
                 // is still the newest drill-in request for the category still on screen.
@@ -158,4 +158,9 @@ class CategoriesViewModel(
     }
 
     fun consumeToast() = _state.update { it.copy(toast = null) }
+
+    companion object {
+        /** Query cap shared with the screen so it can disclose truncation honestly. */
+        const val QUERY_LIMIT = 1000
+    }
 }

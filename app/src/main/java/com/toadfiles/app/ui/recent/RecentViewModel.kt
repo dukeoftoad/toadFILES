@@ -58,11 +58,11 @@ class RecentViewModel(
         queryJob?.cancel()
         queryJob = viewModelScope.launch(ioDispatcher) {
             val entries = if (filter == null) {
-                val indexed = media.recent(limit = 400)
+                val indexed = media.recent(limit = QUERY_LIMIT)
                 media.deleteStale(indexed)
-                media.recent(limit = 400)
+                media.recent(limit = QUERY_LIMIT)
             } else {
-                media.list(filter, limit = 400)
+                media.list(filter, limit = QUERY_LIMIT)
             }
             _state.update { s ->
                 // A slow older query must never overwrite a newer result: drop the
@@ -148,4 +148,9 @@ class RecentViewModel(
     }
 
     fun consumeToast() = _state.update { it.copy(toast = null) }
+
+    companion object {
+        /** Query cap shared with the screen so it can disclose truncation honestly. */
+        const val QUERY_LIMIT = 400
+    }
 }

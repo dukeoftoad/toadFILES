@@ -481,6 +481,18 @@ private fun CategoryEntries(
                     onMore = { onEntryMore(e) },
                 )
             }
+            if (state.entries.size >= CategoriesViewModel.QUERY_LIMIT) {
+                item {
+                    Text(
+                        "Showing the first ${CategoriesViewModel.QUERY_LIMIT} results",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+            }
             item { Spacer(Modifier.height(16.dp)) }
         }
     }
