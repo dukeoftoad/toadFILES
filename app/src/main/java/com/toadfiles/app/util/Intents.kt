@@ -60,9 +60,10 @@ object Intents {
     /**
      * Content URI for sharing/opening a real file. The provider config keeps a root-path
      * catch-all for OEM removable volumes, so [UriGuard] is the second line of defence:
-     * system/internal locations (/data, /proc, /sys, …) are refused before a URI exists.
-     * Throws IllegalArgumentException for refused paths; every caller catches it and
-     * reports an honest failure or skips the item.
+     * only paths that CANONICALIZE under real shared-storage volumes are allowed, so a
+     * symlink or dot-segment alias pointing into /data or another private tree is
+     * refused by its real target. Throws IllegalArgumentException for refused paths;
+     * every caller catches it and reports an honest failure or skips the item.
      */
     fun contentUri(context: Context, file: File): Uri {
         require(UriGuard.isShareablePath(file.absolutePath)) {

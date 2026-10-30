@@ -34,7 +34,10 @@ import java.util.zip.ZipOutputStream
  *
  * Creation protections: the archive is written to a temporary sibling and renamed into
  * place only on success; a failing source aborts and deletes the incomplete archive
- * instead of publishing it; cancellation checkpoints run per buffer.
+ * instead of publishing it; cancellation checkpoints run per buffer and per directory.
+ * Symbolic links are never followed (audit P1.2): links to plain files are stored by
+ * content, links to folders and dangling links are skipped with a recorded reason, and
+ * a canonical visited-set makes link cycles impossible to recurse into.
  */
 object ZipSupport {
 
@@ -246,6 +249,9 @@ object ZipSupport {
         var done = 0
         val total = sources.size
         val usedEntryNames = mutableSetOf<String>()
+        val visited = mutableSetOf<String>()
+        val skipped = mutableListOf<String>()
+        var topLevelSkipped = 0
         var completed = false
         try {
             ZipOutputStream(FileOutputStream(tmp).buffered(BUFFER_SIZE)).use { zos ->
@@ -253,7 +259,16 @@ object ZipSupport {
                     try {
                         currentCoroutineContext().ensureActive()
                         onProgress(OpProgress(done, total, src.name))
-                        addToZip(src, uniqueEntryName(usedEntryNames, src.name), zos)
+                        val reason = unfollowableLinkReason(src)
+                        if (reason != null) {
+                            // The SOURCE ITSELF is a link we never follow: nothing of it
+                            // enters the archive. Nested skips inside a real folder are
+                            // recorded in `skipped` without failing the source.
+                            skipped += "${src.name}: not added: $reason (links are not followed)"
+                            topLevelSkipped++
+                        } else {
+                            addToZip(src, uniqueEntryName(usedEntryNames, src.name), zos, visited, skipped)
+                        }
                     } catch (ce: kotlinx.coroutines.CancellationException) {
                         cancelled = true
                         break
@@ -284,9 +299,16 @@ object ZipSupport {
             }
         }
         if (tmp.exists()) tmp.delete()
-        // `completed` implies every source was added; an archive that was never
-        // published means nothing the user asked for succeeded.
-        OpResult(if (completed) sources.size else 0, 0, fail, cancelled, failures)
+        // `completed` implies every followable source was added; an archive that was
+        // never published means nothing the user asked for succeeded. Unfollowed links
+        // are reported as skips (with reasons), not failures — the archive is still valid.
+        OpResult(
+            if (completed) sources.size - topLevelSkipped else 0,
+            skipped.size,
+            fail,
+            cancelled,
+            failures + skipped,
+        )
     }
 
     // ---------- internal helpers ----------
@@ -382,19 +404,66 @@ object ZipSupport {
         }
     }
 
-    private suspend fun addToZip(file: File, entryName: String, zos: ZipOutputStream) {
+    /**
+     * Adds [file] to the archive. Symbolic links are never followed (audit P1.2):
+     * links to plain files are stored by content; links to folders and dangling links
+     * are skipped with a recorded reason instead of expanding a tree outside the
+     * selection. [visited] holds canonical paths already added, so a link cycle cannot
+     * recurse forever. Cancellation is checked per file AND per directory.
+     */
+    private suspend fun addToZip(
+        file: File,
+        entryName: String,
+        zos: ZipOutputStream,
+        visited: MutableSet<String>,
+        skipped: MutableList<String>,
+    ) {
+        currentCoroutineContext().ensureActive()
+        val canonical = try {
+            file.canonicalPath
+        } catch (_: Exception) {
+            file.absolutePath
+        }
+        if (!visited.add(canonical)) return // link cycle / already added: never recurse twice
+        val reason = unfollowableLinkReason(file)
+        if (reason != null) {
+            skipped += "$entryName: not added: $reason (links are not followed)"
+            return
+        }
         if (file.isDirectory) {
             val children = file.listFiles()
             if (children.isNullOrEmpty()) {
                 zos.putNextEntry(ZipEntry("$entryName/"))
                 zos.closeEntry()
             } else {
-                for (c in children) addToZip(c, "$entryName/${c.name}", zos)
+                for (c in children) addToZip(c, "$entryName/${c.name}", zos, visited, skipped)
             }
             return
         }
-        // Open the source before opening the archive entry: an unreadable source then
-        // never leaves a half-open entry behind in the stream.
+        writeFileEntry(file, entryName, zos)
+    }
+
+    /** Non-null when [file] is a symbolic link this policy refuses to follow: a link to
+     *  a folder, or a dangling link. Links to plain files return null (stored by content). */
+    private fun unfollowableLinkReason(file: File): String? {
+        if (!java.nio.file.Files.isSymbolicLink(file.toPath())) return null
+        val target = try {
+            java.nio.file.Files.readAttributes(
+                file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+            )
+        } catch (_: Exception) {
+            null
+        }
+        return when {
+            target != null && target.isRegularFile -> null
+            target == null -> "broken symbolic link"
+            else -> "symbolic link to a folder"
+        }
+    }
+
+    /** Opens the source before the archive entry: an unreadable source then never
+     *  leaves a half-open entry behind in the stream. */
+    private suspend fun writeFileEntry(file: File, entryName: String, zos: ZipOutputStream) {
         FileInputStream(file).use { fis ->
             val entry = ZipEntry(entryName)
             entry.time = file.lastModified()

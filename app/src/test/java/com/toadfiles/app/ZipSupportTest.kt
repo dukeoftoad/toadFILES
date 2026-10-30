@@ -296,4 +296,98 @@ class ZipSupportTest {
         assertTrue(File(target, "empty").isDirectory)
         assertEquals("k", File(target, "full/keep.txt").readText())
     }
+
+    // ---------- audit P1.2: ZIP creation never follows directory symlinks ----------
+
+    private fun entryNames(zip: File): List<String> {
+        val names = mutableListOf<String>()
+        ZipInputStream(FileInputStream(zip)).use { zis ->
+            while (true) {
+                val e = zis.nextEntry ?: break
+                names += e.name
+                zis.closeEntry()
+            }
+        }
+        return names
+    }
+
+    @Test
+    fun `zip skips a symlink to an outside folder`() = runBlocking {
+        val outside = tmp.newFolder("outside").apply {
+            File(this, "secret.txt").writeText("must not leak")
+        }
+        val selection = tmp.newFolder("selection").apply {
+            File(this, "readme.txt").writeText("fine")
+            java.nio.file.Files.createSymbolicLink(
+                File(this, "link-to-outside").toPath(), outside.toPath(),
+            )
+        }
+        val out = File(tmp.newFolder("zips"), "a.zip")
+
+        val result = ZipSupport.zip(listOf(selection), out)
+
+        assertEquals(1, result.succeeded)
+        assertEquals(1, result.skipped)
+        assertEquals(0, result.failed)
+        val names = entryNames(out)
+        assertTrue(names.any { it.endsWith("readme.txt") })
+        // Nothing from the link target may appear in the archive.
+        assertFalse(names.any { it.contains("secret.txt") })
+    }
+
+    @Test
+    fun `zip stores file symlinks by content`() = runBlocking {
+        val target = tmp.newFile("target.txt").apply { writeText("via link") }
+        val dir = tmp.newFolder("filesel").apply {
+            File(this, "real.txt").writeText("real")
+            java.nio.file.Files.createSymbolicLink(File(this, "link.txt").toPath(), target.toPath())
+        }
+        val out = File(tmp.newFolder("zips"), "b.zip")
+
+        val result = ZipSupport.zip(listOf(dir), out)
+
+        assertEquals(1, result.succeeded)
+        assertEquals(0, result.skipped)
+        // The link's CONTENT made it into the archive.
+        val names = entryNames(out)
+        assertTrue(names.any { it.endsWith("link.txt") })
+    }
+
+    @Test
+    fun `zip survives a symlink cycle without recursing forever`() = runBlocking {
+        val dir = tmp.newFolder("cyclic").apply {
+            File(this, "keep.txt").writeText("x")
+        }
+        // a/link -> a  and  a/b/link -> a: classic cycle bait.
+        java.nio.file.Files.createSymbolicLink(File(dir, "self").toPath(), dir.toPath())
+        val sub = File(dir, "sub").apply { mkdirs() }
+        java.nio.file.Files.createSymbolicLink(File(sub, "up").toPath(), dir.toPath())
+        val out = File(tmp.newFolder("zips"), "c.zip")
+
+        val result = ZipSupport.zip(listOf(dir), out)
+
+        // Terminates (the visited set breaks the cycle), nothing duplicated.
+        val names = entryNames(out)
+        assertTrue(names.any { it.endsWith("keep.txt") })
+        assertTrue(names.count { it.endsWith("keep.txt") } == 1)
+    }
+
+    @Test
+    fun `zip reports a dangling symlink as skipped`() = runBlocking {
+        val dir = tmp.newFolder("dangling").apply {
+            File(this, "ok.txt").writeText("fine")
+            java.nio.file.Files.createSymbolicLink(
+                File(this, "broken.txt").toPath(),
+                File(this, "nowhere.txt").toPath(),
+            )
+        }
+        val out = File(tmp.newFolder("zips"), "d.zip")
+
+        val result = ZipSupport.zip(listOf(dir), out)
+
+        assertEquals(1, result.succeeded)
+        assertEquals(1, result.skipped)
+        assertEquals(0, result.failed)
+        assertTrue(entryNames(out).none { it.endsWith("broken.txt") })
+    }
 }

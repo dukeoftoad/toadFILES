@@ -51,12 +51,11 @@ release. Every item exists because the static audit flagged it as a real-world r
 - [ ] Extract a large ZIP and cancel halfway: no partial files published, no leftover
       staging directories.
 
-## 6. Emulator instrumentation gate
-The CI workflow runs `connectedDebugAndroidTest` on API 29 / 33 / 36 emulators as an
-**advisory** job (`continue-on-error: true`) until it has been green for two consecutive
-releases. Promotion to blocking:
-- [ ] Confirm all three API levels pass consistently on `main`.
-- [ ] Remove `continue-on-error` from the `instrumented` job in `.github/workflows/android.yml`.
+## 6. Instrumentation on a real device
+CI does NOT run `connectedDebugAndroidTest` — hosted-runner emulators proved slow and
+flaky, so the emulator matrix was removed. Instrumentation is a local, on-device step:
+- [ ] On a physical device (or a locally booted emulator of your choice):
+      `./gradlew :app:connectedDebugAndroidTest`.
 - [ ] Keep device/OEM-only checks (sections 1–5) manual — emulators cannot cover them.
 
 ## 7. Release mechanics

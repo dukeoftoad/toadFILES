@@ -9,10 +9,11 @@
          "Failed to find configured root" the moment a user taps a file there. The
          provider is not exported and hands out read grants per-intent only, so the
          wide root is contained to apps the user explicitly shares/opens with.
-         Policy: the wide root stays, but URI generation is additionally guarded by
-         a path denylist at creation time (util/UriGuard.isShareablePath) — system
-         and internal locations (/data, /proc, /sys, /dev, /system, /vendor, /apex,
-         /product) are never handed out, so in practice only user-visible storage
-         paths can become share URIs. -->
+         Policy: the wide root stays, but URI generation is guarded by a canonical
+         ALLOWLIST (util/UriGuard.isShareablePath) — only paths that canonicalize
+         under real shared-storage volumes (/storage/emulated/N, /storage/XXXX-XXXX)
+         are ever handed out, and the app-private Android/data & Android/obb trees
+         are refused, so symlinks and dot-segment aliases cannot smuggle private or
+         system files to other apps (audit P1.1). -->
     <root-path name="device_root" path="." />
 </paths>

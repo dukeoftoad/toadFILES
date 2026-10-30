@@ -52,7 +52,7 @@ Grab the APK from the [Releases](https://github.com/dukeoftoad/toadFILES/release
 
 Android Studio (Koala or newer) works too. Tests are plain JVM tests running on Robolectric, so no emulator is needed.
 
-The instrumentation suite (`./gradlew :app:connectedDebugAndroidTest`) does need a device or emulator, so CI runs it for you on emulators for API 29, 33 and 36 on every push and pull request — the same gate lint, unit tests and APK assembly go through.
+The instrumentation suite (`./gradlew :app:connectedDebugAndroidTest`) needs a real device or emulator; CI deliberately does not run it — hosted-runner emulators proved slow and flaky, so device-only behavior is covered by the manual release checklist (docs/RELEASE_CHECKLIST.md) instead.
 
 To regenerate the README screenshots after UI changes:
 
