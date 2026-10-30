@@ -390,4 +390,201 @@ class ZipSupportTest {
         assertEquals(0, result.failed)
         assertTrue(entryNames(out).none { it.endsWith("broken.txt") })
     }
+
+    // ---------- audit P2.2 / P2.4: all-or-nothing replace publication ----------
+
+    @Test
+    fun `replace extraction rolls back to the previous contents when publication fails`() = runBlocking {
+        val dir = tmp.newFolder("p1")
+        val zip = File(dir, "a.zip")
+        makeZip(
+            zip,
+            mapOf(
+                "a.txt" to "NEW-A".toByteArray(),          // new file: published, then rolled back
+                "sub/x.txt" to "NEW-X".toByteArray(),      // replaced file: backed up, then restored
+                "sub/deep/y.txt" to "NEW-Y".toByteArray(), // fails: its folder is read-only
+            ),
+        )
+        val target = File(dir, "out").apply { mkdirs() }
+        File(target, "sub").apply { mkdirs() }
+        File(target, "sub/x.txt").writeText("OLD-X")
+        val deep = File(target, "sub/deep").apply { mkdirs() }
+        File(deep, "keep.txt").writeText("KEEP")
+        assertTrue(deep.setWritable(false))
+
+        try {
+            val r = ZipSupport.extract(zip, target, replace = true)
+
+            // Precise partial-commit description: nothing was applied, everything undone.
+            assertEquals(0, r.succeeded)
+            assertEquals(1, r.failed)
+            assertTrue("item failure must be reported, got $r", r.failures.any { it.contains("sub/deep/y.txt") })
+            assertTrue("rollback must be described, got $r", r.failures.any { it.contains("rolled back") })
+            // Pre-existing files are intact.
+            assertEquals("OLD-X", File(target, "sub/x.txt").readText())
+            assertEquals("KEEP", File(deep, "keep.txt").readText())
+            // Rolled-back and never-published items are gone.
+            assertFalse(File(target, "a.txt").exists())
+            assertFalse(File(deep, "y.txt").exists())
+            // No backup, staging or temp leftovers anywhere.
+            assertTrue(
+                dir.walkTopDown()
+                    .none { it.name.contains(".tf-old-") || it.name.contains(".staging-") || it.name.contains(".part-") },
+            )
+        } finally {
+            deep.setWritable(true)
+        }
+    }
+
+    @Test
+    fun `replace extraction success deletes its backups and leaves no temp files`() = runBlocking {
+        val dir = tmp.newFolder("p2")
+        val zip = File(dir, "a.zip")
+        makeZip(
+            zip,
+            mapOf(
+                "same.txt" to "NEW".toByteArray(),
+                "sub/old.txt" to "REPLACED".toByteArray(),
+                "new.txt" to "ADDED".toByteArray(),
+            ),
+        )
+        val target = File(dir, "out").apply { mkdirs() }
+        File(target, "same.txt").writeText("OLD")
+        File(File(target, "sub").apply { mkdirs() }, "old.txt").writeText("OLD2")
+
+        val r = ZipSupport.extract(zip, target, replace = true)
+
+        assertEquals(0, r.failed)
+        assertEquals(3, r.succeeded)
+        assertEquals("NEW", File(target, "same.txt").readText())
+        assertEquals("REPLACED", File(target, "sub/old.txt").readText())
+        assertEquals("ADDED", File(target, "new.txt").readText())
+        assertEquals(
+            "no backup leftovers may remain",
+            setOf("same.txt", "sub", "new.txt"),
+            target.listFiles()!!.map { it.name }.toSet(),
+        )
+        assertTrue(
+            dir.walkTopDown()
+                .none { it.name.contains(".tf-old-") || it.name.contains(".staging-") || it.name.contains(".part-") },
+        )
+    }
+
+    @Test
+    fun `cancellation at the publication checkpoint keeps the destination untouched`() = runBlocking {
+        val dir = tmp.newFolder("p3")
+        val zip = File(dir, "a.zip")
+        makeZip(zip, mapOf("same.txt" to "NEW".toByteArray()))
+        val target = File(dir, "out").apply { mkdirs() }
+        File(target, "same.txt").writeText("OLD")
+        var job: kotlinx.coroutines.Job? = null
+        val job2 = launch {
+            try {
+                ZipSupport.extract(zip, target, replace = true) { p ->
+                    // Cancel once the entry finished staging: the next checkpoint is the
+                    // publication loop (audit P2.4).
+                    if (p.currentItem == "same.txt") job?.cancel()
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                // cooperative cancellation surfaces as cancellation of the caller job
+            }
+        }
+        job = job2
+        job2.join()
+        assertEquals("OLD", File(target, "same.txt").readText())
+        assertTrue(dir.listFiles()!!.none { it.name.contains(".staging-") || it.name.contains(".tf-old-") })
+    }
+
+    // ---------- audit P2.3: ratio accounting measures consumed bytes, not prefetch ----------
+
+    /** Deterministic pseudo-random bytes: DEFLATE cannot shrink them, so the real
+     *  expansion ratio of an entry carrying them stays near 1:1. */
+    private fun incompressible(size: Int, seed: Long): ByteArray =
+        ByteArray(size).also { java.util.Random(seed).nextBytes(it) }
+
+    @Test
+    fun `small archive inside one buffer keeps the ratio denominator real`() = runBlocking {
+        val dir = tmp.newFolder("p4")
+        val zip = File(dir, "one.zip")
+        // ~40 KiB archive: the whole thing fits inside one 64 KiB read-ahead buffer.
+        val payload = incompressible(40_000, seed = 7)
+        makeZip(zip, mapOf("rand.bin" to payload))
+        assertTrue("precondition: archive inside one buffer", zip.length() < 64 * 1024)
+
+        val r = ZipSupport.extract(
+            zip, File(dir, "out"), replace = false, limits = ZipSupport.Limits(maxRatio = 2),
+        )
+
+        // A legitimate ~1:1 entry under a 2x cap must not be rejected, even though its
+        // compressed bytes were prefetched long before the entry started.
+        assertTrue("legitimate entry must not be rejected, got $r", r.failed == 0)
+        assertEquals(1, r.succeeded)
+        assertTrue(payload.contentEquals(File(File(dir, "out"), "rand.bin").readBytes()))
+    }
+
+    @Test
+    fun `multiple entries inside one buffer each get a real ratio denominator`() = runBlocking {
+        val dir = tmp.newFolder("p5")
+        val zip = File(dir, "many.zip")
+        val payloads = listOf(
+            incompressible(8_000, seed = 101),
+            incompressible(8_000, seed = 102),
+            incompressible(8_000, seed = 103),
+        )
+        makeZip(zip, mapOf("a.bin" to payloads[0], "b.bin" to payloads[1], "c.bin" to payloads[2]))
+        assertTrue("precondition: archive inside one buffer", zip.length() < 64 * 1024)
+
+        val r = ZipSupport.extract(
+            zip, File(dir, "out"), replace = false, limits = ZipSupport.Limits(maxRatio = 2),
+        )
+
+        // compressedAtStart is captured after every nextEntry, so each entry is judged
+        // by its own consumed bytes, not by a stale prefetch count.
+        assertTrue("every entry is legitimate, got $r", r.failed == 0)
+        assertEquals(3, r.succeeded)
+        payloads.forEachIndexed { i, payload ->
+            assertTrue(payload.contentEquals(File(File(dir, "out"), "${'a' + i}.bin").readBytes()))
+        }
+    }
+
+    @Test
+    fun `legitimate entry just below the ratio limit is not rejected`() = runBlocking {
+        val dir = tmp.newFolder("p6")
+        val zip = File(dir, "mix.zip")
+        // 45% pseudo-random bytes, 55% zero runs: DEFLATE stores the random part almost
+        // verbatim and the runs nearly for free, so the real ratio lands around 1.8 —
+        // just below the 2x cap — while the archive stays inside one buffer.
+        val payload = ByteArray(60_000)
+        val rnd = java.util.Random(11)
+        for (i in payload.indices) payload[i] = if (i % 20 < 9) rnd.nextInt(256).toByte() else 0
+        makeZip(zip, mapOf("mix.bin" to payload))
+        assertTrue("precondition: archive inside one buffer", zip.length() < 64 * 1024)
+
+        val r = ZipSupport.extract(
+            zip, File(dir, "out"), replace = false, limits = ZipSupport.Limits(maxRatio = 2),
+        )
+
+        assertTrue("entry below the ratio limit must pass, got $r", r.failed == 0)
+        assertEquals(1, r.succeeded)
+        assertTrue(payload.contentEquals(File(File(dir, "out"), "mix.bin").readBytes()))
+    }
+
+    @Test
+    fun `high-ratio bomb inside one buffer is rejected`() = runBlocking {
+        val dir = tmp.newFolder("p7")
+        val zip = File(dir, "bomb.zip")
+        // ~200 KiB of zeros compress to a few hundred bytes: a >500:1 bomb whose whole
+        // archive still fits inside one 64 KiB read-ahead buffer.
+        makeZip(zip, mapOf("bomb.bin" to ByteArray(200_000)))
+        assertTrue("precondition: archive inside one buffer", zip.length() < 64 * 1024)
+
+        val r = ZipSupport.extract(
+            zip, File(dir, "out"), replace = false, limits = ZipSupport.Limits(maxRatio = 50),
+        )
+
+        assertTrue(r.failures.any { it.contains("zip bomb") })
+        assertEquals(0, r.succeeded)
+        assertFalse("aborted extraction must not publish", File(dir, "out").exists())
+        assertTrue(dir.listFiles()!!.none { it.name.contains(".staging-") })
+    }
 }

@@ -1,6 +1,8 @@
 package com.toadfiles.app
 
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.domain.TrashEntry
+import com.toadfiles.app.domain.TrashResult
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +13,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class TrashTest {
 
@@ -18,8 +22,9 @@ class TrashTest {
     val tmp = TemporaryFolder()
 
     @After
-    fun resetClock() {
+    fun resetTrashSeams() {
         Trash.clock = { System.currentTimeMillis() }
+        Trash.onAfterPendingWrite = null
     }
 
     private fun volume(): File = tmp.newFolder()
@@ -358,8 +363,9 @@ class TrashTest {
         assertTrue(payload.exists())
     }
 
-    /** Audit P2.7: a user's real "*.tfmeta" payload with a same-basename sibling is
-     *  NOT migrated into .meta — only records with the valid metadata schema are. */
+    /** Audit P2.7 collision test: a user's real "*.tfmeta" payload with a same-basename
+     *  sibling is NOT migrated into .meta — only records with the valid metadata schema
+     *  are. Both files stay listed as payloads. */
     @Test
     fun `user tfmeta file with sibling is not mistaken for legacy metadata`() {
         val vol = volume()
@@ -375,5 +381,139 @@ class TrashTest {
         assertTrue("notes" in names)
         // Nothing was migrated into .meta — the user file is still a payload.
         assertFalse(File(metaDir(vol), "notes.tfmeta").exists())
+    }
+
+    /** Audit P2.7, stricter: even a "*.tfmeta" file whose content parses as valid
+     *  metadata is not migrated unless its origin actually names the sibling payload. */
+    @Test
+    fun `valid-looking metadata that does not reference the sibling stays a payload`() {
+        val vol = volume()
+        val dir = trashDir(vol).apply { mkdirs() }
+        // Parses as perfectly valid metadata — but for "other.txt", not for "notes".
+        val userPayload = File(dir, "notes.tfmeta")
+            .apply { writeText("origin=/elsewhere/other.txt\ntrashedAt=99") }
+        File(dir, "notes").apply { writeText("the sibling") }
+
+        val entries = Trash.entries(listOf(vol))
+        val names = entries.map { it.file.name }.toSet()
+        assertTrue("notes.tfmeta" in names)
+        assertTrue("notes" in names)
+        assertFalse("nothing was migrated into .meta", File(metaDir(vol), "notes.tfmeta").exists())
+        assertEquals(
+            "the user file was not touched",
+            "origin=/elsewhere/other.txt\ntrashedAt=99",
+            userPayload.readText(),
+        )
+    }
+
+    /** Positive control for the strict validation: a genuine legacy sidecar for a
+     *  clash-renamed payload ("<stamp>_<n>_<name>") still migrates — the origin matches
+     *  once the stamp groups are stripped. */
+    @Test
+    fun `legacy sidecar for a clash-renamed payload still migrates`() {
+        val vol = volume()
+        val dir = trashDir(vol).apply { mkdirs() }
+        val payload = File(dir, "123_2_dup.txt").apply { writeText("x") }
+        File(dir, "123_2_dup.txt.tfmeta")
+            .writeText("origin=/somewhere/dup.txt\ntrashedAt=7")
+
+        val entries = Trash.entries(listOf(vol))
+
+        assertEquals(1, entries.size)
+        assertEquals("/somewhere/dup.txt", entries[0].originPath)
+        assertFalse(File(dir, "123_2_dup.txt.tfmeta").exists())
+        assertTrue(sidecarOf(payload).exists())
+    }
+
+    /** Positive control: an original name that itself starts with "<digits>_" must not
+     *  be over-stripped — the sidecar still migrates with its real origin. */
+    @Test
+    fun `legacy sidecar for an original name starting with digits still migrates`() {
+        val vol = volume()
+        val dir = trashDir(vol).apply { mkdirs() }
+        val payload = File(dir, "1000_2024_report.txt").apply { writeText("x") }
+        File(dir, "1000_2024_report.txt.tfmeta")
+            .writeText("origin=/somewhere/2024_report.txt\ntrashedAt=8")
+
+        val entries = Trash.entries(listOf(vol))
+
+        assertEquals(1, entries.size)
+        assertEquals("/somewhere/2024_report.txt", entries[0].originPath)
+        assertTrue(sidecarOf(payload).exists())
+    }
+
+    // ---------- audit P2.6: a listing must never prune an in-flight transaction ----------
+
+    /** Deterministic barrier test (audit P2.6): trash() parks in the window between the
+     *  pending-sidecar write and the payload rename, and only then is a listing started.
+     *  The one repository lock must hold the listing back until the transaction commits:
+     *  the pending record is promoted (not pruned), trash() completes without a
+     *  rollback, and the item ends up listed and restorable. Latches only — no sleeps. */
+    @Test
+    fun `listing started mid-transaction never prunes the in-flight pending record`() {
+        val vol = volume()
+        val src = File(vol, "inflight.txt").apply { writeText("data") }
+        Trash.clock = { 4242L }
+
+        val parked = CountDownLatch(1)
+        val listingStarted = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        Trash.onAfterPendingWrite = {
+            parked.countDown()
+            release.await(10, TimeUnit.SECONDS)
+        }
+        /** Daemon threads: a parked latch must never keep the test JVM alive after a failure. */
+        fun thread(name: String, block: () -> Unit): Thread =
+            Thread({ block() }, name).apply { isDaemon = true }
+
+        var trashResult: TrashResult? = null
+        val trashing = thread("trash-in-flight") {
+            trashResult = Trash.trash(listOf(src), listOf(vol))
+        }.apply { start() }
+        try {
+            assertTrue("trash() never reached the pending window", parked.await(10, TimeUnit.SECONDS))
+
+            // Parked exactly between the pending write and the payload rename.
+            val pending = File(metaDir(vol), "4242_inflight.txt.tfmeta.pending")
+            assertTrue("pending record is on disk", pending.exists())
+            assertFalse("payload not moved yet", File(trashDir(vol), "4242_inflight.txt").exists())
+            assertTrue("origin untouched while parked", src.exists())
+
+            var listed: List<TrashEntry> = emptyList()
+            val listing = thread("trash-listing") {
+                listingStarted.countDown()
+                listed = Trash.entries(listOf(vol))
+            }.apply { start() }
+            assertTrue("listing never started", listingStarted.await(10, TimeUnit.SECONDS))
+
+            // The listing may only proceed once the transaction released the lock.
+            release.countDown()
+            trashing.join(TimeUnit.SECONDS.toMillis(10))
+            listing.join(TimeUnit.SECONDS.toMillis(10))
+            assertFalse("trash() did not finish", trashing.isAlive)
+            assertFalse("listing did not finish", listing.isAlive)
+
+            // The transaction completed: no rollback, the pending record was promoted.
+            val result = trashResult!!
+            assertEquals(listOf(File(trashDir(vol), "4242_inflight.txt")), result.moved)
+            assertTrue(result.rolledBack.isEmpty())
+            assertTrue(result.failed.isEmpty())
+            assertFalse("pending record was pruned mid-transaction", pending.exists())
+            assertTrue(File(metaDir(vol), "4242_inflight.txt.tfmeta").exists())
+
+            // The listing saw the committed item…
+            assertEquals(1, listed.size)
+            assertEquals(src.absolutePath, listed[0].originPath)
+
+            // …and it is restorable.
+            val restored = Trash.restore(listed[0].file)
+            assertNotNull(restored)
+            assertEquals(src.absolutePath, restored!!.absolutePath)
+            assertEquals("data", src.readText())
+        } finally {
+            release.countDown() // never leave the parked transaction hanging
+            if (trashing.isAlive) trashing.join(TimeUnit.SECONDS.toMillis(10))
+            Trash.onAfterPendingWrite = null
+        }
     }
 }

@@ -12,8 +12,11 @@ import com.toadfiles.app.domain.StorageStats
 import com.toadfiles.app.domain.Trash
 import java.io.File
 
-/** Read access to the real file system. Nothing is touched until a screen asks for it. */
-class FileRepository(private val context: Context) {
+/**
+ * Read access to the real file system. Nothing is touched until a screen asks for it.
+ * [open] only so tests can inject a gated subclass (see BrowseViewModelTest).
+ */
+open class FileRepository(private val context: Context) {
 
     fun primaryRoot(): File = Environment.getExternalStorageDirectory()
 
@@ -97,7 +100,8 @@ class FileRepository(private val context: Context) {
         }
     }
 
-    fun list(dir: File, showHidden: Boolean): List<FileItem> {
+    /** [open] only so tests can park/gate the listing for deterministic race regressions. */
+    open fun list(dir: File, showHidden: Boolean): List<FileItem> {
         val children = if (dir.isDirectory && dir.canRead()) dir.listFiles() else return emptyList()
         return children.orEmpty()
             // The trash folder is managed by the Trash screen; keep it out of Browse.
