@@ -107,11 +107,11 @@ class CategoriesViewModel(
             val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
             val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            val trashed = withPath.filter { (_, f) -> f.exists() }
+            val result = withPath.filter { (_, f) -> f.exists() }
                 .map { (_, f) -> f }
                 .let { Trash.trash(it, roots) }
             container.mediaRepo.deleteStale(entries)
-            val ok = trashed.size
+            val ok = result.moved.size
             _state.update {
                 it.copy(
                     toast = when {

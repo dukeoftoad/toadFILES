@@ -8,8 +8,13 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 
 data class OpProgress(val done: Int, val total: Int, val currentItem: String)
 
@@ -33,21 +38,38 @@ data class OpResult(
  * Real file-system operations with honest reporting: every skipped or failed item is
  * counted and listed, never silently ignored. All work runs on Dispatchers.IO and is
  * cooperatively cancellable; partial targets are cleaned up on cancellation.
+ *
+ * Data-safety rules enforced here:
+ * - Symbolic links are never followed during traversal: deleting a link unlinks the
+ *   link itself, and copies/sizes never expand a linked folder (link cycles terminate).
+ * - REPLACE never destroys the old destination until the replacement is complete
+ *   (stage -> backup -> swap, with the backup restored on any failure).
+ * - Cross-volume moves stage a full copy under a hidden name and only then publish it.
  */
 object FileOps {
 
     private const val BUFFER = 64 * 1024
 
+    /** Hidden staging/backup name prefixes; dot-prefixed so normal listings skip them. */
+    private const val STAGE_PREFIX = ".tf-stage-"
+    private const val BACKUP_PREFIX = ".tf-old-"
+
     fun listFilesSafe(dir: File): List<File>? =
         if (dir.isDirectory && dir.canRead()) dir.listFiles()?.toList() else null
 
     fun sizeOf(file: File): Long = try {
-        if (file.isDirectory) {
+        if (isSymlink(file)) {
+            noFollowSize(file)
+        } else if (file.isDirectory) {
             var total = 0L
             val stack = ArrayDeque<File>()
             stack.addLast(file)
             while (stack.isNotEmpty()) {
                 val f = stack.removeLast()
+                if (isSymlink(f)) {
+                    total += noFollowSize(f)
+                    continue
+                }
                 val children = if (f.isDirectory) f.listFiles() else null
                 if (children != null) children.forEach { stack.addLast(it) }
                 else if (f.isFile) total += f.length()
@@ -84,10 +106,11 @@ object FileOps {
                     skip++; continue
                 }
                 if (dest.exists() && strategy == ConflictStrategy.REPLACE) {
-                    if (!deleteRecursively(dest)) {
-                        fail++; failures += "Could not replace ${dest.name}"
-                        continue
+                    val error = swapReplace(src, dest) { staging ->
+                        copyRecursively(src, staging) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
                     }
+                    if (error == null) ok++ else { fail++; failures += error }
+                    continue
                 }
                 copyRecursively(src, dest) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
                     .let { copied ->
@@ -126,23 +149,63 @@ object FileOps {
                 } else src.name
                 val dest = File(targetDir, destName)
                 if (dest.exists() && strategy == ConflictStrategy.SKIP) { skip++; continue }
-                val moved = if (dest.exists() && strategy == ConflictStrategy.REPLACE) {
-                    if (!deleteRecursively(dest)) {
+                if (dest.exists() && strategy == ConflictStrategy.REPLACE) {
+                    // Move the old destination aside first; it stays recoverable until
+                    // the replacement is fully in place. (The source is never renamed
+                    // into a staging slot here: a failed swap would have to un-do it.)
+                    val backup = File(targetDir, PathSafety.uniqueName(targetDir, BACKUP_PREFIX + dest.name))
+                    if (!dest.renameTo(backup)) {
                         fail++; failures += "Could not replace ${dest.name}"; continue
                     }
-                    tryRename(src, dest)
-                } else tryRename(src, dest)
+                    var replaced = false
+                    try {
+                        // The destination path is free now, so a same-volume rename
+                        // usually finishes the job in one atomic step.
+                        if (tryRename(src, dest)) {
+                            replaced = true
+                        } else {
+                            // Cross-volume: stage a full copy under a hidden name and
+                            // only then publish it under the final name.
+                            val staging = File(targetDir, PathSafety.uniqueName(targetDir, STAGE_PREFIX + src.name))
+                            try {
+                                val copied = copyRecursively(src, staging) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
+                                if (copied && staging.renameTo(dest)) replaced = true else fail++
+                            } finally {
+                                if (staging.exists() && !replaced) deleteRecursively(staging)
+                            }
+                        }
+                        if (replaced) {
+                            deleteRecursively(src) // no-op when the rename already moved it
+                            ok++
+                        }
+                    } finally {
+                        if (replaced) {
+                            if (backup.exists()) deleteRecursively(backup)
+                        } else if (!backup.renameTo(dest)) {
+                            failures += "Could not restore the previous ${dest.name}; old copy kept as ${backup.name}"
+                        }
+                    }
+                    continue
+                }
+                val moved = tryRename(src, dest)
                 if (moved) {
                     ok++
                 } else {
-                    // Cross-volume move: copy then delete source.
-                    val r = copyRecursively(src, dest) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
-                    if (r) {
-                        if (src.isDirectory) deleteRecursively(src) else src.delete()
-                        ok++
-                    } else {
-                        fail++
-                        deleteRecursively(dest)
+                    // Cross-volume move: stage a full copy under a hidden name and only
+                    // then publish it, so the destination path never holds a partial tree.
+                    val staging = File(targetDir, PathSafety.uniqueName(targetDir, STAGE_PREFIX + src.name))
+                    var published = false
+                    try {
+                        val copied = copyRecursively(src, staging) { name, e -> failures += "$name: ${e?.message ?: "error"}" }
+                        if (copied && staging.renameTo(dest)) {
+                            deleteRecursively(src)
+                            ok++
+                            published = true
+                        } else {
+                            fail++
+                        }
+                    } finally {
+                        if (!published && staging.exists()) deleteRecursively(staging)
                     }
                 }
             } catch (ce: kotlinx.coroutines.CancellationException) {
@@ -168,7 +231,8 @@ object FileOps {
             try {
                 currentCoroutineContext().ensureActive()
                 onProgress(OpProgress(index, sources.size, src.name))
-                if (!src.exists()) { ok++; continue }
+                // A dangling symlink has exists() == false but still needs unlinking.
+                if (!src.exists() && !isSymlink(src)) { ok++; continue }
                 if (deleteRecursively(src)) ok++ else { fail++; failures += "Could not delete ${src.name}" }
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 cancelled = true
@@ -191,6 +255,61 @@ object FileOps {
 
     // ---------- internal helpers ----------
 
+    /** True when [file] is a symbolic link, checked without following it. */
+    private fun isSymlink(file: File): Boolean =
+        try {
+            Files.isSymbolicLink(file.toPath())
+        } catch (_: Exception) {
+            false
+        }
+
+    /** The size of the link itself, never of the thing it points at. */
+    private fun noFollowSize(file: File): Long = try {
+        Files.readAttributes(file.toPath(), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).size()
+    } catch (_: Exception) {
+        0L
+    }
+
+    /**
+     * Replaces an existing [dest] with a fresh copy of [src] while keeping the old
+     * destination recoverable until the replacement is fully in place:
+     * 1. [stage] materialises the new content under a hidden staging name (the old
+     *    destination stays untouched while this runs);
+     * 2. the old destination is renamed to a hidden backup (same directory, cheap);
+     * 3. the staged item is promoted onto [dest] with a rename in the same directory.
+     * On any failure the backup is renamed back, so [dest] is never left missing or
+     * half-written. Returns null on success or a failure message for the report.
+     */
+    private suspend fun swapReplace(
+        src: File,
+        dest: File,
+        stage: (File) -> Boolean,
+    ): String? {
+        val dir = dest.parentFile ?: return "Could not replace ${dest.name}"
+        val staging = File(dir, PathSafety.uniqueName(dir, STAGE_PREFIX + dest.name))
+        var backup: File? = null
+        try {
+            currentCoroutineContext().ensureActive()
+            if (!stage(staging)) return "Could not replace ${dest.name}"
+            currentCoroutineContext().ensureActive()
+            backup = File(dir, PathSafety.uniqueName(dir, BACKUP_PREFIX + dest.name))
+            if (!dest.renameTo(backup)) return "Could not replace ${dest.name}"
+            if (!staging.renameTo(dest)) {
+                if (!backup.renameTo(dest)) {
+                    // Could not restore either: keep the old content under its hidden name.
+                    val kept = backup.name
+                    backup = null
+                    return "Could not replace ${dest.name}; old copy kept as $kept"
+                }
+                return "Could not replace ${dest.name}"
+            }
+            return null
+        } finally {
+            if (staging.exists()) deleteRecursively(staging)
+            backup?.let { if (it.exists()) deleteRecursively(it) }
+        }
+    }
+
     private fun tryRename(src: File, dest: File): Boolean =
         try {
             if (src.isDirectory) {
@@ -210,7 +329,23 @@ object FileOps {
         onItemFailure: (String, Exception?) -> Unit,
     ): Boolean {
         return try {
-            if (src.isDirectory) {
+            if (isSymlink(src)) {
+                // Policy: links to plain files are copied by content; links to folders
+                // (and broken links) are never followed — they are recorded instead of
+                // silently expanding the linked tree or looping on a link cycle.
+                val target = try {
+                    Files.readAttributes(src.toPath(), BasicFileAttributes::class.java)
+                } catch (_: Exception) {
+                    null
+                }
+                if (target != null && target.isRegularFile) {
+                    copyFileContents(src, dest)
+                } else {
+                    val why = if (target == null) "broken symbolic link" else "symbolic link to a folder"
+                    onItemFailure(src.name, IOException("not copied: $why (links are not followed)"))
+                    false
+                }
+            } else if (src.isDirectory) {
                 if (!dest.exists() && !dest.mkdirs()) {
                     onItemFailure(dest.name, IOException("mkdir failed"))
                     return false
@@ -229,18 +364,7 @@ object FileOps {
                 }
                 all
             } else {
-                if (dest.exists() && dest.length() == src.length()) return true // already there
-                FileInputStream(src).use { input ->
-                    FileOutputStream(dest).use { output ->
-                        val buf = ByteArray(BUFFER)
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n == -1) break
-                            output.write(buf, 0, n)
-                        }
-                    }
-                }
-                true
+                copyFileContents(src, dest)
             }
         } catch (e: Exception) {
             onItemFailure(src.name, e)
@@ -248,11 +372,50 @@ object FileOps {
         }
     }
 
-    fun deleteRecursively(file: File): Boolean {
-        if (!file.exists()) return true
-        if (file.isDirectory) {
-            file.listFiles()?.forEach { if (!deleteRecursively(it)) return false }
+    private fun copyFileContents(src: File, dest: File): Boolean {
+        if (dest.exists() && dest.length() == src.length()) return true // already there
+        FileInputStream(src).use { input ->
+            FileOutputStream(dest).use { output ->
+                val buf = ByteArray(BUFFER)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n == -1) break
+                    output.write(buf, 0, n)
+                }
+            }
         }
-        return file.delete()
+        return true
+    }
+
+    /**
+     * Deletes [file] and, for a real directory, everything inside it. Symbolic links —
+     * including links to directories and dangling links — are unlinked themselves;
+     * their targets are never entered, so deleting a link can never touch the linked
+     * folder's contents and link cycles cannot occur.
+     */
+    fun deleteRecursively(file: File): Boolean {
+        return try {
+            val path = file.toPath()
+            if (Files.isSymbolicLink(path)) {
+                Files.delete(path)
+                return true
+            }
+            if (!file.exists()) return true
+            Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
+                override fun visitFile(f: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    Files.delete(f) // also unlinks file symlinks without touching their targets
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                    exc?.let { throw it }
+                    Files.delete(dir)
+                    return FileVisitResult.CONTINUE
+                }
+            })
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }
