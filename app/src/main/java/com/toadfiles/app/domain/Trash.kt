@@ -30,9 +30,12 @@ data class TrashResult(
  * volume (just a rename, never a copy) with a small ".tfmeta" sidecar in a dedicated
  * ".meta" subfolder that remembers the original path. Sidecars are committed
  * transactionally: the payload is only counted as trashed once its metadata is in place,
- * and a metadata failure rolls the payload back to where it came from. Permanent deletion
- * removes the payload first and the sidecar only after that succeeded, so an item is
- * never left in the trash without its restore metadata. Items older than
+ * and a metadata failure rolls the payload back to where it came from. A process death
+ * between the payload move and the metadata commit leaves a valid ".pending" record —
+ * the next listing promotes it to a committed sidecar, so the item stays restorable
+ * (audit P1.3). All mutations and listings run under one lock, so orphan cleanup can
+ * never race an in-flight transaction (audit P2.6). Permanent deletion removes the
+ * payload first and the sidecar only after that succeeded. Items older than
  * [RETENTION_DAYS] days are purged automatically. Plain file IO only, so the whole thing
  * is pure JVM and unit-testable.
  */
@@ -46,6 +49,10 @@ object Trash {
     private const val META_SUFFIX = ".tfmeta"
     private const val PENDING_SUFFIX = ".pending"
     private const val DAY_MS = 24L * 60 * 60 * 1000
+
+    /** Serializes every mutation/listing: orphan cleanup must never race an in-flight
+     *  transaction (audit P2.6), and crash recovery must never race a concurrent trash(). */
+    private val lock = Any()
 
     /** Clock seam for tests: trash names and timestamps derive from it. */
     internal var clock: () -> Long = { System.currentTimeMillis() }
@@ -65,7 +72,7 @@ object Trash {
     }
 
     /** Moves [files] into the trash, reporting every item's outcome. */
-    fun trash(files: List<File>, volumeRoots: List<File>): TrashResult {
+    fun trash(files: List<File>, volumeRoots: List<File>): TrashResult = synchronized(lock) {
         val moved = mutableListOf<File>()
         val rolledBack = mutableListOf<File>()
         val failed = mutableListOf<File>()
@@ -116,7 +123,7 @@ object Trash {
     }
 
     /** Restores a trashed item to its original location. Returns the restored file or null. */
-    fun restore(trashed: File): File? {
+    fun restore(trashed: File): File? = synchronized(lock) {
         val meta = readMeta(trashed) ?: return null
         val parent = File(meta.second.substringBeforeLast('/', ""))
         val target = when {
@@ -141,14 +148,14 @@ object Trash {
      * only after that succeeded, so a failed deletion leaves the item listed (and
      * restorable where possible) instead of stranded without metadata.
      */
-    fun deleteForever(trashed: File): Boolean {
+    fun deleteForever(trashed: File): Boolean = synchronized(lock) {
         val ok = FileOps.deleteRecursively(trashed)
         if (ok) metaFor(trashed).delete()
-        return ok
+        ok
     }
 
     /** All trashed items across [volumeRoots], newest first. */
-    fun entries(volumeRoots: List<File>): List<TrashEntry> {
+    fun entries(volumeRoots: List<File>): List<TrashEntry> = synchronized(lock) {
         val out = mutableListOf<TrashEntry>()
         for (root in volumeRoots) {
             val dir = dirFor(root)
@@ -162,6 +169,12 @@ object Trash {
                 }
             }
             val payloads = mutableListOf<File>()
+            // Crash recovery (audit P1.3): a process death between the payload rename and
+            // the sidecar commit leaves a valid ".pending" record next to an existing
+            // payload. Promote it to a committed sidecar BEFORE reading metadata, so the
+            // item is listed with its real origin and stays restorable. Pending records
+            // without a payload are orphans and fall through to pruneOrphanMeta.
+            recoverPendingMeta(dir)
             for (f in children) {
                 if (f.name == META_DIR_NAME || f in migrated) continue
                 if (!f.exists()) continue // moved away between the two passes
@@ -209,16 +222,66 @@ object Trash {
     }
 
     /** Returns (trashedAt, originPath), or null when the sidecar is missing or corrupt. */
-    private fun readMeta(trashed: File): Pair<Long, String>? = try {
+    private fun readMeta(trashed: File): Pair<Long, String>? {
+        val committed = try {
+            parseMeta(metaFor(trashed).readText())
+        } catch (_: Exception) {
+            null
+        }
+        if (committed != null) return committed
+        // Crash window (audit P1.3): the payload moved but the sidecar is still
+        // ".pending". Fall back to the pending record so restore keeps working;
+        // entries() promotes it on the next listing anyway.
+        return try {
+            pendingMetaFor(trashed)?.let { p -> parseMeta(p.readText()) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Validates the sidecar schema: both "trashedAt=<positive long>" and a non-empty
+     *  absolute "origin=<path>" must be present, else it is not trusted metadata. */
+    private fun parseMeta(text: String): Pair<Long, String>? {
         var at = -1L
         var origin = ""
-        for (line in metaFor(trashed).readLines()) {
+        for (line in text.lineSequence()) {
             if (line.startsWith("trashedAt=")) at = line.removePrefix("trashedAt=").toLongOrNull() ?: at
             else if (line.startsWith("origin=")) origin = line.removePrefix("origin=")
         }
-        if (at > 0 && origin.isNotEmpty()) at to origin else null
-    } catch (_: Exception) {
-        null
+        return if (at > 0 && origin.startsWith("/")) at to origin else null
+    }
+
+    private fun pendingMetaFor(trashed: File): File? = trashed.parentFile
+        ?.let { metaDirFor(it) }
+        ?.let { File(it, trashed.name + META_SUFFIX + PENDING_SUFFIX) }
+
+    /** Promotes valid ".pending" records whose payload made it into the trash (crash
+     *  recovery, audit P1.3). Invalid or orphan pending files are left for pruning. */
+    private fun recoverPendingMeta(trashDir: File) {
+        val metaDir = metaDirFor(trashDir)
+        val pendings = metaDir.listFiles { f -> f.name.endsWith(PENDING_SUFFIX) } ?: return
+        for (pending in pendings) {
+            val committedName = pending.name.removeSuffix(PENDING_SUFFIX)
+            if (!committedName.endsWith(META_SUFFIX)) continue
+            val payload = File(trashDir, committedName.removeSuffix(META_SUFFIX))
+            if (!payload.exists()) continue // transaction never reached the payload move
+            val valid = try {
+                parseMeta(pending.readText()) != null
+            } catch (_: Exception) {
+                false
+            }
+            if (!valid) continue
+            val committed = File(metaDir, committedName)
+            // Rename first (atomic); a refused replace falls back to copy + delete.
+            if (!pending.renameTo(committed)) {
+                try {
+                    committed.writeText(pending.readText())
+                    pending.delete()
+                } catch (_: Exception) {
+                    // Committed write failed: keep the pending record for the next pass.
+                }
+            }
+        }
     }
 
     /**
@@ -230,6 +293,15 @@ object Trash {
     private fun migrateLegacySidecar(trashDir: File, sidecar: File): Boolean {
         val payload = File(trashDir, sidecar.name.removeSuffix(META_SUFFIX))
         if (!payload.exists()) return false
+        // Schema validation (audit P2.7): a user file named "*.tfmeta" with a sibling of
+        // the same basename must NOT be mistaken for metadata — only a record that
+        // parses as valid trash metadata is migrated.
+        val valid = try {
+            parseMeta(sidecar.readText()) != null
+        } catch (_: Exception) {
+            false
+        }
+        if (!valid) return false
         val metaDir = metaDirFor(trashDir)
         if (!metaDir.isDirectory && !metaDir.mkdirs()) return false
         return try {
@@ -255,7 +327,23 @@ object Trash {
         val sidecars = metaDir.listFiles() ?: return
         val names = payloads.mapTo(mutableSetOf()) { it.name }
         for (m in sidecars) {
-            val payloadName = m.name.removeSuffix(PENDING_SUFFIX).removeSuffix(META_SUFFIX)
+            if (m.name.endsWith(PENDING_SUFFIX)) {
+                // A pending record is dead when the transaction never reached the
+                // payload move, when its committed sidecar already exists, or when it
+                // is not valid metadata. Valid pendings with a live payload are left
+                // for recoverPendingMeta on the next listing.
+                val base = m.name.removeSuffix(PENDING_SUFFIX)
+                val payloadName = base.removeSuffix(META_SUFFIX)
+                val committedExists = File(metaDir, base).exists()
+                val valid = try {
+                    parseMeta(m.readText()) != null
+                } catch (_: Exception) {
+                    false
+                }
+                if (payloadName !in names || committedExists || !valid) m.delete()
+                continue
+            }
+            val payloadName = m.name.removeSuffix(META_SUFFIX)
             if (payloadName !in names) m.delete()
         }
     }
