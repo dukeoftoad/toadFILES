@@ -26,8 +26,8 @@ Real screenshots of the app — captured from the actual Compose UI running on t
 - Long-press a file to start multi-select (Google-Files style); the row's ⋮ button opens the full action sheet: open, share, rename, copy, move, delete, details, zip, favorite, pin to Home, copy path, open with.
 - Multi-select in Browse, Categories and Recent — batch share, delete, zip (Browse) with select-all support. Zipping always asks for the archive name first, and tapping a zip offers to extract it right there.
 - Sharing is the real thing: Android's standard share sheet (ACTION_SEND) hands the files to whichever app you pick. Single or multiple. toadFILES itself still uploads nothing.
-- Opening a file uses the system "Just once / Always" chooser, so you can pin a default app per file type if you like.
-- Tapping an APK offers a real install handoff; if Android's "Install unknown apps" toggle is off, the app walks you straight to it.
+- Opening a file is a direct system launch: Android shows its own "Just once / Always" resolver when several apps can handle the type and no default is pinned yet — with a default saved, the file opens straight into that app. "Open with" always shows a one-time picker instead.
+- Tapping an APK offers a real install handoff; if Android's "Install unknown apps" toggle is off, the app walks you straight to it. If the settings screen itself can't be opened, the app says so instead of pretending.
 - A Categories tab that reads the system media library: a grid with per-type icons, item counts and sizes. Images and videos drill into a thumbnail gallery; every entry opens, shares, or deletes to trash — trashed files are hidden from Categories and Recent.
 - Quick access on Home is yours: pin folders from Browse, edit them with the ＋ button, long-press to remove — and folders you open often show up automatically as "most used".
 - Recent files are fully actionable: open, share, show in folder, delete, details — not just a list. Type filter tabs (All / images / videos / audio / docs / archives / APKs) narrow it down.
