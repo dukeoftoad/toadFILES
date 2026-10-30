@@ -86,14 +86,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: build
+    # Advisory on purpose: the checklist (docs/RELEASE_CHECKLIST.md §6) promotes this
+    # to blocking only after the matrix has been green on two consecutive releases.
+    # A red emulator matrix must never block app-code PRs while it is still being
+    # validated — flip continue-on-error to false there, not here. (Job-level key:
+    # "strategy.continue-on-error" is not a valid GitHub Actions keyword.)
+    continue-on-error: true
 
     strategy:
       fail-fast: false
-      # Advisory on purpose: the checklist (docs/RELEASE_CHECKLIST.md §6) promotes this
-      # to blocking only after the matrix has been green on two consecutive releases.
-      # A red emulator matrix must never block app-code PRs while it is still being
-      # validated — flip continue-on-error to false there, not here.
-      continue-on-error: true
       matrix:
         api-level: [ 29, 33, 36 ]
 
