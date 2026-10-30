@@ -89,6 +89,11 @@ jobs:
 
     strategy:
       fail-fast: false
+      # Advisory on purpose: the checklist (docs/RELEASE_CHECKLIST.md §6) promotes this
+      # to blocking only after the matrix has been green on two consecutive releases.
+      # A red emulator matrix must never block app-code PRs while it is still being
+      # validated — flip continue-on-error to false there, not here.
+      continue-on-error: true
       matrix:
         api-level: [ 29, 33, 36 ]
 
@@ -130,4 +135,14 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-boot-timeout: 900
+          # -partition-size keeps the userdata partition (default 7.2 GB) within what a
+          # hosted runner can still offer after the SDK + system image are installed
+          # (FATAL | Not enough space to create userdata partition without it).
+          emulator-options: >-
+            -no-window
+            -gpu swiftshader_indirect
+            -no-snapshot
+            -noaudio
+            -no-boot-anim
+            -partition-size 3072
           script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
