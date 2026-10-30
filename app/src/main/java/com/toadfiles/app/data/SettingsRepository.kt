@@ -1,6 +1,7 @@
 package com.toadfiles.app.data
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -151,35 +152,72 @@ class SettingsRepository(
     private val _folderUses = MutableStateFlow<Map<String, Int>>(emptyMap())
     val folderUses: StateFlow<Map<String, Int>> = _folderUses
 
-    /** Serializes the initial hydration so concurrent readers can never observe a half-loaded map. */
+    /**
+     * Serializes every mutation of the folder-use state — hydration, visit recording,
+     * remapping and persistence (audit P2.9). With only hydration guarded, a concurrent
+     * [persistFolderUses] could write the pre-remap in-memory paths after
+     * [remapSavedPaths] had already rewritten the persisted set, resurrecting stale
+     * paths on disk until the next remap or session update.
+     */
     private val usesMutex = Mutex()
 
     /** True once the persisted counts have been read into [_folderUses]. Guarded by [usesMutex]. */
     @Volatile
     private var usesLoaded = false
 
+    /**
+     * Test-only gate (audit P2.9 barrier test): invoked inside [persistFolderUses] while
+     * holding [usesMutex], right after the snapshot was taken and before it is written —
+     * the exact window in which a concurrent remap used to be able to commit its
+     * rewritten set. Always null in production, so this is a no-op there.
+     */
+    @VisibleForTesting
+    internal var onUsesPersistSnapshotted: (() -> Unit)? = null
+
+    /**
+     * Test-only gate (audit P2.9 barrier test): invoked inside [remapSavedPaths] while
+     * holding [usesMutex], right after the persisted set was rewritten and before the
+     * live map follows — the window in which a concurrent flush used to be able to
+     * write the pre-remap in-memory paths. Always null in production, so this is a
+     * no-op there.
+     */
+    @VisibleForTesting
+    internal var onUsesRemapCommitted: (() -> Unit)? = null
+
     /** Loads persisted counts once (call at startup so previous sessions surface immediately). */
     suspend fun reloadFolderUses() {
         if (usesLoaded) return
         usesMutex.withLock {
-            if (usesLoaded) return
-            _folderUses.value = parseFolderUses(store.data.first()[Keys.FOLDER_USES])
-            // Only mark loaded after the read has actually landed in the map — otherwise
-            // a stop-before-start persist() could flush the empty map over the saved history.
-            usesLoaded = true
+            if (!usesLoaded) hydrateUsesLocked()
         }
     }
 
-    /** Counts one folder visit. In-memory only; persists via [persistFolderUses]. */
+    /**
+     * Reads the persisted counts into [_folderUses]. The caller must hold [usesMutex].
+     * Only marks the map loaded after the read has actually landed — otherwise a
+     * stop-before-start persist() could flush the empty map over the saved history.
+     */
+    private suspend fun hydrateUsesLocked() {
+        _folderUses.value = parseFolderUses(store.data.first()[Keys.FOLDER_USES])
+        usesLoaded = true
+    }
+
+    /**
+     * Counts one folder visit. In-memory only; persists via [persistFolderUses].
+     * Runs under [usesMutex] (audit P2.9) so a concurrent remap either rewrites this
+     * visit's path along with the rest of the map or lands strictly after it.
+     */
     suspend fun recordFolderUse(path: String) {
-        reloadFolderUses()
-        _folderUses.update { uses ->
-            val next = uses + (path to (uses[path] ?: 0) + 1)
-            if (next.size > MAX_TRACKED_FOLDERS) {
-                next.entries.sortedByDescending { it.value }.take(MAX_TRACKED_FOLDERS)
-                    .associate { it.key to it.value }
-            } else {
-                next
+        usesMutex.withLock {
+            if (!usesLoaded) hydrateUsesLocked()
+            _folderUses.update { uses ->
+                val next = uses + (path to (uses[path] ?: 0) + 1)
+                if (next.size > MAX_TRACKED_FOLDERS) {
+                    next.entries.sortedByDescending { it.value }.take(MAX_TRACKED_FOLDERS)
+                        .associate { it.key to it.value }
+                } else {
+                    next
+                }
             }
         }
     }
@@ -188,12 +226,20 @@ class SettingsRepository(
      * Persists the in-memory visit counts (MainActivity.onStop). Always hydrates first:
      * if the app is stopped before the initial read finished, flushing the still-empty
      * map would erase the previous session's history instead of preserving it.
+     *
+     * Snapshot and write share one [usesMutex] critical section with remapping (audit
+     * P2.9): a remap can never commit its rewritten set in between, so a flush can no
+     * longer resurrect pre-remap paths after a rename or move.
      */
     suspend fun persistFolderUses() {
-        reloadFolderUses()
-        store.edit { p ->
-            p[Keys.FOLDER_USES] = _folderUses.value.entries
+        usesMutex.withLock {
+            if (!usesLoaded) hydrateUsesLocked()
+            val entries = _folderUses.value.entries
                 .map { "${it.value}|${it.key}" }.toSet()
+            onUsesPersistSnapshotted?.invoke()
+            store.edit { p ->
+                p[Keys.FOLDER_USES] = entries
+            }
         }
     }
 
@@ -232,33 +278,38 @@ class SettingsRepository(
      * Without this, a renamed/moved folder would silently drop out of Quick access,
      * reappear as a default, or lose its usage history — favorites were the only keys
      * remapped before.
+     *
+     * The persisted rewrite and the live-map rewrite share one [usesMutex] critical
+     * section with recording and persistence (audit P2.9), so no interleaving can write
+     * the old in-memory paths to disk once the remapped set has been persisted.
      */
     suspend fun remapSavedPaths(oldPath: String, newPath: String) {
         val remap = subtreeRemap(oldPath, newPath)
-        store.edit { p ->
-            val favs = p[Keys.FAVORITES] ?: emptySet()
-            val remappedFavs = favs.map(remap).toSet()
-            if (remappedFavs != favs) p[Keys.FAVORITES] = remappedFavs
-
-            val pins = p[Keys.QUICK_PINS] ?: emptySet()
-            val remappedPins = pins.map(remap).toSet()
-            if (remappedPins != pins) p[Keys.QUICK_PINS] = remappedPins
-
-            val hidden = p[Keys.QUICK_HIDDEN] ?: emptySet()
-            val remappedHidden = hidden.map(remap).toSet()
-            if (remappedHidden != hidden) p[Keys.QUICK_HIDDEN] = remappedHidden
-
-            val uses = p[Keys.FOLDER_USES] ?: emptySet()
-            val remappedUses = uses.map { entry ->
-                val sep = entry.indexOf('|')
-                if (sep <= 0) entry else "${entry.substring(0, sep)}|${remap(entry.substring(sep + 1))}"
-            }.toSet()
-            if (remappedUses != uses) p[Keys.FOLDER_USES] = remappedUses
-        }
-        // Keep the live counts consistent with the rewritten disk state. If hydration
-        // has not happened yet, skip the map rewrite — the upcoming hydration reads the
-        // already-remapped values from disk.
         usesMutex.withLock {
+            store.edit { p ->
+                val favs = p[Keys.FAVORITES] ?: emptySet()
+                val remappedFavs = favs.map(remap).toSet()
+                if (remappedFavs != favs) p[Keys.FAVORITES] = remappedFavs
+
+                val pins = p[Keys.QUICK_PINS] ?: emptySet()
+                val remappedPins = pins.map(remap).toSet()
+                if (remappedPins != pins) p[Keys.QUICK_PINS] = remappedPins
+
+                val hidden = p[Keys.QUICK_HIDDEN] ?: emptySet()
+                val remappedHidden = hidden.map(remap).toSet()
+                if (remappedHidden != hidden) p[Keys.QUICK_HIDDEN] = remappedHidden
+
+                val uses = p[Keys.FOLDER_USES] ?: emptySet()
+                val remappedUses = uses.map { entry ->
+                    val sep = entry.indexOf('|')
+                    if (sep <= 0) entry else "${entry.substring(0, sep)}|${remap(entry.substring(sep + 1))}"
+                }.toSet()
+                if (remappedUses != uses) p[Keys.FOLDER_USES] = remappedUses
+            }
+            onUsesRemapCommitted?.invoke()
+            // Keep the live counts consistent with the rewritten disk state. If hydration
+            // has not happened yet, skip the map rewrite — the upcoming hydration reads the
+            // already-remapped values from disk.
             if (usesLoaded) {
                 _folderUses.update { m -> m.entries.associate { (k, v) -> remap(k) to v } }
             }
