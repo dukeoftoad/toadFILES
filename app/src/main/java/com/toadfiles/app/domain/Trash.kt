@@ -1,5 +1,6 @@
 package com.toadfiles.app.domain
 
+import androidx.annotation.VisibleForTesting
 import java.io.File
 
 /** One item sitting in the trash, together with where it came from. */
@@ -50,12 +51,24 @@ object Trash {
     private const val PENDING_SUFFIX = ".pending"
     private const val DAY_MS = 24L * 60 * 60 * 1000
 
+    /** A "<stamp>_" group the trash prefixes to payload names (also "<n>_" on a clash). */
+    private val STAMP_GROUP = Regex("^\\d+_")
+
     /** Serializes every mutation/listing: orphan cleanup must never race an in-flight
      *  transaction (audit P2.6), and crash recovery must never race a concurrent trash(). */
     private val lock = Any()
 
     /** Clock seam for tests: trash names and timestamps derive from it. */
     internal var clock: () -> Long = { System.currentTimeMillis() }
+
+    /**
+     * Test-only gate (audit P2.6 barrier test): invoked inside [trash] right after the
+     * pending sidecar is written and before the payload is renamed — the exact window
+     * in which a concurrent listing used to be able to prune the active transaction's
+     * pending file. Always null in production, so this is a no-op there.
+     */
+    @VisibleForTesting
+    internal var onAfterPendingWrite: (() -> Unit)? = null
 
     fun dirFor(volumeRoot: File): File = File(volumeRoot, DIR_NAME)
 
@@ -98,6 +111,9 @@ object Trash {
                 // 1. Prepare the metadata as a pending temp file, before anything moves.
                 val pending = File(metaDir, target.name + META_SUFFIX + PENDING_SUFFIX)
                 pending.writeText("origin=${src.absolutePath}\ntrashedAt=${clock()}")
+                // Test-only barrier (audit P2.6): lets a test park the transaction in
+                // this window to prove a concurrent listing waits instead of pruning.
+                onAfterPendingWrite?.invoke()
                 // 2. Move the payload into the trash (same volume, just a rename).
                 if (!src.renameTo(target)) {
                     pending.delete()
@@ -223,20 +239,18 @@ object Trash {
 
     /** Returns (trashedAt, originPath), or null when the sidecar is missing or corrupt. */
     private fun readMeta(trashed: File): Pair<Long, String>? {
-        val committed = try {
-            parseMeta(metaFor(trashed).readText())
-        } catch (_: Exception) {
-            null
-        }
-        if (committed != null) return committed
         // Crash window (audit P1.3): the payload moved but the sidecar is still
         // ".pending". Fall back to the pending record so restore keeps working;
         // entries() promotes it on the next listing anyway.
-        return try {
-            pendingMetaFor(trashed)?.let { p -> parseMeta(p.readText()) }
-        } catch (_: Exception) {
-            null
-        }
+        return parseMetaFile(metaFor(trashed)) ?: parseMetaFile(pendingMetaFor(trashed))
+    }
+
+    /** Parses the metadata file at [f] with [parseMeta]; null when missing, unreadable
+     *  or not valid metadata. Shared by every reader so the schema lives in one place. */
+    private fun parseMetaFile(f: File?): Pair<Long, String>? = try {
+        f?.let { parseMeta(it.readText()) }
+    } catch (_: Exception) {
+        null
     }
 
     /** Validates the sidecar schema: both "trashedAt=<positive long>" and a non-empty
@@ -265,12 +279,7 @@ object Trash {
             if (!committedName.endsWith(META_SUFFIX)) continue
             val payload = File(trashDir, committedName.removeSuffix(META_SUFFIX))
             if (!payload.exists()) continue // transaction never reached the payload move
-            val valid = try {
-                parseMeta(pending.readText()) != null
-            } catch (_: Exception) {
-                false
-            }
-            if (!valid) continue
+            if (parseMetaFile(pending) == null) continue
             val committed = File(metaDir, committedName)
             // Rename first (atomic); a refused replace falls back to copy + delete.
             if (!pending.renameTo(committed)) {
@@ -286,22 +295,20 @@ object Trash {
 
     /**
      * Moves a pre-rename sidecar into the ".meta" directory. Returns true when [sidecar]
-     * really was metadata for an existing payload and has been migrated; when the name
-     * has no matching payload it may be a user's own "*.tfmeta" file, so it is kept and
-     * listed as a payload — never deleted behind the user's back.
+     * really was metadata for an existing payload and has been migrated; anything else
+     * — no matching payload, or a file that does not parse as valid metadata naming the
+     * payload (audit P2.7) — is kept and listed as a payload, never deleted or hidden
+     * behind the user's back.
      */
     private fun migrateLegacySidecar(trashDir: File, sidecar: File): Boolean {
         val payload = File(trashDir, sidecar.name.removeSuffix(META_SUFFIX))
         if (!payload.exists()) return false
         // Schema validation (audit P2.7): a user file named "*.tfmeta" with a sibling of
         // the same basename must NOT be mistaken for metadata — only a record that
-        // parses as valid trash metadata is migrated.
-        val valid = try {
-            parseMeta(sidecar.readText()) != null
-        } catch (_: Exception) {
-            false
-        }
-        if (!valid) return false
+        // parses as valid trash metadata AND whose origin actually names this payload
+        // is migrated. Anything else is preserved as an ordinary payload.
+        val meta = parseMetaFile(sidecar)
+        if (meta == null || !referencesPayload(meta.second, payload.name)) return false
         val metaDir = metaDirFor(trashDir)
         if (!metaDir.isDirectory && !metaDir.mkdirs()) return false
         return try {
@@ -335,16 +342,25 @@ object Trash {
                 val base = m.name.removeSuffix(PENDING_SUFFIX)
                 val payloadName = base.removeSuffix(META_SUFFIX)
                 val committedExists = File(metaDir, base).exists()
-                val valid = try {
-                    parseMeta(m.readText()) != null
-                } catch (_: Exception) {
-                    false
-                }
+                val valid = parseMetaFile(m) != null
                 if (payloadName !in names || committedExists || !valid) m.delete()
                 continue
             }
             val payloadName = m.name.removeSuffix(META_SUFFIX)
             if (payloadName !in names) m.delete()
         }
+    }
+
+    /** True when a legacy sidecar's [originPath] names the payload [payloadName]: the
+     *  trash stores a payload under "<stamp>_" (plus a "<n>_" group when the name
+     *  clashed), so the origin's last segment must equal the payload name with zero,
+     *  one or two of those groups stripped. Zero covers unstamped legacy layouts;
+     *  stopping at two keeps genuine records whose original name itself starts with
+     *  "<digits>_" (audit P2.7: metadata that names no sibling payload is not metadata). */
+    private fun referencesPayload(originPath: String, payloadName: String): Boolean {
+        val base = originPath.substringAfterLast('/')
+        val strippedOnce = payloadName.replaceFirst(STAMP_GROUP, "")
+        val strippedTwice = strippedOnce.replaceFirst(STAMP_GROUP, "")
+        return base == payloadName || base == strippedOnce || base == strippedTwice
     }
 }

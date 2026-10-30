@@ -86,9 +86,10 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
                         category = category,
                         data = data,
                     )
-                    // Same trash-hiding rule as recent(): renamed-away files can linger
-                    // in the media index and would otherwise appear inside categories.
-                    if (data != null && (isTrashPath(data) || !File(data).exists())) {
+                    // Same visibility rule as recent() and totalsFor(): renamed-away files
+                    // can linger in the media index and would otherwise appear inside
+                    // categories.
+                    if (data != null && isHiddenPath(data)) {
                         // Trash-path rows still exist on disk — hide, never delete. But a
                         // row whose file vanished outright is a ghost: remember it so the
                         // index can be reconciled once the cursor is closed.
@@ -106,11 +107,11 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
     }
 
     /**
-     * True per-category totals for the grid cards. The old implementation listed up
-     * to 2000 entries and reported the capped size as the total; COUNT/SUM aggregates
-     * give the real, uncapped numbers without materialising any rows. Totals reflect
-     * the MediaStore index as-is; ghost rows whose files vanished are reconciled by
-     * [list] and [recent] as users browse.
+     * True per-category totals for the grid cards, counted in VISIBLE files — exactly
+     * the rows [list] and [recent] would show (audit P2.5). The old implementation
+     * listed up to 2000 entries and reported the capped size as the total; COUNT/SUM
+     * aggregates keep the numbers real and uncapped, and [totalsFor] excludes the
+     * hidden rows without introducing any cap.
      */
     override fun summaries(): List<CategorySummary> =
         FileCategory.entries.map { c ->
@@ -166,7 +167,7 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
                     )
                     // Renaming a file into the trash does not always update the media index
                     // immediately, so trashed files can still surface as "recent". Hide them.
-                    if (data != null && (isTrashPath(data) || !File(data).exists())) {
+                    if (data != null && isHiddenPath(data)) {
                         if (!isTrashPath(data)) stale += entry()
                         continue
                     }
@@ -200,11 +201,24 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
         return dropped
     }
 
-    /** COUNT(_id)/SUM(_size) over the category's selection; (0, 0) when unavailable. */
+    /**
+     * The row-visibility rule shared by [list], [recent] and [totalsFor] for a non-null
+     * DATA path: the file lives inside the trash folder, or its backing file has
+     * vanished (a ghost row). Rows without a DATA path stay visible, as in the listings.
+     */
+    private fun isHiddenPath(data: String): Boolean = isTrashPath(data) || !File(data).exists()
+
+    /**
+     * Per-category totals for the cards, counted in VISIBLE files (audit P2.5): rows
+     * [isHiddenPath] hides are excluded, so a card can never advertise an entry the
+     * user cannot open. Totals stay true uncapped aggregates — the full COUNT/SUM runs
+     * first and [hiddenTotals] subtracts the hidden rows afterwards, instead of capping
+     * the result at a listing size. (0, 0) when unavailable.
+     */
     private fun totalsFor(category: FileCategory): Pair<Int, Long> {
         val (selection, args) = selectionFor(category)
         try {
-            resolver.query(
+            val (count, bytes) = resolver.query(
                 MediaStore.Files.getContentUri("external"),
                 arrayOf(
                     "COUNT(${MediaStore.Files.FileColumns._ID})",
@@ -215,21 +229,56 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
                 null,
             )?.use { c ->
                 if (c.moveToFirst()) {
-                    val count = c.getInt(0)
                     // SUM over zero rows is NULL; Cursor.getLong would hand back 0 anyway,
                     // but be explicit about the empty case.
-                    val bytes = if (c.isNull(1)) 0L else c.getLong(1)
-                    return count to bytes
-                }
-            }
+                    c.getInt(0) to (if (c.isNull(1)) 0L else c.getLong(1))
+                } else null
+            } ?: return 0 to 0L
+            val (hiddenCount, hiddenBytes) = hiddenTotals(selection, args)
+            // coerceAtLeast: the index can change between the two queries.
+            return (count - hiddenCount).coerceAtLeast(0) to (bytes - hiddenBytes).coerceAtLeast(0L)
         } catch (_: Exception) {
             // Provider without aggregate support (or index unavailable): honest zeros.
         }
         return 0 to 0L
     }
 
-    /** Selection + args for a category. Shared by [list] and [summaries] so the
-     *  category totals always count exactly what the listing would show. */
+    /**
+     * Count and bytes of the rows under [selection] that [isHiddenPath] hides (trash
+     * paths, vanished files) — the amount [totalsFor] subtracts from the raw aggregate.
+     * Probe only: unlike [reconcileStaleRows] this never writes to the index, so
+     * reading summaries stays side-effect free. Errors propagate to [totalsFor]'s
+     * catch, which reports honest zeros.
+     */
+    private fun hiddenTotals(selection: String, args: Array<String>): Pair<Int, Long> {
+        var count = 0
+        var bytes = 0L
+        resolver.query(
+            MediaStore.Files.getContentUri("external"),
+            arrayOf(
+                MediaStore.Files.FileColumns.SIZE,
+                MediaStore.Files.FileColumns.DATA,
+            ),
+            selection,
+            args,
+            null,
+        )?.use { c ->
+            val iSize = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+            val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+            while (c.moveToNext()) {
+                val data = if (iData >= 0) c.getString(iData) else null
+                if (data != null && isHiddenPath(data)) {
+                    count++
+                    bytes += c.getLong(iSize)
+                }
+            }
+        }
+        return count to bytes
+    }
+
+    /** Selection + args for a category. Shared by [list], [totalsFor] and its
+     *  hidden-row probe so the category totals always count exactly what the listing
+     *  would show. */
     private fun selectionFor(category: FileCategory): Pair<String, Array<String>> {
         val mime = MediaStore.Files.FileColumns.MIME_TYPE
         val name = MediaStore.Files.FileColumns.DISPLAY_NAME

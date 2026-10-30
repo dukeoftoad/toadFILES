@@ -25,8 +25,9 @@ import java.io.File
 /**
  * Trash-path detection powers the "hide trashed files everywhere" rule: renaming a file
  * into the per-volume trash folder does not instantly update the MediaStore index, so
- * Recent and Categories filter rows by their DATA path instead. The media-store-backed
- * tests below run against a fake provider registered on Robolectric's
+ * Recent and Categories filter rows by their DATA path instead — and the category
+ * summary totals run the same rule, so they always mean visible files. The
+ * media-store-backed tests below run against a fake provider registered on Robolectric's
  * ShadowContentResolver (same pattern as the screenshot fixtures), so queries AND the
  * repo-side stale-row cleanup go through the real ContentResolver plumbing.
  */
@@ -247,10 +248,10 @@ class MediaRepositoryTrashPathTest {
         assertFalse(names.contains("notes.txt"))
     }
 
-    // ---------- summaries: true totals from COUNT/SUM aggregates ----------
+    // ---------- summaries: totals = visible files (trash + ghosts excluded) ----------
 
     @Test
-    fun `summaries reports true totals from the aggregate query not the listed size`() {
+    fun `summaries count visible files and exclude rows hidden from the listing`() {
         seed(
             row("a.jpg", "image/jpeg", realFile("pics/a.jpg"), 1, size = 100L),
             row("b.jpg", "image/jpeg", realFile("pics/b.jpg"), 1, size = 200L),
@@ -261,12 +262,91 @@ class MediaRepositoryTrashPathTest {
 
         val summary = repo.summaries().first { it.category == FileCategory.IMAGES }
 
-        // COUNT/SUM see all 5 index rows (1500 bytes), including the ghost — unlike
-        // list(), which hides it. The old implementation reported the capped
-        // list().size instead of the true total.
-        assertEquals(5, summary.count)
-        assertEquals(1500L, summary.totalBytes)
+        // The ghost row is invisible to list(), so the totals exclude it too — a card
+        // must never advertise an entry the user cannot open (audit P2.5). Totals stay
+        // true COUNT/SUM aggregates, not the size of a capped listing.
+        assertEquals(4, summary.count)
+        assertEquals(1000L, summary.totalBytes)
         assertEquals(4, repo.list(FileCategory.IMAGES, 100).size)
+    }
+
+    @Test
+    fun `summaries stay uncapped regardless of the listing limit`() {
+        seed(
+            row("a.jpg", "image/jpeg", realFile("pics/a.jpg"), 1, size = 100L),
+            row("b.jpg", "image/jpeg", realFile("pics/b.jpg"), 1, size = 200L),
+            row("c.jpg", "image/jpeg", realFile("pics/c.jpg"), 1, size = 300L),
+        )
+
+        val summary = repo.summaries().first { it.category == FileCategory.IMAGES }
+
+        assertEquals(3, summary.count)
+        assertEquals(600L, summary.totalBytes)
+        assertEquals(1, repo.list(FileCategory.IMAGES, 1).size)
+    }
+
+    @Test
+    fun `summaries exclude trashed rows from count and bytes in multiple categories`() {
+        seed(
+            row("kept.jpg", "image/jpeg", realFile("pics/kept.jpg"), 1, size = 100L),
+            row("trashed.jpg", "image/jpeg", realFile("${Trash.DIR_NAME}/trashed.jpg"), 1, size = 400L),
+            row("kept.txt", "text/plain", realFile("docs/kept.txt"), 6, size = 50L),
+            row("trashed.txt", "text/plain", realFile("${Trash.DIR_NAME}/trashed.txt"), 6, size = 70L),
+        )
+
+        val images = repo.summaries().first { it.category == FileCategory.IMAGES }
+        val docs = repo.summaries().first { it.category == FileCategory.DOCS }
+
+        // The trashed payloads still exist on disk inside the trash folder, so only the
+        // trash rule (not the vanished-file rule) can hide them.
+        assertEquals(1, images.count)
+        assertEquals(100L, images.totalBytes)
+        assertEquals(1, docs.count)
+        assertEquals(50L, docs.totalBytes)
+    }
+
+    @Test
+    fun `summaries exclude vanished ghost rows from count and bytes in multiple categories`() {
+        seed(
+            row("kept.mp3", "audio/mpeg", realFile("music/kept.mp3"), 2, size = 30L),
+            row("ghost.mp3", "audio/mpeg", "/storage/emulated/0/Music/ghost.mp3", 2, size = 40L),
+            row("kept.zip", "application/zip", realFile("archives/kept.zip"), 0, size = 500L),
+            row("ghost.zip", "application/zip", "/storage/emulated/0/Archives/ghost.zip", 0, size = 600L),
+        )
+
+        val audio = repo.summaries().first { it.category == FileCategory.AUDIO }
+        val archives = repo.summaries().first { it.category == FileCategory.ARCHIVES }
+
+        // Hidden rows are subtracted read-only: summaries never reconcile the index,
+        // that stays list()/recent()'s job.
+        assertEquals(1, audio.count)
+        assertEquals(30L, audio.totalBytes)
+        assertEquals(1, archives.count)
+        assertEquals(500L, archives.totalBytes)
+        assertEquals(0, provider.deletedUris.size)
+    }
+
+    @Test
+    fun `summaries totals match exactly what the listing shows`() {
+        seed(
+            row("visible.jpg", "image/jpeg", realFile("pics/visible.jpg"), 1, size = 100L),
+            row("trashed.jpg", "image/jpeg", realFile("${Trash.DIR_NAME}/trashed.jpg"), 1, size = 200L),
+            row("ghost.jpg", "image/jpeg", "/storage/emulated/0/pics/ghost.jpg", 1, size = 300L),
+            row("no-data.jpg", "image/jpeg", null, 1, size = 400L),
+            row("visible.txt", "text/plain", realFile("docs/visible.txt"), 6, size = 10L),
+            row("ghost.txt", "text/plain", "/storage/emulated/0/Docs/ghost.txt", 6, size = 20L),
+        )
+
+        for (category in listOf(FileCategory.IMAGES, FileCategory.DOCS)) {
+            val listed = repo.list(category, 100)
+            val summary = repo.summaries().first { it.category == category }
+            assertEquals(listed.size, summary.count)
+            assertEquals(listed.sumOf { it.size }, summary.totalBytes)
+        }
+
+        // Rows without a DATA path cannot be classified as hidden, so both the listing
+        // and the totals keep them visible (matching list()'s rule).
+        assertEquals(listOf("visible.jpg", "no-data.jpg"), repo.list(FileCategory.IMAGES, 100).map { it.name })
     }
 
     @Test

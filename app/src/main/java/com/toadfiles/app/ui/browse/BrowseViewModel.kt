@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.BrowseLayout
@@ -21,6 +22,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +31,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.attribute.BasicFileAttributes
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.coroutineContext
 
 data class BrowseUiState(
     val dir: File? = null,
@@ -76,15 +83,25 @@ data class PropertiesDetail(val sizeText: String, val children: Int?)
 class BrowseViewModel(
     private val container: AppContainer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Injectable for tests; production uses the container's real-file-system repository. */
+    private val fileRepo: FileRepository = container.fileRepo,
 ) : ViewModel() {
 
-    private val fileRepo = container.fileRepo
     private val settingsRepo = container.settingsRepo
 
     private val _state = MutableStateFlow(BrowseUiState())
     val state: StateFlow<BrowseUiState> = _state
 
     private var searchJob: Job? = null
+
+    /** Current folder-listing job; cancelled and superseded by the next load (P2.8). */
+    private var loadJob: Job? = null
+
+    /**
+     * Monotonically increasing load request id; only the newest load may apply its
+     * listing (P2.8). Atomic because load() is also called from IO coroutines.
+     */
+    private val loadSeq = AtomicLong(0L)
 
     /** First directory opened in this session; up-navigation and breadcrumbs never go above it. */
     private var browseRoot: File? = null
@@ -126,6 +143,12 @@ class BrowseViewModel(
 
     fun load(dir: File) {
         if (browseRoot == null) browseRoot = dir
+        // P2.8: every load takes a monotonically increasing token and cancels the load job
+        // it supersedes. Two loads for the same path can overlap (rapid refresh, sort or
+        // hidden-setting change, op-triggered re-list — they all funnel through here), and
+        // a slower older result must never overwrite the newer listing.
+        val token = loadSeq.incrementAndGet()
+        val settings = _state.value.settings
         _state.update {
             it.copy(
                 dir = dir,
@@ -137,22 +160,43 @@ class BrowseViewModel(
                 breadcrumbs = breadcrumbs(dir),
             )
         }
-        viewModelScope.launch(ioDispatcher) {
-            val s = _state.value.settings
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch(ioDispatcher) {
             if (!dir.isDirectory || !dir.canRead()) {
-                // Guard against stale results: only apply if this directory is still the current one.
-                if (_state.value.dir?.path == dir.path) {
-                    _state.update {
-                        it.copy(loading = false, items = emptyList(), error = "Folder is not readable")
-                    }
+                applyListing(dir, token, settings) {
+                    it.copy(loading = false, items = emptyList(), error = "Folder is not readable")
                 }
                 return@launch
             }
-            val items = fileRepo.list(dir, s.showHidden)
-                .sortedWith(Sorting.comparator(s.sortMode, s.sortOrder))
-            if (_state.value.dir?.path == dir.path) {
-                _state.update { it.copy(loading = false, items = items) }
+            val items = fileRepo.list(dir, settings.showHidden)
+                .sortedWith(Sorting.comparator(settings.sortMode, settings.sortOrder))
+            ensureActive() // honour a cancel that arrived while the listing was read
+            applyListing(dir, token, settings) {
+                it.copy(loading = false, items = items)
             }
+        }
+    }
+
+    /**
+     * Applies a finished listing only when its request is still the newest one and the
+     * view still shows the same directory with the same listing-affecting settings
+     * (showHidden / sortMode / sortOrder); otherwise the result is stale and dropped.
+     * Checked atomically inside the state update, like RecentViewModel's token guard.
+     */
+    private fun applyListing(
+        dir: File,
+        token: Long,
+        settings: ToadSettings,
+        update: (BrowseUiState) -> BrowseUiState,
+    ) {
+        _state.update { s ->
+            val current = s.settings
+            val stale = token != loadSeq.get() ||
+                s.dir?.path != dir.path ||
+                current.showHidden != settings.showHidden ||
+                current.sortMode != settings.sortMode ||
+                current.sortOrder != settings.sortOrder
+            if (stale) s else update(s)
         }
     }
 
@@ -193,6 +237,10 @@ class BrowseViewModel(
             load(dir)
             return
         }
+        // P2.8: the search replaces the folder listing, so any in-flight load result is
+        // now stale — invalidate its token and cancel it before the search takes over.
+        loadSeq.incrementAndGet()
+        loadJob?.cancel()
         searchJob = viewModelScope.launch(ioDispatcher) {
             delay(300) // debounce
             val s = _state.value.settings
@@ -216,8 +264,17 @@ class BrowseViewModel(
         }
     }
 
-    /** Recursive in-tree search. Matches file name (always) and small-text-file content (opt-in). */
-    private fun searchTree(
+    /**
+     * Recursive in-tree search. Matches file name (always) and small-text-file content (opt-in).
+     *
+     * Symlink policy (P2.1, explicit): directory-ness is decided with no-follow attributes
+     * (see [isRealDirectory]) instead of [File.isDirectory], which silently follows links.
+     * Directory symlinks are never recursed into — a link back to an ancestor cannot trap
+     * this traversal in a cycle — but they still surface as name-matched results. On top
+     * of that, a visited set of canonical paths breaks any remaining cycle, and the
+     * traversal honours cancellation at every directory and every entry.
+     */
+    private suspend fun searchTree(
         root: File,
         query: String,
         showHidden: Boolean,
@@ -228,11 +285,20 @@ class BrowseViewModel(
         val out = mutableListOf<FileItem>()
         var capped = false
         val stack = ArrayDeque<File>()
-        stack.addLast(root)
+        // Canonical paths of directories already queued: breaks cycles for good even if a
+        // symlinked directory ever slips through (the same physical dir is visited once).
+        val visited = HashSet<String>()
+        fun push(dir: File) {
+            val canonical = runCatching { dir.canonicalPath }.getOrNull() ?: return
+            if (visited.add(canonical)) stack.addLast(dir)
+        }
+        push(root)
         while (stack.isNotEmpty() && out.size < limit) {
+            coroutineContext.ensureActive() // cancellation checkpoint per directory
             val dir = stack.removeLast()
             val children = fileRepo.list(dir, showHidden)
             for (c in children) {
+                coroutineContext.ensureActive() // cancellation checkpoint per file
                 if (c.name.lowercase().contains(q)) {
                     out += c
                     if (out.size >= limit) {
@@ -246,7 +312,9 @@ class BrowseViewModel(
                         break
                     }
                 }
-                if (c.isDir) stack.addLast(c.file)
+                // Recurse into real directories only; a symlinked directory is matched by
+                // name above but never pushed (a link to an ancestor would loop forever).
+                if (isRealDirectory(c.file)) push(c.file)
             }
         }
         return SearchResult(
@@ -259,6 +327,18 @@ class BrowseViewModel(
     }
 
     private data class SearchResult(val items: List<FileItem>, val capped: Boolean)
+
+    /**
+     * True only for a real directory. Unlike [File.isDirectory], this never follows a
+     * symbolic link: a symlink pointing at a directory is NOT a directory for traversal
+     * purposes (Browse's search does not recurse into symlinked folders).
+     */
+    private fun isRealDirectory(f: File): Boolean = try {
+        val attrs = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+        attrs.isDirectory && !attrs.isSymbolicLink
+    } catch (_: IOException) {
+        false // unreadable or vanished entry: nothing to recurse into
+    }
 
     /**
      * Cheap content peek: only opens files with extension in the safe-to-read allowlist
