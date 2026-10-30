@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -148,13 +150,24 @@ class SettingsRepository(
      */
     private val _folderUses = MutableStateFlow<Map<String, Int>>(emptyMap())
     val folderUses: StateFlow<Map<String, Int>> = _folderUses
+
+    /** Serializes the initial hydration so concurrent readers can never observe a half-loaded map. */
+    private val usesMutex = Mutex()
+
+    /** True once the persisted counts have been read into [_folderUses]. Guarded by [usesMutex]. */
+    @Volatile
     private var usesLoaded = false
 
     /** Loads persisted counts once (call at startup so previous sessions surface immediately). */
     suspend fun reloadFolderUses() {
         if (usesLoaded) return
-        usesLoaded = true
-        _folderUses.value = parseFolderUses(store.data.first()[Keys.FOLDER_USES])
+        usesMutex.withLock {
+            if (usesLoaded) return
+            _folderUses.value = parseFolderUses(store.data.first()[Keys.FOLDER_USES])
+            // Only mark loaded after the read has actually landed in the map — otherwise
+            // a stop-before-start persist() could flush the empty map over the saved history.
+            usesLoaded = true
+        }
     }
 
     /** Counts one folder visit. In-memory only; persists via [persistFolderUses]. */
@@ -171,8 +184,13 @@ class SettingsRepository(
         }
     }
 
-    /** Persists the in-memory visit counts (MainActivity.onStop). */
+    /**
+     * Persists the in-memory visit counts (MainActivity.onStop). Always hydrates first:
+     * if the app is stopped before the initial read finished, flushing the still-empty
+     * map would erase the previous session's history instead of preserving it.
+     */
     suspend fun persistFolderUses() {
+        reloadFolderUses()
         store.edit { p ->
             p[Keys.FOLDER_USES] = _folderUses.value.entries
                 .map { "${it.value}|${it.key}" }.toSet()
@@ -200,15 +218,67 @@ class SettingsRepository(
     /** Favorites keep working after their file/folder is renamed or moved: rewrite stored paths. */
     suspend fun remapFavorites(oldPath: String, newPath: String) = store.edit { p ->
         val cur = p[Keys.FAVORITES] ?: emptySet()
-        val oldPrefix = oldPath.trimEnd('/')
-        val updated = cur.map { f ->
-            when {
-                f == oldPath -> newPath
-                f.startsWith("$oldPrefix/") -> newPath.trimEnd('/') + f.substring(oldPrefix.length)
-                else -> f
-            }
-        }.toSet()
+        val remap = subtreeRemap(oldPath, newPath)
+        val updated = cur.map(remap).toSet()
         if (updated != cur) p[Keys.FAVORITES] = updated
+    }
+
+    /**
+     * One atomic subtree rename across every path-keyed preference: favorites, Quick
+     * access pins, Quick access hidden marks, and the "most used" folder-use counters
+     * (both the persisted set and the live in-memory map). Rename or move [oldPath] to
+     * [newPath] and every stored path at or under it keeps pointing at the right item.
+     *
+     * Without this, a renamed/moved folder would silently drop out of Quick access,
+     * reappear as a default, or lose its usage history — favorites were the only keys
+     * remapped before.
+     */
+    suspend fun remapSavedPaths(oldPath: String, newPath: String) {
+        val remap = subtreeRemap(oldPath, newPath)
+        store.edit { p ->
+            val favs = p[Keys.FAVORITES] ?: emptySet()
+            val remappedFavs = favs.map(remap).toSet()
+            if (remappedFavs != favs) p[Keys.FAVORITES] = remappedFavs
+
+            val pins = p[Keys.QUICK_PINS] ?: emptySet()
+            val remappedPins = pins.map(remap).toSet()
+            if (remappedPins != pins) p[Keys.QUICK_PINS] = remappedPins
+
+            val hidden = p[Keys.QUICK_HIDDEN] ?: emptySet()
+            val remappedHidden = hidden.map(remap).toSet()
+            if (remappedHidden != hidden) p[Keys.QUICK_HIDDEN] = remappedHidden
+
+            val uses = p[Keys.FOLDER_USES] ?: emptySet()
+            val remappedUses = uses.map { entry ->
+                val sep = entry.indexOf('|')
+                if (sep <= 0) entry else "${entry.substring(0, sep)}|${remap(entry.substring(sep + 1))}"
+            }.toSet()
+            if (remappedUses != uses) p[Keys.FOLDER_USES] = remappedUses
+        }
+        // Keep the live counts consistent with the rewritten disk state. If hydration
+        // has not happened yet, skip the map rewrite — the upcoming hydration reads the
+        // already-remapped values from disk.
+        usesMutex.withLock {
+            if (usesLoaded) {
+                _folderUses.update { m -> m.entries.associate { (k, v) -> remap(k) to v } }
+            }
+        }
+    }
+
+    /**
+     * Builds the path rewrite for one subtree rename: an exact match becomes [newPath],
+     * anything under [oldPath] moves to the same spot under it, everything else is kept.
+     */
+    private fun subtreeRemap(oldPath: String, newPath: String): (String) -> String {
+        val oldPrefix = oldPath.trimEnd('/')
+        val newPrefix = newPath.trimEnd('/')
+        return { path ->
+            when {
+                path == oldPath || path == oldPrefix -> newPrefix
+                path.startsWith("$oldPrefix/") -> newPrefix + path.substring(oldPrefix.length)
+                else -> path
+            }
+        }
     }
 
     /**

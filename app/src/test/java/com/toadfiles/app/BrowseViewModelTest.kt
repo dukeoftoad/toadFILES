@@ -325,6 +325,24 @@ class BrowseViewModelTest {
     }
 
     @Test
+    fun `renaming a pinned folder keeps its Quick access pin and usage history`() = runTest {
+        val folder = File(dir, "pinned").apply { mkdirs() }
+        container.settingsRepo.toggleQuickPin(folder.path)
+        container.settingsRepo.recordFolderUse(folder.path)
+        vm.openDir(dir)
+        await { vm.state.value.quickPins.contains(folder.path) }
+
+        vm.rename(folder, "pinned-renamed")
+
+        val renamed = File(dir, "pinned-renamed").path
+        await { vm.state.value.quickPins.contains(renamed) }
+        assertFalse(vm.state.value.quickPins.contains(folder.path))
+        // Usage history follows the folder too (P2.8).
+        assertEquals(1, container.settingsRepo.folderUses.value[renamed])
+        assertNull(container.settingsRepo.folderUses.value[folder.path])
+    }
+
+    @Test
     fun `confirmDelete trashes and undoDelete restores`() = runTest {
         val f = File(dir, "doomed.txt").apply { writeText("precious") }
         vm.openDir(dir)

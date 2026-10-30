@@ -257,9 +257,9 @@ fun SettingsScreen(
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Diagnostics", style = MaterialTheme.typography.bodyLarge)
+                            Text("Diagnostics (planned)", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                "Off by default. Even on, no data leaves the device — toadFILES has no internet permission.",
+                                "Reserved for a future local diagnostics feature. Nothing is collected or transmitted today — the switch only stores a preference.",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

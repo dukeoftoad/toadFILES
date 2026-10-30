@@ -8,6 +8,11 @@
          live under /storage/XXXX-XXXX, and without this FileProvider throws
          "Failed to find configured root" the moment a user taps a file there. The
          provider is not exported and hands out read grants per-intent only, so the
-         wide root is contained to apps the user explicitly shares/opens with. -->
+         wide root is contained to apps the user explicitly shares/opens with.
+         Policy: the wide root stays, but URI generation is additionally guarded by
+         a path denylist at creation time (util/UriGuard.isShareablePath) — system
+         and internal locations (/data, /proc, /sys, /dev, /system, /vendor, /apex,
+         /product) are never handed out, so in practice only user-visible storage
+         paths can become share URIs. -->
     <root-path name="device_root" path="." />
 </paths>

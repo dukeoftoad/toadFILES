@@ -28,9 +28,10 @@ import java.io.File
  * get nothing. Started from a real Activity context because Application-context
  * startActivity is not a realistic harness on Robolectric.
  *
- * v1.5 semantics: open uses a DIRECT ACTION_VIEW launch (the system resolver provides
- * "Just once / Always"), share uses ACTION_SEND / ACTION_SEND_MULTIPLE behind a chooser,
- * and install gates on the "Install unknown apps" grant.
+ * v1.6 semantics: open uses a DIRECT ACTION_VIEW launch — the system resolver appears
+ * only on Android's own terms (multiple handlers, no saved default), so no picker is
+ * promised here; share uses ACTION_SEND / ACTION_SEND_MULTIPLE behind a chooser with
+ * every URI in ClipData; install gates on the "Install unknown apps" grant.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -81,7 +82,7 @@ class IntentsTest {
     }
 
     @Test
-    fun `openFile launches a direct ACTION_VIEW with grants for just-once-always`() {
+    fun `openFile launches a direct ACTION_VIEW with clip data and read grants`() {
         val root = Environment.getExternalStorageDirectory()
         root.mkdirs()
         val f = File(root, "intents_open_me.txt").apply { writeText("open me") }
@@ -108,6 +109,9 @@ class IntentsTest {
             assertTrue(Intents.openWith(activity, f))
             val chooser = lastStartedIntent()
             assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+            // The chooser itself must carry the grant too — some OEM sheets resolve from it.
+            assertTrue(chooser.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            assertNotNull(chooser.clipData)
             @Suppress("DEPRECATION")
             val view = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
             assertEquals(Intent.ACTION_VIEW, view.action)
@@ -134,6 +138,9 @@ class IntentsTest {
             assertTrue(stream.toString().startsWith("content://"))
             assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
             assertNotNull(send.clipData)
+            // The chooser wrapper carries the same grant + clip.
+            assertTrue(chooser.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            assertNotNull(chooser.clipData)
         } finally {
             f.delete()
         }
@@ -157,6 +164,12 @@ class IntentsTest {
             val streams = send.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)!!
             assertEquals(2, streams.size)
             assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+            // EVERY stream uri must sit in ClipData — a first-item-only clip makes the
+            // rest unreadable for receivers that rely on clip-based grants.
+            val expected = streams.map { it.toString() }.toSet()
+            val clip = send.clipData!!
+            assertEquals(2, clip.itemCount)
+            assertEquals(expected, (0 until clip.itemCount).map { clip.getItemAt(it).uri.toString() }.toSet())
         } finally {
             a.delete(); b.delete()
         }
@@ -172,6 +185,35 @@ class IntentsTest {
         val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
         assertEquals(Intent.ACTION_SEND, send.action)
         assertEquals("image/jpeg", send.type)
+        assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        assertTrue(chooser.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        assertEquals(setOf(uri.toString()), (0 until send.clipData!!.itemCount).map { send.clipData!!.getItemAt(it).uri.toString() }.toSet())
+    }
+
+    @Test
+    fun `shareUris puts every uri into clipData on the send intent and the chooser`() {
+        val uris = listOf(
+            Uri.parse("content://media/external/images/media/1"),
+            Uri.parse("content://media/external/images/media/2"),
+            Uri.parse("content://media/external/images/media/3"),
+        )
+        assertTrue(Intents.shareUris(activity, uris, "image/jpeg"))
+        val chooser = lastStartedIntent()
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        assertTrue(chooser.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        @Suppress("DEPRECATION")
+        val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+        assertEquals(Intent.ACTION_SEND_MULTIPLE, send.action)
+        @Suppress("DEPRECATION")
+        val streams = send.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)!!
+        val expected = streams.map { it.toString() }.toSet()
+        assertEquals(3, expected.size)
+        // Both wrappers that matter carry every uri: the send intent and the chooser.
+        for (holder in listOf(send, chooser)) {
+            val clip = holder.clipData!!
+            assertEquals(3, clip.itemCount)
+            assertEquals(expected, (0 until clip.itemCount).map { clip.getItemAt(it).uri.toString() }.toSet())
+        }
         assertTrue(send.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
     }
 

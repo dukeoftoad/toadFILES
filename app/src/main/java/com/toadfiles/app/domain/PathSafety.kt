@@ -50,22 +50,36 @@ object PathSafety {
     }
 
     /**
-     * Validates a ZIP entry name: rejects absolute paths, ".." components,
-     * drive letters and backslash escapes (classic ZIP-slip vectors).
+     * Validates a ZIP entry name (audit P3.1 / §9.2 "ZIP filename validation").
+     *
+     * Rejects: blank names, NUL bytes, absolute paths, drive-letter / colon vectors
+     * (also NTFS alternate-data streams), and any path component equal to ".."
+     * (classic ZIP-slip, including backslash separators used by Windows-created archives).
+     *
+     * Harmless names that merely *contain* two dots ("release..notes.txt", "a..b/c")
+     * remain valid: only whole ".." components escape the destination.
      */
     fun isSafeEntryName(entryName: String): Boolean {
         if (entryName.isBlank()) return false
+        if (entryName.indexOf('\u0000') >= 0) return false
         val normalised = entryName.replace('\\', '/')
-        if (normalised.startsWith("/") || normalised.contains(':')) return false
-        if (normalised.contains("..")) return false
+        if (normalised.startsWith("/")) return false // absolute path
+        if (normalised.contains(':')) return false   // "C:\..." drives / "file:stream" vectors
+        val components = normalised.split('/').dropLastWhile { it.isEmpty() }
+        if (components.isEmpty() || components.all { it == "." }) return false // resolves to the root itself
+        for (c in components) {
+            if (c == "..") return false // parent traversal (ZIP-slip)
+        }
         return true
     }
 
-    /** Secondary containment check using canonical paths at extraction time. */
+    /**
+     * Secondary containment check using canonical paths at extraction time.
+     * Canonicalisation resolves symlinks and ".." components, so both a hostile
+     * entry name that slipped through validation and a pre-planted symlink are caught.
+     */
     fun ensureInside(parent: File, candidate: File) {
-        val c = candidate.canonicalFile
-        val p = parent.canonicalFile
-        if (c != p && !c.path.startsWith(p.path + File.separator)) {
+        if (!isInside(candidate, parent)) {
             throw IOException("Blocked path traversal: ${candidate.path}")
         }
     }
