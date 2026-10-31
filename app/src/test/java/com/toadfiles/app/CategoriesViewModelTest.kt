@@ -531,7 +531,6 @@ class CategoriesViewModelTest {
      * when the domain contract has landed.
      */
     @Test
-    @org.junit.Ignore("TODO(integration): encrypted 7z requires the v1.8.0 domain (AES-256 + passwordRequired)")
     fun `confirmZip passes the password to ArchiveOps for an encrypted 7z`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "cat-zipcrypt-${System.nanoTime()}")
         root.mkdirs()
@@ -571,7 +570,6 @@ class CategoriesViewModelTest {
      * password-prompt flow (prompt state + retry with the same target dir).
      */
     @Test
-    @org.junit.Ignore("TODO(integration): password prompt requires the v1.8.0 domain (passwordRequired)")
     fun `passwordRequired opens the prompt and retry extracts with the password`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "cat-zipprompt-${System.nanoTime()}")
         root.mkdirs()

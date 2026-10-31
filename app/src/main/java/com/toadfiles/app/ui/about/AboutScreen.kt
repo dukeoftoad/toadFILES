@@ -445,6 +445,11 @@ private fun UpdateAvailable(
  * download. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.8.0" to listOf(
+        "Password-protected 7z archives: create AES-256 encrypted archives right from the Compress dialog, and get a password prompt when extracting one — wrong passwords never publish anything.",
+        "Split into volumes: create name.001, name.002… archive sets (fixed sizes or custom), and extract any volume set by tapping its .001 file.",
+        "Six ZArchiver-style compression levels (No compression, Fastest, Fast, Normal, Maximum, Ultra) and the full Create-archive dialog: dropdowns, encryption, passwords, volume size, delete-sources and separate-archive-per-item options.",
+    ),
     "v1.7.5" to listOf(
         "Trash now supports multi-select: long-press items to batch-restore or batch delete-forever (with confirmation).",
         "Categories' Compress now opens the same full dialog as Browse — name, destination, ZIP/7z format and compression level.",
@@ -467,7 +472,7 @@ private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
     ),
     "v1.7.1" to listOf(
         "Tapping an archive now opens its actions (Extract) instead of asking which app to open it with, and after extraction you land straight in the extracted folder.",
-        "ZIP and 7z operations show a real progress bar, and 7z archives are now supported for extraction (password-protected archives are detected and declined politely).",
+        "ZIP and 7z operations show a real progress bar, and 7z archives are now supported for extraction (password-protected archives were detected and declined politely — full password support arrived in v1.8.0).",
         "Update check reliability: retries, redirect handling and friendlier errors for the GitHub connection; toadFILES now also checks silently once on open and shows a small banner when a new version is available.",
         "New Google Files-style side menu (Browse / Recent / Trash / Settings / About), Recent items grouped by Today / Yesterday / This week / Older, and the missing v1.6.0–v1.6.2 entries were added to this changelog.",
     ),

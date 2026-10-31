@@ -9,6 +9,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.SequenceInputStream
 import java.nio.ByteBuffer
 import java.nio.channels.ClosedChannelException
 import java.nio.channels.FileChannel
@@ -136,7 +137,13 @@ object VolumeSupport {
                             currentCoroutineContext().ensureActive()
                             val want = minOf(remaining, BUFFER_SIZE.toLong()).toInt()
                             val n = input.read(buf, 0, want)
-                            if (n == -1) throw IOException("${archive.name}: shrank while splitting")
+                            if (n == -1) {
+                                // EOF is only expected on the LAST volume — it is partial
+                                // by design (or the whole archive is empty). Reaching it
+                                // earlier means the source vanished mid-run.
+                                if (index == count) break else
+                                    throw IOException("${archive.name}: shrank while splitting")
+                            }
                             out.write(buf, 0, n)
                             remaining -= n
                         }
