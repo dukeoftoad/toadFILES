@@ -41,35 +41,39 @@ import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
 
 /**
- * Mi Files-style long-press action sheet. Shows when the user long-presses a single file
- * outside of multi-select. Action visibility is honest: actions that don't apply to the
- * current item (e.g. "Extract here" for a non-zip, "Open with" for a folder) are simply
- * not shown — we never render a disabled row that hints at features the user can't reach.
+ * The app's ONE per-file action sheet (Mi Files style), shared by Browse (FileItem rows)
+ * and the media-library screens (Categories drill-in, Recent) since v1.7.3. Shows when
+ * the user taps a row's ⋮ button; long-press starts multi-select instead.
  *
- * The sheet is deliberately narrow: Open / Share / Rename / Copy / Move / Delete /
- * Zip / Favorite / Pin to Home / Properties / Copy path / Open with. Multi-select is
- * started by long-pressing a row (Google Files style) — no extra entry point needed —
- * and the bulk toolbar (select-all, bulk zip, …) takes over from there.
+ * Action visibility is honest: an action the calling screen did not wire (null callback)
+ * or that doesn't apply to the item (e.g. "Extract here" for a non-archive, "Open with…" for
+ * a folder) is simply not shown — we never render a disabled row that hints at features
+ * the user can't reach. Browse wires everything; the media screens wire the actions that
+ * make sense for a MediaStore row (path-dependent actions only when the on-disk path is
+ * known, clipboard copy/move only where a paste target exists). Both zip and 7z are
+ * creatable since v1.7.3 via the compress dialog's format chooser, but an existing
+ * archive is far more often extracted, so archives get Extract actions instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileActionSheet(
     item: FileItem,
-    isFavorite: Boolean,
-    pinnedToHome: Boolean = false,
     onOpen: () -> Unit,
     onShare: () -> Unit,
-    onRename: () -> Unit,
-    onCopy: () -> Unit,
-    onMove: () -> Unit,
-    onDelete: () -> Unit,
     onDetails: () -> Unit,
-    onZip: () -> Unit,
-    onExtract: (() -> Unit)?,
+    isFavorite: Boolean = false,
+    onDelete: (() -> Unit)? = null,
+    onRename: (() -> Unit)? = null,
+    onCopy: (() -> Unit)? = null,
+    onMove: (() -> Unit)? = null,
+    onZip: (() -> Unit)? = null,
+    onExtract: (() -> Unit)? = null,
     onExtractTo: (() -> Unit)? = null,
-    onToggleFavorite: () -> Unit,
-    onCopyPath: () -> Unit,
-    onOpenWith: () -> Unit,
+    onToggleFavorite: (() -> Unit)? = null,
+    onCopyPath: (() -> Unit)? = null,
+    onOpenWith: (() -> Unit)? = null,
+    onShowInFolder: (() -> Unit)? = null,
+    pinnedToHome: Boolean = false,
     onTogglePin: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
@@ -115,35 +119,48 @@ fun FileActionSheet(
             // Primary actions: Open / Share / Rename
             SheetRow(Icons.AutoMirrored.Outlined.OpenInNew, "Open", onClick = onOpen)
             SheetRow(Icons.Outlined.Share, "Share", onClick = onShare)
-            SheetRow(Icons.Outlined.DriveFileRenameOutline, "Rename", onClick = onRename)
+            if (onRename != null) {
+                SheetRow(Icons.Outlined.DriveFileRenameOutline, "Rename", onClick = onRename)
+            }
 
-            // Clipboard actions: Copy / Move
-            SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = onCopy)
-            SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
+            // Clipboard actions: Copy / Move (only where a screen has a paste target)
+            if (onCopy != null) {
+                SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = onCopy)
+            }
+            if (onMove != null) {
+                SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
+            }
 
-            // Organize: Delete / Zip / Extract. Archives toadFILES can extract (.zip,
-            // .7z) get Extract actions instead of "Zip this file" — 7z is extract-only,
-            // zip keeps its compress flow on the selection toolbar and folder rows.
-            SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
-            if (item.isDir) {
-                SheetRow(Icons.Outlined.Archive, "Zip this folder", onClick = onZip)
-            } else if (ArchiveOps.canExtract(item.name)) {
-                SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = { onExtract?.invoke() })
-                // Destination picking is optional plumbing: hide the row when a screen
-                // can't handle it, like every other non-applicable action here.
-                if (onExtractTo != null) {
-                    SheetRow(Icons.Outlined.FolderOpen, "Extract to…", onClick = onExtractTo)
+            // Organize: Delete / Compress / Extract. Archives toadFILES can extract (.zip,
+            // .7z) get Extract actions instead of "Compress this file" — both formats are
+            // also creatable since v1.7.3 via the compress dialog's format chooser, but an
+            // existing archive is far more often extracted.
+            if (onDelete != null) {
+                SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
+            }
+            when {
+                item.isDir && onZip != null ->
+                    SheetRow(Icons.Outlined.Archive, "Compress this folder", onClick = onZip)
+                ArchiveOps.canExtract(item.name) && onExtract != null -> {
+                    SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = onExtract)
+                    // Destination picking is optional plumbing: hide the row when a screen
+                    // can't handle it, like every other non-applicable action here.
+                    if (onExtractTo != null) {
+                        SheetRow(Icons.Outlined.FolderOpen, "Extract to…", onClick = onExtractTo)
+                    }
                 }
-            } else {
-                SheetRow(Icons.Outlined.Archive, "Zip this file", onClick = onZip)
+                onZip != null ->
+                    SheetRow(Icons.Outlined.Archive, "Compress this file", onClick = onZip)
             }
 
             // Favorite / advanced
-            SheetRow(
-                if (isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-                if (isFavorite) "Remove favorite" else "Add favorite",
-                onClick = onToggleFavorite,
-            )
+            if (onToggleFavorite != null) {
+                SheetRow(
+                    if (isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+                    if (isFavorite) "Remove favorite" else "Add favorite",
+                    onClick = onToggleFavorite,
+                )
+            }
             if (item.isDir && onTogglePin != null) {
                 SheetRow(
                     Icons.Outlined.PushPin,
@@ -153,8 +170,13 @@ fun FileActionSheet(
             }
             // Read-only properties sheet; offered for files and folders alike.
             SheetRow(Icons.Outlined.Info, "Properties", onClick = onDetails)
-            if (!item.isDir) {
+            if (onShowInFolder != null) {
+                SheetRow(Icons.Outlined.FolderOpen, "Show in folder", onClick = onShowInFolder)
+            }
+            if (!item.isDir && onCopyPath != null) {
                 SheetRow(Icons.Outlined.ContentPaste, "Copy path", onClick = onCopyPath)
+            }
+            if (!item.isDir && onOpenWith != null) {
                 SheetRow(Icons.Outlined.MoreHoriz, "Open with…", onClick = onOpenWith)
             }
 

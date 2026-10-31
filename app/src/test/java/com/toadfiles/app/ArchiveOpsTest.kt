@@ -1,6 +1,8 @@
 package com.toadfiles.app
 
+import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.ZipSupport
 import kotlinx.coroutines.runBlocking
@@ -136,5 +138,42 @@ class ArchiveOpsTest {
         assertEquals(ZipSupport.PASSWORD_UNSUPPORTED, friendly)
         assertEquals("boom", ZipSupport.friendlyArchiveError(java.io.IOException("boom")))
         assertNotNull(ZipSupport.PASSWORD_UNSUPPORTED)
+    }
+
+    // ---------- v1.7.3 creation dispatch ----------
+
+    @Test
+    fun `compress dispatches zip and 7z creation by format`() = runBlocking {
+        val dir = tmp.newFolder("fmt")
+        val src = File(dir, "f.txt").apply { writeText("dispatch") }
+
+        val zipOut = File(dir, "o.zip")
+        val rz = ArchiveOps.compress(listOf(src), zipOut, ArchiveFormat.ZIP, CompressLevel.MAXIMUM)
+        assertEquals(1, rz.succeeded)
+        assertTrue(zipOut.exists() && zipOut.length() > 0)
+
+        val sevenOut = File(dir, "o.7z")
+        val r7 = ArchiveOps.compress(listOf(src), sevenOut, ArchiveFormat.SEVEN_Z, CompressLevel.FAST)
+        assertEquals(1, r7.succeeded)
+        assertTrue(sevenOut.exists() && sevenOut.length() > 0)
+
+        // Both land in readable archives that extract through their own pipeline.
+        val unzip = File(dir, "unzip")
+        assertEquals(1, ArchiveOps.extract(zipOut, unzip, replace = false).succeeded)
+        assertEquals("dispatch", File(unzip, "f.txt").readText())
+        val un7z = File(dir, "un7z")
+        assertEquals(1, ArchiveOps.extract(sevenOut, un7z, replace = false).succeeded)
+        assertEquals("dispatch", File(un7z, "f.txt").readText())
+    }
+
+    @Test
+    fun `legacy zip entry point still works and defaults to NORMAL`() = runBlocking {
+        val dir = tmp.newFolder("legacy")
+        val src = File(dir, "f.txt").apply { writeText("legacy call sites keep compiling") }
+        val out = File(dir, "o.zip")
+        assertEquals(1, ArchiveOps.zip(listOf(src), out).succeeded)
+        assertTrue(out.exists())
+        val target = File(dir, "out")
+        assertEquals(1, ArchiveOps.extract(out, target, replace = false).succeeded)
     }
 }

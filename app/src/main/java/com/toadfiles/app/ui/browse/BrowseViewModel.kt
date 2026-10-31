@@ -11,15 +11,20 @@ import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.FileOps
-import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.PathSafety
 import com.toadfiles.app.domain.PropertiesBuilder
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
+import com.toadfiles.app.domain.SevenZipOpenAction
+import com.toadfiles.app.domain.ZipOpenAction
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.ArchiveFormat
+import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.ui.components.PropertiesDetail
+import com.toadfiles.app.ui.components.computeFilePropertiesDetail
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -64,9 +69,17 @@ data class BrowseUiState(
     val pendingNewFolder: Boolean = false,
     val pendingRename: File? = null,
     val pendingDelete: List<File>? = null,
-    /** Batch waiting for the user to type an archive name in the Zip dialog. */
+    /** Batch waiting for the user in the compress dialog: name, format, level and
+     *  destination are chosen there (v1.7.3 format/level chooser). */
     val pendingZipFiles: List<File>? = null,
     val pendingZipName: String = "",
+    val pendingZipFormat: ArchiveFormat = ArchiveFormat.ZIP,
+    val pendingZipLevel: CompressLevel = CompressLevel.NORMAL,
+    /** Folder the new archive will land in: the archive-folder setting when set,
+     *  else the current folder. Shown in the compress dialog. */
+    val pendingZipDestination: File? = null,
+    /** Existing archive target awaiting the overwrite confirmation. */
+    val pendingZipOverwrite: File? = null,
     val pendingConflict: PendingConflict? = null,
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
@@ -90,17 +103,10 @@ sealed interface ExtractEvent {
 }
 
 /**
- * Computed detail behind the Browse properties sheet. Folder sizes/counts arrive
- * asynchronously (recursive walk on IO); [error] carries the app's standard error copy
- * when a folder could not be read at all. Files use [fileCount]/[dirCount] = 0.
+ * What a row tap on an archive does (v1.7.3): the resolved, format-agnostic form of
+ * [ZipOpenAction] / [SevenZipOpenAction] so the screen only has one enum to switch on.
  */
-data class PropertiesDetail(
-    val sizeText: String,
-    val sizeBytes: Long,
-    val fileCount: Int,
-    val dirCount: Int,
-    val error: String? = null,
-)
+enum class ArchiveTapAction { SHOW_MENU, EXTRACT, OPEN_WITH }
 
 @OptIn(FlowPreview::class)
 class BrowseViewModel(
@@ -422,6 +428,39 @@ class BrowseViewModel(
         viewModelScope.launch { settingsRepo.setSortMode(mode) }
     }
 
+    /**
+     * Pull-to-refresh hook: re-lists the current folder through the standard [load]
+     * path (same semantics as an operation-triggered reload — clears query/selection).
+     */
+    fun refresh() {
+        _state.value.dir?.let { load(it) }
+    }
+
+    /**
+     * Resolves the v1.7.3 tap behavior for an extractable archive: .7z honors
+     * [ToadSettings.sevenZipOpenAction], everything else (i.e. .zip) honors
+     * [ToadSettings.zipOpenAction]. SHOW_MENU keeps the v1.7.1 extract-or-open dialog,
+     * EXTRACT runs the exact pipeline behind the menu's "Extract here" (including the
+     * same pre-existing-target refusal / conflict dialog via [extractZip]), OPEN_WITH
+     * is the pre-v1.7.1 ACTION_VIEW behavior.
+     */
+    fun archiveTapAction(fileName: String): ArchiveTapAction {
+        val s = _state.value.settings
+        return if (ArchiveOps.extension(fileName) == "7z") {
+            when (s.sevenZipOpenAction) {
+                SevenZipOpenAction.MENU -> ArchiveTapAction.SHOW_MENU
+                SevenZipOpenAction.EXTRACT -> ArchiveTapAction.EXTRACT
+                SevenZipOpenAction.OPEN_WITH -> ArchiveTapAction.OPEN_WITH
+            }
+        } else {
+            when (s.zipOpenAction) {
+                ZipOpenAction.MENU -> ArchiveTapAction.SHOW_MENU
+                ZipOpenAction.EXTRACT -> ArchiveTapAction.EXTRACT
+                ZipOpenAction.OPEN_WITH -> ArchiveTapAction.OPEN_WITH
+            }
+        }
+    }
+
     fun setFilter(mode: FilterMode) {
         _state.update { it.copy(filterMode = mode) }
     }
@@ -660,6 +699,9 @@ class BrowseViewModel(
             // Post-extract redirect (v1.7.1): navigate into the extracted folder.
             if (kind == OpKind.ZIP_EXTRACT && r.succeeded > 0) {
                 extractDest?.let { d -> _events.tryEmit(ExtractEvent.ExtractCompleted(d)) }
+                // v1.7.3 delete-after-extract (conflict-dialog path); the media
+                // flows (Recent/Categories) mirror this via trashArchiveAfterExtract.
+                if (_state.value.settings.deleteAfterExtract) trashSourcesAfterArchiveOp(sources)
             }
         }
         // Extraction doesn't touch the clipboard — don't drop a pending paste batch.
@@ -696,14 +738,37 @@ class BrowseViewModel(
     /** Last (showHidden, sortMode, sortOrder) that triggered a re-list. */
     private var lastListSettings: Triple<Boolean, SortMode, com.toadfiles.app.domain.SortOrder>? = null
 
-    // ---------- zip ----------
+    // ---------- compress (zip + 7z) ----------
 
-    /** Opens the archive-name dialog for a batch (UI flow). */
-    fun requestZip(files: List<File>) {
-        _state.update { it.copy(pendingZipFiles = files, pendingZipName = suggestedZipName(files)) }
+    /** Default destination for new archives and "Extract to…" (v1.7.3): the user's
+     *  archive folder when one is set, else [fallback] (the current folder). A blank
+     *  setting keeps the v1.7.2 behavior — same folder as the source. */
+    fun archiveFolderOr(fallback: File?): File? {
+        val folder = _state.value.settings.archiveFolder.trim()
+        return if (folder.isNotEmpty()) File(folder) else fallback
     }
 
-    fun dismissZipDialog() = _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
+    /** Opens the compress dialog for a batch (UI flow). */
+    fun requestZip(files: List<File>) {
+        _state.update {
+            it.copy(
+                pendingZipFiles = files,
+                pendingZipName = suggestedZipName(files),
+                pendingZipFormat = ArchiveFormat.ZIP,
+                pendingZipLevel = CompressLevel.NORMAL,
+                pendingZipDestination = archiveFolderOr(it.dir),
+            )
+        }
+    }
+
+    fun dismissZipDialog() = _state.update {
+        it.copy(pendingZipFiles = null, pendingZipName = "", pendingZipOverwrite = null)
+    }
+
+    /** Compress-dialog state setters (the dialog's fields are backed by the VM). */
+    fun setZipName(name: String) = _state.update { it.copy(pendingZipName = name) }
+    fun setZipFormat(format: ArchiveFormat) = _state.update { it.copy(pendingZipFormat = format) }
+    fun setZipLevel(level: CompressLevel) = _state.update { it.copy(pendingZipLevel = level) }
 
     /** Suggested archive name: the single item's name, or "archive.zip" for batches. */
     fun suggestedZipName(files: List<File>): String = when (files.size) {
@@ -714,40 +779,110 @@ class BrowseViewModel(
         else -> "archive.zip"
     }
 
-    /** Zips [files] under the user-typed name (".zip" appended when missing, collisions deduped). */
+    /** Strips a foreign archive extension (".zip"/".7z") and appends the chosen
+     *  format's own, so switching format in the dialog renames the suggestion honestly. */
+    fun normalizeArchiveName(name: String, format: ArchiveFormat): String {
+        val lower = name.lowercase()
+        val base = when {
+            lower.endsWith(".zip") -> name.dropLast(4)
+            lower.endsWith(".7z") -> name.dropLast(3)
+            else -> name
+        }
+        return "$base.${format.extension}"
+    }
+
+    /**
+     * Compresses [name] under the dialog's format/level/destination. When the target
+     * already exists, the overwriteConfirm setting decides: ask first (Cancel returns
+     * to the dialog for a new name) or replace silently.
+     */
     fun confirmZip(name: String) {
-        val files = _state.value.pendingZipFiles ?: return
-        val dir = _state.value.dir ?: return
+        val st = _state.value
+        val files = st.pendingZipFiles ?: return
+        val dest = st.pendingZipDestination ?: st.dir ?: return
         val clean = name.trim()
         if (clean.isEmpty() || clean.contains('/') || clean.contains('\\')) {
             _state.update { it.copy(toast = "Enter a valid archive name") }
             return
         }
-        _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
-        val base = if (clean.lowercase().endsWith(".zip")) clean else "$clean.zip"
-        zipTo(files, File(dir, PathSafety.uniqueName(dir, base)))
+        val target = File(dest, normalizeArchiveName(clean, st.pendingZipFormat))
+        if (target.exists() && st.settings.overwriteConfirm) {
+            _state.update { it.copy(pendingZipOverwrite = target) }
+            return
+        }
+        startCompress(files, target, st.pendingZipFormat, st.pendingZipLevel)
     }
 
-    /** Quick zip with the classic auto name (tests; UI goes through the name dialog). */
+    /** Overwrite confirmed: publish over the existing target after all. */
+    fun confirmZipOverwrite() {
+        val st = _state.value
+        val target = st.pendingZipOverwrite ?: return
+        val files = st.pendingZipFiles ?: return
+        startCompress(files, target, st.pendingZipFormat, st.pendingZipLevel)
+    }
+
+    /** Overwrite declined: back to the compress dialog so the user can pick a new name. */
+    fun dismissZipOverwrite() = _state.update { it.copy(pendingZipOverwrite = null) }
+
+    private fun startCompress(files: List<File>, target: File, format: ArchiveFormat, level: CompressLevel) {
+        _state.update { it.copy(pendingZipFiles = null, pendingZipName = "", pendingZipOverwrite = null) }
+        zipTo(files, target, format, level)
+    }
+
+    /** Quick zip with the classic auto name (tests; UI goes through the compress dialog). */
     fun zipSelected(files: List<File>) {
         val dir = _state.value.dir ?: return
         zipTo(files, File(dir, PathSafety.uniqueName(dir, "archive.zip")))
     }
 
-    private fun zipTo(files: List<File>, out: File) {
+    private fun zipTo(
+        files: List<File>,
+        out: File,
+        format: ArchiveFormat = ArchiveFormat.ZIP,
+        level: CompressLevel = CompressLevel.NORMAL,
+    ) {
         val dir = _state.value.dir ?: return
-        _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
+        val title = if (format == ArchiveFormat.SEVEN_Z) "Compressing" else "Zipping"
+        _state.update { it.copy(progress = title to OpProgress(0, files.size, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ArchiveOps.zip(files, out) { p -> _state.update { it.copy(progress = "Zipping" to p) } }
-            _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }
+            val r = ArchiveOps.compress(files, out, format, level) { p ->
+                _state.update { it.copy(progress = title to p) }
+            }
+            _state.update { it.copy(progress = null, result = r, resultTitle = title) }
+            if (r.succeeded > 0 && _state.value.settings.deleteAfterCompress) {
+                trashSourcesAfterArchiveOp(files)
+            }
             load(dir)
         }
     }
 
     /**
+     * "Delete after archive op" follows the app's delete convention (checked): the
+     * sources move to the toadFILES trash — 30-day retention, restorable, undoable via
+     * [BrowseUiState.lastTrashed] — never a silent permanent erase. ZArchiver deletes
+     * permanently; toadFILES deletes like its own Delete button does.
+     */
+    private suspend fun trashSourcesAfterArchiveOp(files: List<File>) {
+        val live = files.filter { it.exists() }
+        if (live.isEmpty()) return
+        val roots = container.fileRepo.roots().map { it.dir }
+        val result = Trash.trash(live, roots)
+        _state.update {
+            it.copy(
+                lastTrashed = result.moved.takeIf { m -> m.isNotEmpty() },
+                toast = if (result.failureCount > 0) {
+                    "Could not delete ${result.failureCount} source item(s)"
+                } else it.toast,
+            )
+        }
+        refreshTrashCount()
+    }
+
+    /**
      * Extracts an archive (.zip or .7z) into a folder named after it next to it — or,
      * when [targetName] is set ("Extract to…"), into a folder with that name under the
-     * current directory. The default flow refuses an existing destination (as before);
+     * default destination: the user's archive folder when set, else the current
+     * directory (v1.7.3). The default flow refuses an existing destination (as before);
      * the named flow asks via the shared conflict dialog: Replace overwrites colliding
      * entries, Keep both extracts into a uniquely named sibling, Skip merges without
      * overwriting.
@@ -764,7 +899,7 @@ class BrowseViewModel(
             }
             startExtract(file, target)
         } else {
-            val dir = _state.value.dir ?: return
+            val dir = archiveFolderOr(_state.value.dir) ?: return
             val clean = targetName.trim()
             if (clean.isEmpty() || clean.contains('/') || clean.contains('\\')) {
                 _state.update { it.copy(toast = "Enter a valid folder name") }
@@ -784,7 +919,8 @@ class BrowseViewModel(
 
     /** Runs the ArchiveOps extract with Browse's standard progress/result plumbing and
      *  emits an [ExtractEvent.ExtractCompleted] one-shot so the screen can navigate into
-     *  the extracted folder (v1.7.1 post-extract redirect). */
+     *  the extracted folder (v1.7.1 post-extract redirect). v1.7.3: a successful
+     *  extraction honors deleteAfterExtract (app delete convention: trash, undoable). */
     private fun startExtract(file: File, target: File) {
         _state.update {
             it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, ""))
@@ -794,7 +930,12 @@ class BrowseViewModel(
                 _state.update { it.copy(progress = "Extracting" to p) }
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
-            if (r.succeeded > 0) _events.tryEmit(ExtractEvent.ExtractCompleted(target))
+            if (r.succeeded > 0) {
+                _events.tryEmit(ExtractEvent.ExtractCompleted(target))
+                // The media flows (Recent/Categories) honor this too via
+                // trashArchiveAfterExtract — same trash-based convention.
+                if (_state.value.settings.deleteAfterExtract) trashSourcesAfterArchiveOp(listOf(file))
+            }
             load(target.parentFile ?: return@launch)
         }
     }
@@ -827,24 +968,11 @@ class BrowseViewModel(
         _state.update { it.copy(pendingProperties = null, propertiesDetail = null) }
     }
 
-    /** Blocking FS walks (size, counts) run inside the IO-dispatched properties job. */
-    private suspend fun computePropertiesDetail(file: File): PropertiesDetail {
-        if (file.isDirectory && !file.canRead()) {
-            return PropertiesDetail(
-                sizeText = "—", sizeBytes = 0L, fileCount = 0, dirCount = 0,
-                error = "Folder is not readable",
-            )
-        }
-        val sizeBytes = FileOps.sizeOf(file)
-        coroutineContext.ensureActive()
-        val counts = if (file.isDirectory) propertiesBuilder.countEntries(file) else null
-        return PropertiesDetail(
-            sizeText = Format.size(sizeBytes),
-            sizeBytes = sizeBytes,
-            fileCount = counts?.files ?: 0,
-            dirCount = counts?.dirs ?: 0,
-        )
-    }
+    /** Blocking FS walks (size, counts) run inside the IO-dispatched properties job; the
+     *  computation itself is the shared [computeFilePropertiesDetail] (v1.7.3: Categories
+     *  runs the exact same engine for its properties sheet). */
+    private suspend fun computePropertiesDetail(file: File): PropertiesDetail =
+        computeFilePropertiesDetail(file, propertiesBuilder)
 
     // ---------- misc ----------
 

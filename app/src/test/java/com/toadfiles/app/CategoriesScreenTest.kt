@@ -29,13 +29,17 @@ import java.io.File
 import javax.imageio.ImageIO
 
 /**
- * P2.4 regression: the Categories drill-in must expose a reachable per-item action
- * sheet. Long-press is reserved for multi-select, so rows (docs/audio/archives/apks)
- * and visual grid cells (images/videos) each render a ⋮ affordance that opens the
- * MediaActionSheet — the old code wired the sheet but never rendered any trigger.
+ * P2.4 regression + v1.7.3 parity: the Categories drill-in renders the SAME shared rows
+ * and grid cells Browse uses (FileRow / FileGridCell), and each exposes a reachable
+ * per-item action sheet via its ⋮ affordance. Long-press is reserved for multi-select,
+ * so rows (docs/audio/archives/apks) and grid cells (images/videos) each render the
+ * trigger. The sheet is the shared FileActionSheet wiring, so a zip row must offer the
+ * Browse-parity actions (Extract here, Extract to…, Rename, Zip, Properties).
  */
 @RunWith(AndroidJUnit4::class)
-@Config(application = ToadApp::class, sdk = [35])
+// qualifiers: a tall virtual screen so every category tile in the LazyVerticalGrid
+// (Archives sits below the fold on Robolectric's default 320x470) is composed.
+@Config(application = ToadApp::class, sdk = [35], qualifiers = "w411dp-h1200dp")
 class CategoriesScreenTest {
 
     @get:Rule
@@ -61,12 +65,22 @@ class CategoriesScreenTest {
         val root = Environment.getExternalStorageDirectory().apply { mkdirs() }
         val docs = File(root, "Documents").apply { mkdirs() }
         val cam = File(root, "DCIM/Camera").apply { mkdirs() }
+        val arch = File(root, "Download").apply { mkdirs() }
         val pdf = File(docs, "quarterly-report.pdf").apply { writeBytes(ByteArray(4_096) { 3 }) }
         val jpg = File(cam, "IMG_1.jpg").apply { writeBytes(png()) }
+        val zip = File(arch, "bundle.zip").apply {
+            // A real (tiny) zip so ArchiveOps.canExtract/entryCount behave honestly.
+            java.util.zip.ZipOutputStream(outputStream()).use { zos ->
+                zos.putNextEntry(java.util.zip.ZipEntry("inner.txt"))
+                zos.write("zipbody".toByteArray())
+                zos.closeEntry()
+            }
+        }
 
         val now = System.currentTimeMillis() / 1000L
         rows += MediaRow(rowId++, pdf.name, pdf.length(), now, "application/pdf", pdf.path, 6)
         rows += MediaRow(rowId++, jpg.name, jpg.length(), now - 60, "image/jpeg", jpg.path, 1)
+        rows += MediaRow(rowId++, zip.name, zip.length(), now - 120, "application/zip", zip.path, 0)
         media.rowsList = rows.toList()
         ShadowContentResolver.registerProviderInternal("media", media)
     }
@@ -83,6 +97,10 @@ class CategoriesScreenTest {
         render()
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Media library").fetchSemanticsNodes().isNotEmpty()
+        }
+        // The grid tiles land asynchronously (summaries query) — never race the click.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText(tileLabel).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText(tileLabel).performClick()
     }
@@ -104,19 +122,19 @@ class CategoriesScreenTest {
             compose.onAllNodesWithText("Open with…").fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Details").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Properties").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
     @Test
     fun `image grid cells expose the per-item action sheet`() {
         openDrillIn("Images")
-        // Visual cells show the file name as the image's content description, not text.
+        // The shared FileGridCell renders the file name as text under the thumbnail.
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithContentDescription("IMG_1.jpg").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("IMG_1.jpg").fetchSemanticsNodes().isNotEmpty()
         }
 
-        // The visual cell's ⋮ affordance is rendered and opens the action sheet.
+        // The grid cell's ⋮ affordance is rendered and opens the action sheet.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithContentDescription("More actions").fetchSemanticsNodes().isNotEmpty()
         }
@@ -124,6 +142,33 @@ class CategoriesScreenTest {
 
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Open with…").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun `archive rows offer the Browse-parity actions in the shared sheet`() {
+        openDrillIn("Archives")
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("bundle.zip").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodesWithContentDescription("More actions")[0].performClick()
+
+        // Extract (here + to…), Rename, Delete and Properties — the exact rows Browse
+        // renders for the same file, now shared.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Extract here").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Extract to…").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Rename").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Properties").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Delete").fetchSemanticsNodes().isNotEmpty()
         }
     }
 

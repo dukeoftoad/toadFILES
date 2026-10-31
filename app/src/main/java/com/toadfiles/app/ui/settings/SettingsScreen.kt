@@ -1,10 +1,6 @@
 package com.toadfiles.app.ui.settings
 
-import android.os.Build
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,16 +9,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -31,12 +25,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,18 +36,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.ToadViewModelFactory
-import com.toadfiles.app.data.ThemeMode
-import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.BackKeyAction
+import com.toadfiles.app.domain.NavStyle
+import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
-import com.toadfiles.app.ui.theme.AccentPalettes
+import com.toadfiles.app.domain.ZipOpenAction
+import com.toadfiles.app.ui.components.ArchiveFolderPicker
 
 private val SEARCH_LIMIT_CHOICES = listOf(100, 250, 500, 1000, 2000)
 
@@ -65,14 +57,20 @@ private val SEARCH_LIMIT_CHOICES = listOf(100, 250, 500, 1000, 2000)
 fun SettingsScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
-    onOpenTrash: () -> Unit,
+    // Deprecated no-op kept for source compatibility; the Trash card was removed in
+    // v1.7.3 (Trash lives in the side menu).
+    @Suppress("DEPRECATION", "unused")
+    onOpenTrash: (() -> Unit)? = null,
     onOpenAbout: () -> Unit,
+    // Wired in ToadNavHost to the "appearance" route.
+    onOpenAppearance: (() -> Unit)? = null,
     onOpenDrawer: (() -> Unit)? = null,
     vm: SettingsViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var sortMenuOpen by remember { mutableStateOf(false) }
     var searchLimitMenuOpen by remember { mutableStateOf(false) }
+    var archiveFolderPickerOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -99,71 +97,32 @@ fun SettingsScreen(
             Text("Appearance", style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
 
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    ThemeMode.entries.forEach { mode ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { vm.setTheme(mode) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = settings.themeMode == mode, onClick = { vm.setTheme(mode) })
-                            Text(
-                                when (mode) {
-                                    ThemeMode.SYSTEM -> "Follow system"
-                                    ThemeMode.LIGHT -> "Light"
-                                    ThemeMode.DARK -> "Dark"
-                                }
-                            )
-                        }
-                    }
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Dynamic color", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                                    "Use wallpaper-based Material You colors"
-                                else "Requires Android 12+",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = settings.dynamicColor,
-                            onCheckedChange = { vm.setDynamic(it) },
-                            enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+            // Theme / dynamic color / accent live on the dedicated Appearance subpage now.
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = onOpenAppearance != null) { onOpenAppearance?.invoke() },
+            ) {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.Palette, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.size(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Appearance", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Theme, Dynamic Color, Accent Color",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    // Accent picker — only meaningful when dynamic color is OFF. When
-                    // dynamic color is on the picker is shown disabled so the user can see
-                    // what's available once they turn Material You off; the swatch they
-                    // pre-select here will then apply immediately.
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Text("Accent color", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Used when dynamic color is off. Toad is the original palette.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "Open",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
                     )
-                    Spacer(Modifier.height(10.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(AccentColor.entries) { accent ->
-                            AccentSwatch(
-                                accent = accent,
-                                selected = settings.accentColor == accent,
-                                enabled = !settings.dynamicColor ||
-                                    Build.VERSION.SDK_INT < Build.VERSION_CODES.S,
-                                onClick = { vm.setAccent(accent) },
-                            )
-                        }
-                    }
                 }
             }
 
@@ -256,32 +215,93 @@ fun SettingsScreen(
                 }
             }
 
-            Text("Trash", style = MaterialTheme.typography.titleMedium,
+            Text("General", style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp))
 
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenTrash() },
-            ) {
-                Row(
-                    Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Open trash", style = MaterialTheme.typography.bodyLarge)
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    ChoiceRow(
+                        title = "Open Action (ZIP)",
+                        choices = ZipOpenAction.entries,
+                        selected = settings.zipOpenAction,
+                        label = ::zipOpenLabel,
+                        onSelect = { vm.setZipOpenAction(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    ChoiceRow(
+                        title = "Open Action (7z)",
+                        choices = SevenZipOpenAction.entries,
+                        selected = settings.sevenZipOpenAction,
+                        label = ::sevenZipOpenLabel,
+                        onSelect = { vm.setSevenZipOpenAction(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    ChoiceRow(
+                        title = "Back Key Action",
+                        choices = BackKeyAction.entries,
+                        selected = settings.backKeyAction,
+                        label = ::backKeyLabel,
+                        onSelect = { vm.setBackKeyAction(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    ChoiceRow(
+                        title = "Navigation Style",
+                        choices = NavStyle.entries,
+                        selected = settings.navStyle,
+                        label = ::navStyleLabel,
+                        onSelect = { vm.setNavStyle(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    SwitchRow(
+                        title = "Delete Source After Compression",
+                        subtitle = "Remove the original files once the archive is created",
+                        checked = settings.deleteAfterCompress,
+                        onChange = { vm.setDeleteAfterCompress(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    SwitchRow(
+                        title = "Delete Archive After Extraction",
+                        subtitle = "Remove the archive once everything is extracted",
+                        checked = settings.deleteAfterExtract,
+                        onChange = { vm.setDeleteAfterExtract(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    SwitchRow(
+                        title = "Confirm Before Aborting",
+                        subtitle = "Ask before canceling a running archive operation",
+                        checked = settings.abortConfirm,
+                        onChange = { vm.setAbortConfirm(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    SwitchRow(
+                        title = "Confirm Before Overwriting",
+                        subtitle = "Ask before extraction replaces existing files",
+                        checked = settings.overwriteConfirm,
+                        onChange = { vm.setOverwriteConfirm(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { archiveFolderPickerOpen = true },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Archive Folder", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                settings.archiveFolder.ifBlank { "Same Folder As Source" },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         Text(
-                            "Deleted items are kept for 30 days, then removed automatically",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "Change",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge,
                         )
                     }
-                    Text(
-                        "View",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
                 }
             }
 
@@ -352,39 +372,98 @@ fun SettingsScreen(
             Spacer(Modifier.height(32.dp))
         }
     }
+
+    if (archiveFolderPickerOpen) {
+        ArchiveFolderPicker(
+            initial = settings.archiveFolder,
+            onSelect = {
+                vm.setArchiveFolder(it)
+                archiveFolderPickerOpen = false
+            },
+            onDismiss = { archiveFolderPickerOpen = false },
+        )
+    }
 }
 
+private fun zipOpenLabel(action: ZipOpenAction) = when (action) {
+    ZipOpenAction.MENU -> "Show Menu"
+    ZipOpenAction.EXTRACT -> "Extract"
+    ZipOpenAction.OPEN_WITH -> "Open With"
+}
+
+private fun sevenZipOpenLabel(action: SevenZipOpenAction) = when (action) {
+    SevenZipOpenAction.MENU -> "Show Menu"
+    SevenZipOpenAction.EXTRACT -> "Extract"
+    SevenZipOpenAction.OPEN_WITH -> "Open With"
+}
+
+private fun backKeyLabel(action: BackKeyAction) = when (action) {
+    BackKeyAction.PARENT -> "Back To Parent Folder"
+    BackKeyAction.EXIT -> "Exit App"
+}
+
+private fun navStyleLabel(style: NavStyle) = when (style) {
+    NavStyle.BOTTOM_BAR -> "Bottom Bar"
+    NavStyle.SIDE_MENU -> "Side Menu"
+}
+
+/** Label + current value + "Change" affordance with a dropdown, as used by "Default sort". */
 @Composable
-private fun AccentSwatch(
-    accent: AccentColor,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
+private fun <T> ChoiceRow(
+    title: String,
+    choices: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
 ) {
-    val color = AccentPalettes.swatch(accent)
-    Column(
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    var open by remember { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { open = true },
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            shape = CircleShape,
-            color = if (selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f) else Color.Transparent,
-            modifier = Modifier.size(40.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .padding(4.dp)
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(if (enabled) color else color.copy(alpha = 0.4f)),
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                label(selected),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(Modifier.height(4.dp))
         Text(
-            accent.label,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            "Change",
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelLarge,
         )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            choices.forEach { c ->
+                DropdownMenuItem(
+                    text = { Text(label(c)) },
+                    onClick = { onSelect(c); open = false },
+                )
+            }
+        }
+    }
+}
+
+/** Label + explanatory subtitle + switch, as used by "Show hidden files". */
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

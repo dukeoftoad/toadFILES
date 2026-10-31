@@ -64,6 +64,8 @@ object ToadViewModelFactory : ViewModelProvider.Factory {
                 com.toadfiles.app.ui.recent.RecentViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.storage.StorageViewModel::class.java) ->
                 com.toadfiles.app.ui.storage.StorageViewModel(c) as T
+            modelClass.isAssignableFrom(com.toadfiles.app.ui.analyzer.StorageAnalyzerViewModel::class.java) ->
+                com.toadfiles.app.ui.analyzer.StorageAnalyzerViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.settings.SettingsViewModel::class.java) ->
                 com.toadfiles.app.ui.settings.SettingsViewModel(c) as T
             modelClass.isAssignableFrom(com.toadfiles.app.ui.trash.TrashViewModel::class.java) ->

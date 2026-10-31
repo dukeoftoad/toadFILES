@@ -41,18 +41,25 @@ class FileActionSheetTest {
     private fun renderSheet(
         item: FileItem,
         isFavorite: Boolean = false,
+        onExtract: (() -> Unit)? = null,
         onExtractTo: (() -> Unit)? = null,
+        wired: Boolean = true,
     ) {
         compose.setContent {
             ToadTheme {
                 FileActionSheet(
                     item = item,
                     isFavorite = isFavorite,
-                    onOpen = {}, onShare = {}, onRename = {}, onCopy = {}, onMove = {},
-                    onDelete = {}, onDetails = {}, onZip = {},
-                    onExtract = null,
+                    onOpen = {}, onShare = {}, onDelete = {}, onDetails = {},
+                    onRename = if (wired) ({}) else null,
+                    onCopy = if (wired) ({}) else null,
+                    onMove = if (wired) ({}) else null,
+                    onZip = if (wired) ({}) else null,
+                    onExtract = onExtract,
                     onExtractTo = onExtractTo,
-                    onToggleFavorite = {}, onCopyPath = {}, onOpenWith = {},
+                    onToggleFavorite = if (wired) ({}) else null,
+                    onCopyPath = if (wired) ({}) else null,
+                    onOpenWith = if (wired) ({}) else null,
                     onDismiss = {},
                 )
             }
@@ -88,15 +95,15 @@ class FileActionSheetTest {
         // File-only actions
         assertRowShown("Copy path")
         assertRowShown("Open with…")
-        // For a non-zip file the zip row reads "Zip this file" (not "Extract here")
-        assertRowShown("Zip this file")
+        // For a non-zip file the compress row reads "Compress this file" (not "Extract here")
+        assertRowShown("Compress this file")
     }
 
     @Test
-    fun `folder sheet hides Copy path and Open with, shows Zip this folder`() {
+    fun `folder sheet hides Copy path and Open with, shows Compress this folder`() {
         renderSheet(fileItem("Pictures", isDir = true))
         assertRowShown("Open")
-        assertRowShown("Zip this folder")
+        assertRowShown("Compress this folder")
         // File-only actions must NOT appear for a folder — the sheet hides them.
         assertRowHidden("Copy path")
         assertRowHidden("Open with…")
@@ -104,17 +111,52 @@ class FileActionSheetTest {
     }
 
     @Test
-    fun `zip file sheet shows Extract here instead of Zip this file`() {
-        renderSheet(fileItem("archive.zip", isDir = false))
+    fun `zip file sheet shows Extract here instead of Compress this file`() {
+        renderSheet(fileItem("archive.zip", isDir = false), onExtract = {})
         assertRowShown("Extract here")
-        // The file-zip row must be hidden when the extract row is shown.
-        assertRowHidden("Zip this file")
-        assertRowHidden("Zip this folder")
+        // The file-compress row must be hidden when the extract row is shown.
+        assertRowHidden("Compress this file")
+        assertRowHidden("Compress this folder")
+    }
+
+    @Test
+    fun `7z file sheet shows Extract here instead of Compress this file`() {
+        // The 7z twin keeps the same honest-visibility promise.
+        renderSheet(fileItem("archive.7z", isDir = false), onExtract = {})
+        assertRowShown("Extract here")
+        assertRowHidden("Compress this file")
+    }
+
+    @Test
+    fun `Extract here is hidden when the screen cannot extract`() {
+        // v1.7.3: an unwired extract (e.g. a media row without an on-disk path) must not
+        // hint at the action — the row hides, and a zippable file falls back to "Compress this file".
+        renderSheet(fileItem("archive.zip", isDir = false), onExtract = null)
+        assertRowHidden("Extract here")
+        assertRowShown("Compress this file")
+    }
+
+    @Test
+    fun `unwired actions stay hidden so screens can offer a subset`() {
+        // The media screens (Categories drill-in, Recent) wire only the actions that make
+        // sense for a MediaStore row — the unwired ones must not render, Browse-style.
+        renderSheet(fileItem("song.mp3", isDir = false), wired = false)
+        assertRowShown("Open")
+        assertRowShown("Share")
+        assertRowShown("Delete")
+        assertRowShown("Properties")
+        assertRowHidden("Rename")
+        assertRowHidden("Copy to…")
+        assertRowHidden("Move to…")
+        assertRowHidden("Compress this file")
+        assertRowHidden("Add favorite")
+        assertRowHidden("Copy path")
+        assertRowHidden("Open with…")
     }
 
     @Test
     fun `zip sheet shows Extract to alongside Extract here when the screen can pick a destination`() {
-        renderSheet(fileItem("archive.zip", isDir = false), onExtractTo = {})
+        renderSheet(fileItem("archive.zip", isDir = false), onExtract = {}, onExtractTo = {})
         assertRowShown("Extract here")
         assertRowShown("Extract to…")
     }
@@ -122,7 +164,7 @@ class FileActionSheetTest {
     @Test
     fun `Extract to is hidden when no destination callback is wired`() {
         // Screens without destination picking pass null — the row must not hint at it.
-        renderSheet(fileItem("archive.zip", isDir = false), onExtractTo = null)
+        renderSheet(fileItem("archive.zip", isDir = false), onExtract = {}, onExtractTo = null)
         assertRowShown("Extract here")
         assertRowHidden("Extract to…")
     }

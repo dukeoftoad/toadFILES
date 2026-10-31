@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -171,9 +172,26 @@ class RecentViewModel(
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
+                if (r.succeeded > 0) trashArchiveAfterExtract(file)
                 refresh()
             },
         )
+    }
+
+    /**
+     * v1.7.3 delete-after-extract (media flows): after a successful extraction, honor
+     * the setting by moving the archive to the toadFILES trash (undoable) — the same
+     * convention BrowseViewModel.trashSourcesAfterArchiveOp follows.
+     */
+    private fun trashArchiveAfterExtract(file: File) {
+        viewModelScope.launch {
+            if (!container.settingsRepo.settings.first().deleteAfterExtract) return@launch
+            if (!file.exists()) return@launch
+            val roots = container.fileRepo.roots().map { it.dir }
+            if (Trash.trash(listOf(file), roots).failureCount > 0) {
+                requestToast("Could not delete the archive")
+            }
+        }
     }
 
     fun cancelOp() = ops.cancel { _state.update { it.copy(progress = null) } }

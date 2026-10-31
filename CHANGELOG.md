@@ -4,6 +4,58 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.7.3] — 2026-10-31
+
+Big UX release: 7z creation, a redesigned Settings with Appearance page and
+General preferences, Browse-level feature parity in Categories, a MI Files-style
+storage analyzer, pull-to-refresh everywhere and the two-navigation-styles switch.
+
+### Added
+- **7z archive creation** (Browse): "Compress" now offers ZIP *and* 7z. The 7z
+  pipeline mirrors the hardened zip one — staged temp file with atomic rename,
+  no-follow symlink walk, per-file determinate progress, cancellation checkpoints,
+  duplicate-name and entry-count caps. STORE uses the uncompressed COPY codec;
+  Fast/Normal/Maximum map to LZMA2 presets 1/6/9 (xz defaults).
+- **Compression level chooser** for both formats: Store / Fast / Normal / Maximum
+  (zip → Deflater levels, 7z → LZMA2 presets) in the new compress dialog, which
+  also shows the destination folder (the archive-folder setting when set).
+- **New General settings** (image-inspired): per-format archive open actions
+  (ZIP and 7z separately: show menu / extract immediately / open with), back-key
+  action (parent folder / exit app), navigation style (bottom bar / side menu),
+  delete-source-after-compression, delete-archive-after-extraction, abort
+  confirmation, overwrite confirmation, and an **archive folder** picker used
+  as the default destination for both compression output and "Extract to…".
+- **Appearance subpage** in Settings: theme mode, dynamic color and accent
+  color moved to a dedicated page.
+- **Browse-level file actions in Categories**: every category drill-in row
+  now opens the exact same action sheet Browse uses — Extract here / Extract
+  to… for `.zip`/`.7z` (with the shared conflict dialog on a name clash),
+  Rename, Compress, Properties (the full properties sheet, not a summary
+  dialog), Share, Delete-to-trash with Undo, Copy path, Open with… and Show
+  in folder; plus Browse's sort menu and list/grid toggle, and batch
+  operations (compress the selection, extract, properties, rename) in
+  multi-select.
+- **Storage analyzer** (MI Files style): "Analyze storage" on the Storage page
+  scans a volume with live progress and shows a per-category size breakdown,
+  the biggest files and the largest folders (non-nested, MI Files style) with
+  tap-through to properties or the folder.
+- **Pull-to-refresh** on Browse, Recent, Categories and Trash; the toolbar
+  refresh buttons are gone.
+- **Archive tap actions** in Browse honor the per-format settings above.
+
+### Changed
+- **One action sheet implementation**: Categories and Recent now render the
+  shared `FileActionSheet` (and the shared `FileRow`/`FileGridCell` rows)
+  that Browse uses, instead of a trimmed-down media variant; the Recent
+  sheet's "Details" row is now labeled "Properties".
+- **Trash removed from Settings**: the side-menu Trash page is the one entry
+  point (the Settings card is gone).
+- **Delete after compress / delete after extract**: successful operations move
+  the sources to the toadFILES trash (30-day retention, undoable) — the app's
+  delete convention, never a silent permanent erase.
+- **Overwrite confirmation** when the target archive already exists (honors the
+  overwriteConfirm setting; decline returns to the dialog for a new name).
+
 ## [1.7.2] — 2026-10-31
 
 ### Fixed

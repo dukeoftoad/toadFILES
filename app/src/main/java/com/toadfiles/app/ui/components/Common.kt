@@ -218,7 +218,12 @@ fun VideoThumb(path: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Compact grid cell used by Browse's grid layout. */
+/**
+ * Compact grid cell shared by Browse's grid layout and the Categories drill-in grid.
+ * [onMore] (when wired) renders the always-visible ⋮ badge that opens the per-item action
+ * sheet — screens where long-press starts multi-select need an explicit sheet trigger,
+ * and it sits exactly where the selection check goes (the two never render together).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileGridCell(
@@ -227,6 +232,7 @@ fun FileGridCell(
     isFavorite: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onMore: (() -> Unit)? = null,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
     Surface(color = bg, shape = RoundedCornerShape(14.dp)) {
@@ -284,6 +290,26 @@ fun FileGridCell(
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.padding(3.dp),
+                        )
+                    }
+                } else if (onMore != null) {
+                    // Overflow affordance for the per-item action sheet. The scrim disc
+                    // keeps it visible over any thumbnail.
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f))
+                            .clickable(onClickLabel = "More actions") { onMore() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Outlined.MoreVert,
+                            contentDescription = "More actions",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
                         )
                     }
                 }
@@ -365,18 +391,30 @@ fun NameInputDialog(
     confirmLabel: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
+    /** Optional destination path shown under the field (v1.7.3: archive folder default). */
+    destination: String? = null,
 ) {
     var value by remember { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                singleLine = true,
-                label = { Text("Name") },
-            )
+            Column {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    singleLine = true,
+                    label = { Text("Name") },
+                )
+                destination?.let {
+                    Text(
+                        "Into $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(value) }, enabled = value.isNotBlank()) {
