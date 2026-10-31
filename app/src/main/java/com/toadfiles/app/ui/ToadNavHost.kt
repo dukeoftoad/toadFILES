@@ -1,18 +1,34 @@
 package com.toadfiles.app.ui
 
 import android.net.Uri
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -21,6 +37,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import kotlinx.coroutines.launch
 import com.toadfiles.app.ui.about.AboutScreen
 import com.toadfiles.app.ui.browse.BrowseScreen
 import com.toadfiles.app.ui.categories.CategoriesScreen
@@ -45,6 +62,9 @@ object Routes {
 
 private data class BottomDestination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
+/** Side-drawer entry — Google Files style navigation in addition to the bottom bar. */
+private data class DrawerDestination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+
 /**
  * Navigate without stacking a second copy when the destination is already on top.
  * Plain navigate() pushed a new instance on every tap, so repeated taps on
@@ -63,6 +83,64 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
         BottomDestination(Routes.SETTINGS, "Settings") { Icon(Icons.Outlined.Settings, null) },
     )
 
+    // Side navigation menu. Reachable via the hamburger on the top-level screens
+    // (Home, Recent, Trash, Settings) — Google Files-style.
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val drawerDestinations = listOf(
+        DrawerDestination(Routes.BROWSE, "Browse", Icons.Outlined.Folder),
+        DrawerDestination(Routes.RECENT, "Recent", Icons.Outlined.History),
+        DrawerDestination(Routes.TRASH, "Trash", Icons.Outlined.Delete),
+        DrawerDestination(Routes.SETTINGS, "Settings", Icons.Outlined.Settings),
+        DrawerDestination(Routes.ABOUT, "About", Icons.Outlined.Info),
+    )
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentBase = backStackEntry?.destination?.route?.substringBefore('?')
+    val openFromDrawer: (String) -> Unit = { route ->
+        scope.launch { drawerState.close() }
+        // Same reselection semantics as the bottom bar: never stack duplicates.
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Text(
+                    "toadFILES",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(
+                        start = 28.dp, top = 20.dp, bottom = 4.dp,
+                    ),
+                )
+                Text(
+                    "Lightweight · Fast · Private",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 28.dp, bottom = 12.dp),
+                )
+                HorizontalDivider()
+                drawerDestinations.forEach { dest ->
+                    val base = dest.route.substringBefore('?')
+                    NavigationDrawerItem(
+                        label = { Text(dest.label) },
+                        icon = { Icon(dest.icon, null) },
+                        selected = currentBase == base,
+                        onClick = { openFromDrawer(base) },
+                        // Distinct from the bottom-bar items: a closed drawer still
+                        // composes its content, so plain-text lookups would be ambiguous.
+                        modifier = Modifier
+                            .testTag("drawer_${dest.label}")
+                            .padding(NavigationDrawerItemDefaults.ItemPadding),
+                    )
+                }
+            }
+        },
+    ) {
     Scaffold(
         bottomBar = {
             val backStack by navController.currentBackStackEntryAsState()
@@ -86,6 +164,8 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         },
                         icon = dest.icon,
                         label = { Text(dest.label) },
+                        // Distinct from the (always-composed, closed) drawer items.
+                        modifier = Modifier.testTag("tab_${dest.label}"),
                     )
                 }
             }
@@ -103,6 +183,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },
                     onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
                     onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
                 )
             }
             composable(
@@ -120,6 +201,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
                     onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
                 )
             }
             composable(Routes.CATEGORIES) {
@@ -135,6 +217,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onBack = { navController.popBackStack() },
                     onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
                     onOpenAbout = { navController.navigateSingleTop(Routes.ABOUT) },
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
                 )
             }
 
@@ -149,6 +232,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 TrashScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
                 )
             }
             composable(Routes.STORAGE) {
@@ -159,5 +243,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 )
             }
         }
+    }
     }
 }

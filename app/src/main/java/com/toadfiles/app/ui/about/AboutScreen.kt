@@ -52,9 +52,10 @@ import com.toadfiles.app.util.Intents
  * the OSS credits, and an in-app changelog.
  *
  * Layout: a vertically scrolling column of cards. One concern per card so the page stays
- * navigable on small screens. The update check is strictly opt-in (no background polling,
- * no auto-check at startup); a downloaded update APK lands in the app-private download
- * dir and is handed to the system installer as a DownloadManager content URI.
+ * navigable on small screens. Updates: a silent, once-per-launch check contacts
+ * api.github.com (no periodic polling, no telemetry); a downloaded update APK lands in the
+ * app-private download dir and is handed to the system installer as a DownloadManager
+ * content URI.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -329,8 +330,8 @@ private fun UpdatePanel(
     when (update) {
         is UpdateState.Idle -> {
             Text(
-                "Checking contacts api.github.com once and shows the result here. No account, " +
-                    "no telemetry, no auto-check on startup.",
+                "Contacts api.github.com once per app open (silently, in the background) and " +
+                    "shows the result here. No account, no telemetry, no periodic polling.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -436,15 +437,44 @@ private fun UpdateAvailable(
 
 /**
  * Hand-maintained changelog. Kept inside the app (not pulled from a remote feed) so it works
- * offline; network use is limited to the explicit About-page update check. Append a new
- * pair at the top when shipping.
+ * offline; network use is limited to the startup update check and the About-page check/update
+ * download. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.7.1" to listOf(
+        "Tapping an archive now opens its actions (Extract) instead of asking which app to open it with, and after extraction you land straight in the extracted folder.",
+        "ZIP and 7z operations show a real progress bar, and 7z archives are now supported for extraction (password-protected archives are detected and declined politely).",
+        "Update check reliability: retries, redirect handling and friendlier errors for the GitHub connection; toadFILES now also checks silently once on open and shows a small banner when a new version is available.",
+        "New Google Files-style side menu (Browse / Recent / Trash / Settings / About), Recent items grouped by Today / Yesterday / This week / Older, and the missing v1.6.0–v1.6.2 entries were added to this changelog.",
+    ),
     "v1.7.0" to listOf(
         "Extract from ZIP archives everywhere: Browse gets \"Extract to…\" with the Replace / Keep both / Skip dialog, and Recent & Categories archive rows get \"Extract here\" — all through the hardened archive pipeline.",
         "Check for updates right from the About page: one tap scans GitHub Releases and, when a newer signed APK exists, downloads it and offers install. It only runs when you press the button — no background traffic.",
         "New Properties sheet for files and folders: type, location, recursive size, modified time, hidden flag.",
         "Housekeeping: removed the never-functional Diagnostics toggle and consolidated duplicated action plumbing.",
+    ),
+    "v1.6.2" to listOf(
+        "Follow-up re-audit pass: ZIP replace now rolls back cleanly on failure or cancel, with per-item checkpoints and precise partial-commit reporting.",
+        "Browse search can't be trapped by symlink cycles anymore, and a stale load can no longer overwrite a newer folder listing.",
+        "Category totals count only visible files — trash and vanished rows are excluded.",
+        "Trash sidecar migration validates schema AND payload, so real user .tfmeta files stay payloads; cross-volume moves report cleanup failures instead of fake success.",
+        "Folder-use bookkeeping is serialized under one mutex; the flaky Browse ZIP tests were stabilized (the root cause of the red CI unit-test step).",
+    ),
+    "v1.6.1" to listOf(
+        "Reliability and security pass driven by the full codebase audit: stale Recent entries are cleaned up, video thumbnails are keyed to file identity, and queries carry request tokens so a slow result can never overwrite a newer one.",
+        "APK installation gets distinct installer outcomes, and the pending APK is retained across the \"Install unknown apps\" settings round-trip — no re-pick needed.",
+        "Sharing 2+ files now carries every URI in ClipData with grants — receivers could previously only read the first item.",
+        "Symlink-safe recursive traversal, transactional move/replace with trash metadata preserved, and a fixed tfmeta payload encoding.",
+        "Archive extraction hardened: zip-bomb quotas, staged extraction into a temp dir with atomic publishing, path-traversal entries rejected.",
+        "UriGuard denylist keeps files under system/private locations away from external apps; documents, archives and APKs get proper MediaStore content URIs.",
+        "CI instrumentation suite runs on API 29/33/36 emulators; the full audit and release checklist live under docs/.",
+    ),
+    "v1.6.0" to listOf(
+        "Long-press starts multi-select in Browse, Categories and Recent (Google-Files style); per-row ⋮ overflow menu replaces the old action sheet.",
+        "Recent filter tabs — All / Images / Videos / Audio / Docs / Archives / APKs — backed by MediaStore per-category queries.",
+        "Customizable Quick Access on Home: pin/unpin folders from Browse's action sheet, edit the row via the ＋ dialog, and most-used folders (2+ visits) surface automatically.",
+        "ZIP creation always asks for the archive name (suggested from the selection, .zip appended, path separators rejected); tapping a ZIP offers \"Extract here\" or \"Open\".",
+        "Settings changes that don't affect the listing no longer reload the current folder; README screenshots were regenerated for the updated Home / Browse / Recent.",
     ),
     "v1.5.0" to listOf(
         "Real Android share: the system share sheet hands files to the app you pick (single or batch), replacing the old local-copy share.",

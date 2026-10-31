@@ -5,11 +5,14 @@ import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.DownloadRequest
 import com.toadfiles.app.data.GitHubRelease
+import com.toadfiles.app.data.UpdateCheckRateLimitException
 import com.toadfiles.app.data.UpdateChecker
 import com.toadfiles.app.data.UpdateDownloader
+import com.toadfiles.app.update.StartupUpdateCheck
 import com.toadfiles.app.ui.about.AboutViewModel
 import com.toadfiles.app.ui.about.UpdateState
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -203,6 +206,10 @@ class AboutViewModelTest {
         vm.checkForUpdates()
         await { vm.state.value.update is UpdateState.Error }
         assertTrue((vm.state.value.update as UpdateState.Error).message.contains("GitHub"))
+        assertEquals(
+            "Couldn't reach GitHub — check your connection and try again.",
+            (vm.state.value.update as UpdateState.Error).message,
+        )
 
         checker.error = null
         checker.release = release()
@@ -237,6 +244,60 @@ class AboutViewModelTest {
     }
 
     // ---------- download + install handoff ----------
+
+    @Test
+    fun `checkForUpdates shows the friendly rate-limit message for HTTP 403`() = runTest {
+        checker.error = UpdateCheckRateLimitException()
+
+        vm.checkForUpdates()
+
+        await { vm.state.value.update is UpdateState.Error }
+        val message = (vm.state.value.update as UpdateState.Error).message
+        assertTrue(message.contains("rate limit"))
+        assertTrue(message.contains("try again"))
+    }
+
+    // ---------- v1.7.1: startup-check seeding + auto-check wiring ----------
+
+    @Test
+    fun `a positive startup check seeds the panel Available on construction`() {
+        val startup = StartupUpdateCheck()
+        checker.release = release()
+        startup.checkOnce(
+            CoroutineScope(dispatcher),
+            installedVersion = BuildConfig.VERSION_NAME,
+            checker = checker,
+        )
+
+        val seededVm = AboutViewModel(container, dispatcher, checker, downloader, startup)
+
+        val available = seededVm.state.value.update as UpdateState.Available
+        assertEquals(checker.release!!.tagName, available.version)
+        assertEquals(checker.release!!.apkUrl, available.apkUrl)
+        assertFalse(available.downloadInProgress) // seeded ≠ downloading
+        assertEquals(1, checker.calls) // no second network call from the ViewModel
+    }
+
+    @Test
+    fun `no startup result leaves the panel Idle as before`() {
+        assertEquals(UpdateState.Idle, vm.state.value.update)
+    }
+
+    @Test
+    fun `startup seeding works even after the banner was dismissed`() {
+        val startup = StartupUpdateCheck()
+        checker.release = release()
+        startup.checkOnce(
+            CoroutineScope(dispatcher),
+            installedVersion = BuildConfig.VERSION_NAME,
+            checker = checker,
+        )
+        startup.dismissBanner() // banner hidden, About still deep-links into the flow
+
+        val seededVm = AboutViewModel(container, dispatcher, checker, downloader, startup)
+
+        assertTrue(seededVm.state.value.update is UpdateState.Available)
+    }
 
     @Test
     fun `downloadAndInstall enqueues the release apk and records the downloaded uri`() = runTest {

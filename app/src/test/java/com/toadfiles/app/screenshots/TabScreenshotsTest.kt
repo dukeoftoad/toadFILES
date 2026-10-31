@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -234,7 +235,7 @@ class TabScreenshotsTest {
     @Test
     fun `02 browse tab`() {
         startApp()
-        compose.onNodeWithText("Browse").performClick()
+        compose.onNodeWithTag("tab_Browse").performClick()
         settle()
         shot("02-browse.png")
     }
@@ -242,7 +243,7 @@ class TabScreenshotsTest {
     @Test
     fun `03 categories grid`() {
         startApp()
-        compose.onNodeWithText("Categories").performClick()
+        compose.onNodeWithTag("tab_Categories").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Media library").fetchSemanticsNodes().isNotEmpty()
         }
@@ -253,7 +254,7 @@ class TabScreenshotsTest {
     @Test
     fun `04 images drill-in grid`() {
         startApp()
-        compose.onNodeWithText("Categories").performClick()
+        compose.onNodeWithTag("tab_Categories").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Images").fetchSemanticsNodes().isNotEmpty()
         }
@@ -292,7 +293,7 @@ class TabScreenshotsTest {
     @Test
     fun `08 settings tab`() {
         startApp()
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithTag("tab_Settings").performClick()
         settle()
         shot("08-settings.png")
     }

@@ -83,6 +83,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
@@ -126,15 +127,26 @@ fun BrowseScreen(
 
     var pendingInstallApk by remember { mutableStateOf<File?>(null) }
     var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
-    /** A zip the user tapped: offer extract-or-open instead of guessing. */
-    var pendingZipTap by remember { mutableStateOf<File?>(null) }
-    /** A zip the user picked "Extract to…" for: ask for the destination folder name. */
+    /** An archive (.zip/.7z) the user tapped: offer extract-or-open instead of an
+     *  open-with intent (v1.7.1 fix: archives never fall through to ACTION_VIEW). */
+    var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
+    /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
             snackbar.showSnackbar(it)
             vm.consumeToast()
+        }
+    }
+
+    // Post-extract redirect (v1.7.1): navigate into the freshly extracted folder using
+    // Browse's own internal navigation (openDir re-lists and rebuilds breadcrumbs).
+    LaunchedEffect(Unit) {
+        vm.events.collect { e ->
+            when (e) {
+                is ExtractEvent.ExtractCompleted -> vm.openDir(e.destination)
+            }
         }
     }
 
@@ -218,9 +230,7 @@ fun BrowseScreen(
                                 leadingIcon = { Icon(Icons.Outlined.Archive, null) },
                             )
                             val single = state.selection.singleOrNull()
-                            if (single != null && single.isFile &&
-                                single.name.lowercase().endsWith(".zip")
-                            ) {
+                            if (single != null && single.isFile && ArchiveOps.canExtract(single.name)) {
                                 DropdownMenuItem(
                                     text = { Text("Extract here") },
                                     onClick = {
@@ -395,7 +405,7 @@ fun BrowseScreen(
                         selectionMode -> vm.toggleSelection(item)
                         item.isDir -> vm.openDir(item.file)
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
-                        item.name.lowercase().endsWith(".zip") -> pendingZipTap = item.file
+                        ArchiveOps.canExtract(item.name) -> pendingArchiveTap = item.file
                         else -> if (!Intents.openFile(context, item.file)) {
                             vm.requestToast("No app can open this file")
                         }
@@ -505,37 +515,38 @@ fun BrowseScreen(
             onDismiss = { vm.dismissZipDialog() },
         )
     }
-    // Tapping a zip asks what to do: extract (most common) or open with a viewer app.
-    pendingZipTap?.let { zip ->
+    // Tapping an archive (.zip/.7z) asks what to do: extract (most common) or open with
+    // a viewer app — never a silent ACTION_VIEW (v1.7.1 open-with fix).
+    pendingArchiveTap?.let { archive ->
         AlertDialog(
-            onDismissRequest = { pendingZipTap = null },
-            title = { Text(zip.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            onDismissRequest = { pendingArchiveTap = null },
+            title = { Text(archive.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = { Text("Extract this archive into a new folder here, or open it with an app.") },
             confirmButton = {
                 Row {
                     TextButton(onClick = {
-                        pendingZipTap = null
-                        if (!Intents.openFile(context, zip)) vm.requestToast("No app can open this file")
+                        pendingArchiveTap = null
+                        if (!Intents.openFile(context, archive)) vm.requestToast("No app can open this file")
                     }) { Text("Open") }
                     TextButton(onClick = {
-                        pendingZipTap = null
-                        vm.extractZip(zip)
+                        pendingArchiveTap = null
+                        vm.extractZip(archive)
                     }) { Text("Extract here") }
                 }
             },
-            dismissButton = { TextButton(onClick = { pendingZipTap = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { pendingArchiveTap = null }) { Text("Cancel") } },
         )
     }
     // "Extract to…": the user names the destination folder under the current directory,
     // the same ask-for-a-name pattern as the Zip dialog above.
-    pendingExtractTo?.let { zip ->
+    pendingExtractTo?.let { archive ->
         NameInputDialog(
             title = "Extract to…",
-            initialValue = zip.nameWithoutExtension,
+            initialValue = archive.nameWithoutExtension,
             confirmLabel = "Extract",
             onConfirm = {
                 pendingExtractTo = null
-                vm.extractZip(zip, targetName = it)
+                vm.extractZip(archive, targetName = it)
             },
             onDismiss = { pendingExtractTo = null },
         )
@@ -571,7 +582,7 @@ fun BrowseScreen(
         ConfirmDialog(
             title = "Move ${files.size} item(s) to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
-                "You can undo right away or restore later from Settings → Trash.",
+                "You can undo right away or restore later from the Trash page in the side menu.",
             confirmLabel = "Delete",
             destructive = true,
             onConfirm = { vm.confirmDelete() },
@@ -664,13 +675,13 @@ fun BrowseScreen(
                 pendingActionSheet = null
                 vm.requestZip(listOf(item.file))
             },
-            onExtract = if (item.name.lowercase().endsWith(".zip")) {
+            onExtract = if (ArchiveOps.canExtract(item.name)) {
                 {
                     pendingActionSheet = null
                     vm.extractZip(item.file)
                 }
             } else null,
-            onExtractTo = if (item.name.lowercase().endsWith(".zip")) {
+            onExtractTo = if (ArchiveOps.canExtract(item.name)) {
                 {
                     pendingActionSheet = null
                     pendingExtractTo = item.file
