@@ -330,6 +330,29 @@ class CategoriesViewModelTest {
     }
 
     @Test
+    fun `compress dialog chooses 7z and the level, extension follows the format`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-7z-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            assertEquals(com.toadfiles.app.domain.ArchiveFormat.ZIP, vm.state.value.pendingZipFormat)
+            assertEquals(com.toadfiles.app.domain.CompressLevel.NORMAL, vm.state.value.pendingZipLevel)
+
+            vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
+            vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.STORE)
+            vm.confirmZip("packed")
+            assertNull(vm.state.value.pendingZipFiles)
+            await { vm.state.value.result != null }
+            val out = File(root, "packed.7z")
+            assertTrue(out.exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `zip flow honors delete-after-compress by trashing the sources`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "cat-zipdel-${System.nanoTime()}")
         root.mkdirs()

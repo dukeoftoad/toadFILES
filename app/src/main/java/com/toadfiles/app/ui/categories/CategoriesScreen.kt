@@ -89,6 +89,8 @@ import com.toadfiles.app.ui.components.FileGridCell
 import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
+import com.toadfiles.app.ui.components.CompressDialog
+import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.NameInputDialog
 import com.toadfiles.app.ui.components.PropertiesSheet
 import com.toadfiles.app.ui.components.SortMenu
@@ -374,13 +376,19 @@ fun CategoriesScreen(
         )
     }
 
-    // Zip-name dialog: zips are always named by the user, never a silent "archive.zip".
+    // Compress dialog (v1.7.5, Browse parity): format (ZIP / 7z), compression level,
+    // target name and destination — archives are never created under a silent auto name.
     state.pendingZipFiles?.let { files ->
-        NameInputDialog(
-            title = "Zip ${files.size} item(s)",
-            initialValue = state.pendingZipName,
-            confirmLabel = "Zip",
-            onConfirm = { vm.confirmZip(it) },
+        CompressDialog(
+            count = files.size,
+            name = state.pendingZipName,
+            destination = state.pendingZipDestination,
+            format = state.pendingZipFormat,
+            level = state.pendingZipLevel,
+            onNameChange = { vm.setZipName(it) },
+            onFormatChange = { vm.setZipFormat(it) },
+            onLevelChange = { vm.setZipLevel(it) },
+            onConfirm = { vm.confirmZip(state.pendingZipName) },
             onDismiss = { vm.dismissZipDialog() },
         )
     }

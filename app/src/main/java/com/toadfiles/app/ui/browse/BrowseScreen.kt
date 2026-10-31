@@ -99,6 +99,7 @@ import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.ui.components.ConflictDialog
+import com.toadfiles.app.ui.components.CompressDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.FileActionSheet
@@ -834,77 +835,6 @@ private fun Breadcrumbs(path: List<File>, onOpen: (File) -> Unit) {
  * destination folder (archive-folder setting or the current folder), shown under the
  * name field. All state lives in the ViewModel; the dialog is pure UI.
  */
-@Composable
-private fun CompressDialog(
-    count: Int,
-    name: String,
-    destination: File?,
-    format: ArchiveFormat,
-    level: CompressLevel,
-    onNameChange: (String) -> Unit,
-    onFormatChange: (ArchiveFormat) -> Unit,
-    onLevelChange: (CompressLevel) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Compress ${if (count == 1) "1 item" else "$count items"}") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = onNameChange,
-                    singleLine = true,
-                    label = { Text("Archive name") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                destination?.let {
-                    Text(
-                        "Into ${it.path}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Text("Format", style = MaterialTheme.typography.titleSmall)
-                ArchiveFormat.entries.forEach { f ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onFormatChange(f) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = format == f, onClick = { onFormatChange(f) })
-                        Text(f.label, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("Compression level", style = MaterialTheme.typography.titleSmall)
-                CompressLevel.entries.forEach { l ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onLevelChange(l) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = level == l, onClick = { onLevelChange(l) })
-                        Text(l.label, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm, enabled = name.isNotBlank()) { Text("Compress") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
 
 @Composable
 private fun FilterMenu(
