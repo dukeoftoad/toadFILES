@@ -929,7 +929,6 @@ class BrowseViewModelTest {
      * has landed.
      */
     @Test
-    @org.junit.Ignore("TODO(integration): encrypted 7z requires the v1.8.0 domain (AES-256 + passwordRequired)")
     fun `confirmZip passes the password to ArchiveOps for an encrypted 7z`() = runTest {
         val f = File(dir, "doc.txt").apply { writeText("seven secrets") }
         vm.openDir(dir)
@@ -964,7 +963,6 @@ class BrowseViewModelTest {
      * password-prompt flow (prompt state + retry with the same target dir).
      */
     @Test
-    @org.junit.Ignore("TODO(integration): password prompt requires the v1.8.0 domain (passwordRequired)")
     fun `passwordRequired opens the prompt and retry extracts with the password`() = runTest {
         val src = File(dir, "doc.txt").apply { writeText("secret stuff") }
         val vault = File(dir, "vault.7z")

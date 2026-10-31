@@ -644,7 +644,7 @@ class CategoriesViewModel(
                             pendingPasswordRetry = PendingPasswordRetry(file, target, overwrite),
                         )
                     }
-                    return@onDone
+                    return@run
                 }
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
                 if (r.fullySucceeded) trashArchiveAfterExtract(file)

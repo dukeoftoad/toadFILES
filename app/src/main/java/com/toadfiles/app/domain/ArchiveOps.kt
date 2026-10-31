@@ -73,7 +73,7 @@ object ArchiveOps {
             return when (extension(VolumeSupport.baseName(archive.name))) {
                 "7z" -> runCatching {
                     VolumeSupport.seekableChannel(archive).use { ch ->
-                        SevenZFile(ch, null).use { it.entries.toList().size }
+                        SevenZFile(ch).use { it.entries.toList().size }
                     }
                 }.getOrNull()
                 else -> null
@@ -171,7 +171,8 @@ object ArchiveOps {
                     }
                 }
             }
-            ZipSupport.extract(merged, targetDir, replace, limits, onProgress)
+            // zip volumes can't be encrypted (zip has no password support) — pass null.
+            ZipSupport.extract(merged, targetDir, replace, limits, null, onProgress)
         } catch (ce: CancellationException) {
             OpResult(0, 0, 1, true, listOf("${archive.name}: merge cancelled"))
         } finally {

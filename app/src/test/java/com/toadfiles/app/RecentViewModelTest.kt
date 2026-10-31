@@ -240,7 +240,6 @@ class RecentViewModelTest {
      * extract with the typed password. Enable when the domain contract has landed.
      */
     @Test
-    @org.junit.Ignore("TODO(integration): password prompt requires the v1.8.0 domain (passwordRequired)")
     fun `passwordRequired opens the prompt and retry extracts with the password`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "recent-prompt-${System.nanoTime()}")
         root.mkdirs()

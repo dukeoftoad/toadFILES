@@ -190,7 +190,7 @@ class RecentViewModel(
                             pendingPasswordRetry = PendingPasswordRetry(file, target, replace),
                         )
                     }
-                    return@onDone
+                    return@run
                 }
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
                 if (r.fullySucceeded) trashArchiveAfterExtract(file)
