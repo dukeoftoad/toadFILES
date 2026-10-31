@@ -4,6 +4,21 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.7.5] — 2026-10-31
+
+Closing the v1.7.4 audit's known gaps.
+
+### Added
+- **Trash multi-select**: long-press to enter selection mode, then batch-restore
+  or batch delete-forever (with confirmation) — matching Browse and Recent.
+- **Categories compress dialog is now Browse's full dialog**: archive name,
+  destination preview, format (ZIP / 7z) and compression level — shared
+  component, same overwrite-safe hardened pipeline.
+
+### Fixed
+- **Storage uses pull-to-refresh** like Recent/Trash/Categories; the leftover
+  toolbar Refresh button is gone (the last one in the app).
+
 ## [1.7.4] — 2026-10-31
 
 Audit release: the navigation-style switch from v1.7.3 now works as designed,

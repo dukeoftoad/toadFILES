@@ -58,6 +58,13 @@ data class CategoriesUiState(
     /** Batch waiting for the user to type an archive name in the Zip dialog. */
     val pendingZipFiles: List<File>? = null,
     val pendingZipName: String = "",
+    /** Chosen archive format in the compress dialog (Browse parity, v1.7.5). */
+    val pendingZipFormat: ArchiveFormat = ArchiveFormat.ZIP,
+    /** Chosen compression level in the compress dialog (Browse parity, v1.7.5). */
+    val pendingZipLevel: CompressLevel = CompressLevel.NORMAL,
+    /** Destination shown in the compress dialog (archive-folder setting or the
+     *  source's own folder) — resolved asynchronously at request time. */
+    val pendingZipDestination: File? = null,
     /** "Extract to…" collision waiting for a strategy. */
     val pendingExtractConflict: PendingExtractConflict? = null,
     /** Item whose read-only properties sheet is open; null when closed. */
@@ -303,10 +310,35 @@ class CategoriesViewModel(
     /** Opens the archive-name dialog for a batch (UI flow). */
     fun requestZip(files: List<File>) {
         if (files.isEmpty()) return
-        _state.update { it.copy(pendingZipFiles = files, pendingZipName = suggestedZipName(files)) }
+        _state.update {
+            it.copy(
+                pendingZipFiles = files,
+                pendingZipName = suggestedZipName(files),
+                pendingZipFormat = ArchiveFormat.ZIP,
+                pendingZipLevel = CompressLevel.NORMAL,
+            )
+        }
+        // Destination preview: archive-folder setting when set, else the source's own
+        // folder (resolved on IO — same semantics Browse shows in its dialog).
+        val fallbackDir = files.first().parentFile
+        viewModelScope.launch {
+            val dest = archiveFolderOr(fallbackDir ?: return@launch)
+            _state.update { if (it.pendingZipFiles != null) it.copy(pendingZipDestination = dest) else it }
+        }
     }
 
-    fun dismissZipDialog() = _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
+    fun setZipName(name: String) = _state.update { it.copy(pendingZipName = name) }
+
+    fun dismissZipDialog() = _state.update {
+        it.copy(
+            pendingZipFiles = null, pendingZipName = "",
+            pendingZipFormat = ArchiveFormat.ZIP, pendingZipLevel = CompressLevel.NORMAL,
+            pendingZipDestination = null,
+        )
+    }
+
+    fun setZipFormat(f: ArchiveFormat) = _state.update { it.copy(pendingZipFormat = f) }
+    fun setZipLevel(l: CompressLevel) = _state.update { it.copy(pendingZipLevel = l) }
 
     /** Suggested archive name: the single item's name, or "archive.zip" for batches. */
     fun suggestedZipName(files: List<File>): String = when (files.size) {
@@ -322,18 +354,29 @@ class CategoriesViewModel(
      *  dialog), else the first file's folder (".zip" appended when missing, collisions
      *  deduped) — the same dialog flow as Browse. */
     fun confirmZip(name: String) {
-        val files = _state.value.pendingZipFiles ?: return
+        val st = _state.value
+        val files = st.pendingZipFiles ?: return
+        val format = st.pendingZipFormat
+        val level = st.pendingZipLevel
         val fallbackDir = files.first().parentFile ?: return
         val clean = name.trim()
         if (clean.isEmpty() || clean.contains('/') || clean.contains('\\')) {
             _state.update { it.copy(toast = "Enter a valid archive name") }
             return
         }
-        _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
+        _state.update {
+            it.copy(
+                pendingZipFiles = null, pendingZipName = "",
+                pendingZipFormat = ArchiveFormat.ZIP, pendingZipLevel = CompressLevel.NORMAL,
+                pendingZipDestination = null,
+            )
+        }
         viewModelScope.launch {
             val dir = archiveFolderOr(fallbackDir)
-            val base = if (clean.lowercase().endsWith(".zip")) clean else "$clean.zip"
-            zipTo(files, File(dir, PathSafety.uniqueName(dir, base)))
+            // Extension follows the chosen format (ZIP → .zip, 7z → .7z).
+            val base = if (clean.lowercase().endsWith("." + format.extension)) clean
+            else "$clean.${format.extension}"
+            zipTo(files, File(dir, PathSafety.uniqueName(dir, base)), format, level)
         }
     }
 
@@ -344,10 +387,10 @@ class CategoriesViewModel(
         return if (folder.isNotEmpty()) File(folder) else fallback
     }
 
-    private fun zipTo(files: List<File>, out: File) {
+    private fun zipTo(files: List<File>, out: File, format: ArchiveFormat, level: CompressLevel) {
         _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.compress(files, out, ArchiveFormat.ZIP, CompressLevel.NORMAL, onP) },
+            op = { onP -> ArchiveOps.compress(files, out, format, level, onP) },
             onProgress = { p -> _state.update { it.copy(progress = "Zipping" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }

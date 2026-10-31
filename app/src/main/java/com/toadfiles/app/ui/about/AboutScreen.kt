@@ -445,6 +445,11 @@ private fun UpdateAvailable(
  * download. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.7.5" to listOf(
+        "Trash now supports multi-select: long-press items to batch-restore or batch delete-forever (with confirmation).",
+        "Categories' Compress now opens the same full dialog as Browse — name, destination, ZIP/7z format and compression level.",
+        "Storage uses pull-to-refresh like every other screen; the last toolbar refresh button is gone.",
+    ),
     "v1.7.4" to listOf(
         "The two navigation styles are now truly separate: bottom-bar mode has no side menu, and side-menu mode has no bottom bar — and the side menu now lists every destination (Home, Browse, Categories, Recent, Trash, Settings, About).",
         "Removed the wasted space at the top of the app: the branding header is gone and status-bar padding is applied once, so every screen starts right under the status bar.",
