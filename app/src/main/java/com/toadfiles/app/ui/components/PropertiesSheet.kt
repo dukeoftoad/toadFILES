@@ -23,19 +23,67 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.toadfiles.app.domain.FileItem
+import com.toadfiles.app.domain.FileOps
 import com.toadfiles.app.domain.Format
-import com.toadfiles.app.ui.browse.PropertiesDetail
+import com.toadfiles.app.domain.PropertiesBuilder
 import java.io.File
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 /**
- * Read-only properties sheet for a single file or folder (Browse's ⋮ → Properties and the
- * selection menu). Rendered like [FileActionSheet]: a Material 3 modal bottom sheet with
- * the same header treatment. The only action inside is Close — nothing here mutates.
+ * Computed detail behind the properties sheet (shared by Browse, Categories and any
+ * other screen that opens [PropertiesSheet]). Folder sizes/counts arrive asynchronously
+ * (recursive walk on IO); [PropertiesDetail.error] carries the app's standard error copy
+ * when a folder could not be read at all. Files use [fileCount]/[dirCount] = 0.
  *
- * [detail] is produced asynchronously by BrowseViewModel ([FileOps.sizeOf] plus the
- * [com.toadfiles.app.domain.PropertiesBuilder] counts walk); while it is null the size and
- * contents rows show a "Calculating…" placeholder, and a folder that could not be read
- * shows the app's standard "Folder is not readable" copy in the error color.
+ * Promoted to ui/components (v1.7.3) from BrowseViewModel so the media screens can offer
+ * the exact same properties sheet without importing Browse internals.
+ */
+data class PropertiesDetail(
+    val sizeText: String,
+    val sizeBytes: Long,
+    val fileCount: Int,
+    val dirCount: Int,
+    val error: String? = null,
+)
+
+/**
+ * The one size/contents computation behind every [PropertiesSheet] (formerly Browse's
+ * private `computePropertiesDetail`): size via [FileOps.sizeOf] (the app's single size
+ * engine) and, for folders, content counts via [PropertiesBuilder]. Cancellation is
+ * checked between the walks so a dismissed sheet drops its late result.
+ */
+suspend fun computeFilePropertiesDetail(
+    file: File,
+    builder: PropertiesBuilder,
+): PropertiesDetail {
+    if (file.isDirectory && !file.canRead()) {
+        return PropertiesDetail(
+            sizeText = "—", sizeBytes = 0L, fileCount = 0, dirCount = 0,
+            error = "Folder is not readable",
+        )
+    }
+    val sizeBytes = FileOps.sizeOf(file)
+    coroutineContext.ensureActive()
+    val counts = if (file.isDirectory) builder.countEntries(file) else null
+    return PropertiesDetail(
+        sizeText = Format.size(sizeBytes),
+        sizeBytes = sizeBytes,
+        fileCount = counts?.files ?: 0,
+        dirCount = counts?.dirs ?: 0,
+    )
+}
+
+/**
+ * Read-only properties sheet for a single file or folder (Browse's ⋮ → Properties, the
+ * Browse selection menu and the Categories drill-in). Rendered like [FileActionSheet]:
+ * a Material 3 modal bottom sheet with the same header treatment. The only action
+ * inside is Close — nothing here mutates.
+ *
+ * [detail] is produced asynchronously by the owning ViewModel via
+ * [computeFilePropertiesDetail]; while it is null the size and contents rows show a
+ * "Calculating…" placeholder, and a folder that could not be read shows the app's
+ * standard "Folder is not readable" copy in the error color.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

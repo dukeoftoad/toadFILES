@@ -3,7 +3,7 @@ package com.toadfiles.app
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.toadfiles.app.ui.browse.PropertiesDetail
+import com.toadfiles.app.ui.components.PropertiesDetail
 import com.toadfiles.app.ui.components.PropertiesSheet
 import com.toadfiles.app.ui.components.fileTypeLabel
 import com.toadfiles.app.ui.theme.ToadTheme

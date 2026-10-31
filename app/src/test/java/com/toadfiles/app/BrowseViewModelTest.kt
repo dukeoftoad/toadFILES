@@ -5,10 +5,16 @@ import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.domain.ConflictStrategy
+import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.PropertiesBuilder
+import com.toadfiles.app.domain.SevenZipOpenAction
+import com.toadfiles.app.domain.SortMode
+import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.ZipOpenAction
+import com.toadfiles.app.ui.browse.ArchiveTapAction
 import com.toadfiles.app.ui.browse.BrowseViewModel
 import com.toadfiles.app.ui.browse.OpKind
 import kotlinx.coroutines.CancellableContinuation
@@ -69,6 +75,28 @@ class BrowseViewModelTest {
         container = com.toadfiles.app.AppContainer(context)
         vm = BrowseViewModel(container, ioDispatcher = dispatcher)
         dir = File(context.cacheDir, "browse-${System.nanoTime()}").apply { mkdirs() }
+        // The preferencesDataStore delegate is a process-wide singleton, so settings
+        // written by an earlier test in THIS class leak into later ones (v1.7.3 added
+        // many settings-writing tests). Reset every key this VM reads to its shipped
+        // default so each test starts from the v1.7.2 baseline.
+        kotlinx.coroutines.runBlocking {
+            with(container.settingsRepo) {
+                setSortMode(com.toadfiles.app.domain.SortMode.NAME)
+                setSortOrder(com.toadfiles.app.domain.SortOrder.ASC)
+                setShowHidden(false)
+                setContentSearch(false)
+                setBrowseLayout(com.toadfiles.app.domain.BrowseLayout.LIST)
+                setZipOpenAction(com.toadfiles.app.domain.ZipOpenAction.MENU)
+                setSevenZipOpenAction(com.toadfiles.app.domain.SevenZipOpenAction.MENU)
+                setNavStyle(com.toadfiles.app.domain.NavStyle.BOTTOM_BAR)
+                setBackKeyAction(com.toadfiles.app.domain.BackKeyAction.PARENT)
+                setDeleteAfterCompress(false)
+                setDeleteAfterExtract(false)
+                setAbortConfirm(true)
+                setOverwriteConfirm(true)
+                setArchiveFolder("")
+            }
+        }
     }
 
     @After
@@ -601,6 +629,151 @@ class BrowseViewModelTest {
         assertEquals("OLD", File(dir, "unpacked/n.txt").readText())
     }
 
+    // ---------- v1.7.3: compress dialog (format + level), archive folder, delete-after ----------
+
+    @Test
+    fun `normalizeArchiveName swaps the extension with the chosen format`() {
+        assertEquals("pack.zip", vm.normalizeArchiveName("pack", com.toadfiles.app.domain.ArchiveFormat.ZIP))
+        assertEquals("pack.7z", vm.normalizeArchiveName("pack", com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z))
+        assertEquals("pack.7z", vm.normalizeArchiveName("pack.zip", com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z))
+        assertEquals("pack.zip", vm.normalizeArchiveName("pack.7z", com.toadfiles.app.domain.ArchiveFormat.ZIP))
+        // The user's own suffix survives untouched.
+        assertEquals("pack.tar.zip", vm.normalizeArchiveName("pack.tar", com.toadfiles.app.domain.ArchiveFormat.ZIP))
+    }
+
+    @Test
+    fun `compress dialog preselects zip, normal level and the archive-folder destination`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("zip me") }
+        val archiveFolder = File(dir, "archives").apply { mkdirs() }
+        container.settingsRepo.setArchiveFolder(archiveFolder.path)
+        vm.openDir(dir)
+        await { vm.state.value.settings.archiveFolder == archiveFolder.path }
+
+        vm.requestZip(listOf(f))
+
+        assertEquals(listOf(f), vm.state.value.pendingZipFiles)
+        assertEquals("doc.zip", vm.state.value.pendingZipName)
+        assertEquals(com.toadfiles.app.domain.ArchiveFormat.ZIP, vm.state.value.pendingZipFormat)
+        assertEquals(com.toadfiles.app.domain.CompressLevel.NORMAL, vm.state.value.pendingZipLevel)
+        assertEquals(archiveFolder, vm.state.value.pendingZipDestination)
+    }
+
+    @Test
+    fun `confirmZip creates a 7z when the 7z format is chosen`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("seven me") }
+        vm.openDir(dir)
+
+        vm.requestZip(listOf(f))
+        vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
+        vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.FAST)
+        vm.confirmZip("pack")
+
+        await { vm.state.value.result != null && vm.state.value.items.any { it.name == "pack.7z" } }
+        assertEquals(0, vm.state.value.result!!.failed)
+        assertEquals("Compressing", vm.state.value.resultTitle)
+        val made = File(dir, "pack.7z")
+        assertTrue(made.length() > 0)
+        // The produced archive is a real, extractable 7z.
+        val target = File(dir, "unpacked")
+        assertEquals(1, com.toadfiles.app.domain.ArchiveOps.extract(made, target, replace = false).succeeded)
+        assertEquals("seven me", File(target, "doc.txt").readText())
+    }
+
+    @Test
+    fun `existing archive target asks for overwrite and replaces on confirm`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("NEW") }
+        File(dir, "pack.zip").writeText("OLD")
+        vm.openDir(dir)
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("pack")
+
+        // overwriteConfirm defaults to on: the overwrite dialog appears instead.
+        assertEquals(File(dir, "pack.zip"), vm.state.value.pendingZipOverwrite)
+        assertNotNull("compress dialog stays open behind the ask", vm.state.value.pendingZipFiles)
+        assertNull(vm.state.value.result)
+
+        vm.confirmZipOverwrite()
+
+        await { vm.state.value.result != null }
+        assertNull(vm.state.value.pendingZipOverwrite)
+        assertNull(vm.state.value.pendingZipFiles)
+        assertTrue(File(dir, "pack.zip").length() > 0)
+    }
+
+    @Test
+    fun `overwriteConfirm off replaces the target silently`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("NEW") }
+        File(dir, "pack.zip").writeText("OLD")
+        container.settingsRepo.setOverwriteConfirm(false)
+        vm.openDir(dir)
+        await { !vm.state.value.settings.overwriteConfirm }
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("pack")
+
+        assertNull(vm.state.value.pendingZipOverwrite)
+        await { vm.state.value.result != null }
+        // Replaced without asking: a real zip replaced the stale placeholder bytes.
+        assertTrue(File(dir, "pack.zip").length() > 3)
+    }
+
+    @Test
+    fun `delete after compress trashes the sources and undo restores them`() = runTest {
+        container.settingsRepo.setDeleteAfterCompress(true)
+        val f = File(dir, "doc.txt").apply { writeText("zip and trash me") }
+        vm.openDir(dir)
+        await { vm.state.value.settings.deleteAfterCompress }
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("pack")
+
+        await { vm.state.value.result != null && !f.exists() }
+        // App delete convention: trash (undoable), not a permanent erase. lastTrashed
+        // carries the trash-side destinations (what undo restores from).
+        assertEquals(1, vm.state.value.lastTrashed?.size)
+        assertTrue(vm.state.value.lastTrashed!!.none { it == f })
+        assertTrue(File(dir, "pack.zip").exists())
+
+        vm.undoDelete()
+        await { f.exists() }
+    }
+
+    @Test
+    fun `delete after extract trashes the archive`() = runTest {
+        container.settingsRepo.setDeleteAfterExtract(true)
+        val zip = File(dir, "pack.zip")
+        makeZip(zip, mapOf("one.txt" to "hello".toByteArray()))
+        vm.openDir(dir)
+        await { vm.state.value.settings.deleteAfterExtract }
+
+        vm.extractZip(zip)
+
+        await { vm.state.value.result != null && !zip.exists() }
+        assertEquals("hello", File(dir, "pack/one.txt").readText())
+        assertEquals(1, vm.state.value.lastTrashed?.size)
+        assertTrue(vm.state.value.lastTrashed!!.none { it == zip })
+    }
+
+    @Test
+    fun `extract to uses the archive folder as default destination`() = runTest {
+        val archiveFolder = File(dir, "archdest").apply { mkdirs() }
+        container.settingsRepo.setArchiveFolder(archiveFolder.path)
+        val nested = File(dir, "nested").apply { mkdirs() }
+        val zip = File(nested, "pack.zip")
+        makeZip(zip, mapOf("one.txt" to "hello".toByteArray()))
+        vm.openDir(dir)
+        await { vm.state.value.settings.archiveFolder == archiveFolder.path }
+
+        vm.extractZip(zip, targetName = "unpacked")
+
+        await { vm.state.value.result != null }
+        assertEquals(0, vm.state.value.result!!.failed)
+        // Landed under the archive folder, not the current directory.
+        assertEquals("hello", File(archiveFolder, "unpacked/one.txt").readText())
+        assertFalse(File(dir, "unpacked").exists())
+    }
+
     @Test
     fun `clearing the search restores the folder listing`() = runTest {
         val nested = File(dir, "nested").apply { mkdirs() }
@@ -643,6 +816,88 @@ class BrowseViewModelTest {
         container.settingsRepo.setSortMode(com.toadfiles.app.domain.SortMode.SIZE)
         vm.openDir(dir)
         await { vm.state.value.settings.sortMode == com.toadfiles.app.domain.SortMode.SIZE }
+    }
+
+    // -------------------------------------------------------------------------
+    // v1.7.3: archive tap dispatch (Settings → Archive actions), pull-to-refresh
+    // and sort/layout persistence.
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `archive tap action defaults to the menu for both formats`() = runTest {
+        assertEquals(ArchiveTapAction.SHOW_MENU, vm.archiveTapAction("photos.zip"))
+        assertEquals(ArchiveTapAction.SHOW_MENU, vm.archiveTapAction("backup.7z"))
+    }
+
+    @Test
+    fun `archive tap action follows the zip and 7z settings separately`() = runTest {
+        container.settingsRepo.setZipOpenAction(ZipOpenAction.EXTRACT)
+        container.settingsRepo.setSevenZipOpenAction(SevenZipOpenAction.OPEN_WITH)
+        await {
+            vm.state.value.settings.zipOpenAction == ZipOpenAction.EXTRACT &&
+                vm.state.value.settings.sevenZipOpenAction == SevenZipOpenAction.OPEN_WITH
+        }
+
+        assertEquals(ArchiveTapAction.EXTRACT, vm.archiveTapAction("photos.zip"))
+        assertEquals(ArchiveTapAction.OPEN_WITH, vm.archiveTapAction("backup.7z"))
+        // Extension matching is case-insensitive (ArchiveOps lowercases it).
+        assertEquals(ArchiveTapAction.EXTRACT, vm.archiveTapAction("Photos.ZIP"))
+    }
+
+    @Test
+    fun `archive tap action EXTRACT runs the standard extract pipeline`() = runTest {
+        // Build a real one-entry zip so the extract can actually run.
+        val zip = File(dir, "tap.zip")
+        ZipOutputStream(FileOutputStream(zip)).use { zos ->
+            zos.putNextEntry(ZipEntry("hello.txt"))
+            zos.write("x".toByteArray())
+            zos.closeEntry()
+        }
+        vm.openDir(dir)
+        container.settingsRepo.setZipOpenAction(ZipOpenAction.EXTRACT)
+        await { vm.state.value.settings.zipOpenAction == ZipOpenAction.EXTRACT }
+
+        // The screen calls archiveTapAction() and, for EXTRACT, vm.extractZip() —
+        // the exact path the archive menu's "Extract here" uses.
+        assertEquals(ArchiveTapAction.EXTRACT, vm.archiveTapAction(zip.name))
+        vm.extractZip(zip)
+        await { File(dir, "tap").isDirectory && File(dir, "tap/hello.txt").isFile }
+    }
+
+    @Test
+    fun `refresh reloads the current folder listing`() = runTest {
+        vm.openDir(dir)
+        await { !vm.state.value.loading }
+        File(dir, "late.txt").writeText("x")
+
+        vm.refresh()
+
+        await { vm.state.value.items.any { it.name == "late.txt" } }
+    }
+
+    @Test
+    fun `setSort and setSortOrder persist through the settings repository`() = runTest {
+        vm.setSort(SortMode.DATE)
+        vm.setSortOrder(SortOrder.DESC)
+
+        await {
+            vm.state.value.settings.sortMode == SortMode.DATE &&
+                vm.state.value.settings.sortOrder == SortOrder.DESC
+        }
+        val persisted = container.settingsRepo.settings.first()
+        assertEquals(SortMode.DATE, persisted.sortMode)
+        assertEquals(SortOrder.DESC, persisted.sortOrder)
+    }
+
+    @Test
+    fun `toggleLayout flips and persists the browse layout`() = runTest {
+        vm.toggleLayout()
+        await { vm.state.value.settings.browseLayout == BrowseLayout.GRID }
+        assertEquals(BrowseLayout.GRID, container.settingsRepo.settings.first().browseLayout)
+
+        vm.toggleLayout()
+        await { vm.state.value.settings.browseLayout == BrowseLayout.LIST }
+        assertEquals(BrowseLayout.LIST, container.settingsRepo.settings.first().browseLayout)
     }
 
     @Test

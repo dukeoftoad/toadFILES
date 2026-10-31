@@ -1,6 +1,7 @@
 package com.toadfiles.app.ui.browse
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -56,6 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -66,6 +70,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,7 +89,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.ArchiveFormat
+import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
+import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
@@ -117,6 +125,9 @@ fun BrowseScreen(
     var sortMenuOpen by remember { mutableStateOf(false) }
     var filterMenuOpen by remember { mutableStateOf(false) }
     var moreMenuOpen by remember { mutableStateOf(false) }
+    // v1.7.3 abortConfirm: set when the user cancels the progress overlay while the
+    // confirmation setting is on; cleared by the dialog's buttons.
+    var pendingAbortConfirm by remember { mutableStateOf(false) }
 
     val rootDir = remember(initialDir) {
         // Bottom-bar Browse passes an empty dir; default to the external storage root
@@ -127,8 +138,10 @@ fun BrowseScreen(
 
     var pendingInstallApk by remember { mutableStateOf<File?>(null) }
     var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
-    /** An archive (.zip/.7z) the user tapped: offer extract-or-open instead of an
-     *  open-with intent (v1.7.1 fix: archives never fall through to ACTION_VIEW). */
+    /** An archive (.zip/.7z) the user tapped: offered the extract-or-open dialog
+     *  instead of an open-with intent (v1.7.1 fix: archives never fall through to
+     *  ACTION_VIEW). v1.7.3: the dialog only shows for tap action MENU — EXTRACT and
+     *  OPEN_WITH (Settings → Archive actions) are dispatched directly in openItem. */
     var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
     /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
@@ -164,6 +177,14 @@ fun BrowseScreen(
     val selectionMode = state.selection.isNotEmpty()
     BackHandler(enabled = selectionMode) { vm.clearSelection() }
     BackHandler(enabled = !selectionMode) {
+        // v1.7.3 back-key setting: EXIT leaves Browse from any depth — the same thing
+        // the old back-at-root behavior did (onNavigateUp → popBackStack; Browse is a
+        // bottom-bar tab, so popping with an empty stack stays put, matching the
+        // previous root behavior exactly). PARENT walks up one folder per press.
+        if (state.settings.backKeyAction == BackKeyAction.EXIT) {
+            onNavigateUp()
+            return@BackHandler
+        }
         val dir = state.dir
         val canGoUp = dir != null && state.breadcrumbs.size > 1 && dir.parentFile?.canRead() == true
         val parent = dir?.parentFile
@@ -222,7 +243,7 @@ fun BrowseScreen(
                                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Zip ${state.selection.size} item(s)…") },
+                                text = { Text("Compress ${state.selection.size} item(s)…") },
                                 onClick = {
                                     moreMenuOpen = false
                                     vm.requestZip(state.selection.toList())
@@ -348,6 +369,14 @@ fun BrowseScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+                // Pull-to-refresh (v1.7.3): drag down anywhere on the listing (or the
+                // empty state) to re-list the current folder. A refresh is a plain
+                // folder reload — like every other load() it clears an active search.
+                PullToRefreshBox(
+                    isRefreshing = state.loading,
+                    onRefresh = { vm.refresh() },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                 val visible = state.items.filter { state.filterMode.matches(it.name) }
                 Column(Modifier.fillMaxSize()) {
                     if (!selectionMode) {
@@ -405,7 +434,17 @@ fun BrowseScreen(
                         selectionMode -> vm.toggleSelection(item)
                         item.isDir -> vm.openDir(item.file)
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
-                        ArchiveOps.canExtract(item.name) -> pendingArchiveTap = item.file
+                        ArchiveOps.canExtract(item.name) -> when (vm.archiveTapAction(item.name)) {
+                            // MENU: the v1.7.1 extract-or-open dialog (default).
+                            ArchiveTapAction.SHOW_MENU -> pendingArchiveTap = item.file
+                            // EXTRACT: the same pipeline as the dialog / "Extract here"
+                            // menu entry, including its target-exists handling.
+                            ArchiveTapAction.EXTRACT -> vm.extractZip(item.file)
+                            // OPEN_WITH: pre-v1.7.1 behavior — straight ACTION_VIEW.
+                            ArchiveTapAction.OPEN_WITH -> if (!Intents.openFile(context, item.file)) {
+                                vm.requestToast("No app can open this file")
+                            }
+                        }
                         else -> if (!Intents.openFile(context, item.file)) {
                             vm.requestToast("No app can open this file")
                         }
@@ -483,6 +522,7 @@ fun BrowseScreen(
                         .padding(bottom = 24.dp),
                 )
             }
+                }
         }
     }
 
@@ -505,14 +545,34 @@ fun BrowseScreen(
             onDismiss = { vm.dismissRename() },
         )
     }
-    // Archive-name dialog: zips are always named by the user, never a silent "archive.zip".
+    // Compress dialog (v1.7.3): format (ZIP / 7z), compression level, target name and
+    // destination (archive-folder setting or current folder) — archives are never
+    // created under a silent auto name.
     state.pendingZipFiles?.let { files ->
-        NameInputDialog(
-            title = "Zip ${files.size} item(s)",
-            initialValue = state.pendingZipName,
-            confirmLabel = "Zip",
-            onConfirm = { vm.confirmZip(it) },
+        CompressDialog(
+            count = files.size,
+            name = state.pendingZipName,
+            destination = state.pendingZipDestination,
+            format = state.pendingZipFormat,
+            level = state.pendingZipLevel,
+            onNameChange = { vm.setZipName(it) },
+            onFormatChange = { vm.setZipFormat(it) },
+            onLevelChange = { vm.setZipLevel(it) },
+            onConfirm = { vm.confirmZip(state.pendingZipName) },
             onDismiss = { vm.dismissZipDialog() },
+        )
+    }
+    // Target archive already exists and overwriteConfirm is on: ask before replacing
+    // (Cancel returns to the compress dialog so the user can pick another name).
+    state.pendingZipOverwrite?.let { target ->
+        ConfirmDialog(
+            title = "Overwrite \"${target.name}\"?",
+            message = "An archive with this name already exists in " +
+                "${target.parent ?: "the destination"}. Compressing again will replace it.",
+            confirmLabel = "Overwrite",
+            destructive = true,
+            onConfirm = { vm.confirmZipOverwrite() },
+            onDismiss = { vm.dismissZipOverwrite() },
         )
     }
     // Tapping an archive (.zip/.7z) asks what to do: extract (most common) or open with
@@ -537,12 +597,13 @@ fun BrowseScreen(
             dismissButton = { TextButton(onClick = { pendingArchiveTap = null }) { Text("Cancel") } },
         )
     }
-    // "Extract to…": the user names the destination folder under the current directory,
-    // the same ask-for-a-name pattern as the Zip dialog above.
+    // "Extract to…": the user names the destination folder — under the default
+    // destination (archive folder when set, v1.7.3), else the current directory.
     pendingExtractTo?.let { archive ->
         NameInputDialog(
             title = "Extract to…",
             initialValue = archive.nameWithoutExtension,
+            destination = vm.archiveFolderOr(state.dir)?.path,
             confirmLabel = "Extract",
             onConfirm = {
                 pendingExtractTo = null
@@ -601,7 +662,25 @@ fun BrowseScreen(
         ProgressOverlay(
             text = title,
             fraction = if (p.total > 0) p.done.toFloat() / p.total else null,
-            onCancel = { vm.cancelOp() },
+            onCancel = {
+                // v1.7.3 abortConfirm: ask before killing a running archive operation
+                // unless the user turned the confirmation off in Settings.
+                if (state.settings.abortConfirm) {
+                    pendingAbortConfirm = true
+                } else {
+                    vm.cancelOp()
+                }
+            },
+        )
+    }
+    if (pendingAbortConfirm) {
+        ConfirmDialog(
+            title = "Abort operation?",
+            message = "The operation will stop. Already completed items are kept.",
+            confirmLabel = "Abort",
+            destructive = true,
+            onConfirm = { pendingAbortConfirm = false; vm.cancelOp() },
+            onDismiss = { pendingAbortConfirm = false },
         )
     }
     state.result?.let { r ->
@@ -743,6 +822,84 @@ private fun Breadcrumbs(path: List<File>, onOpen: (File) -> Unit) {
             }
         }
     }
+}
+
+/**
+ * v1.7.3 compress dialog: format (ZIP / 7z), compression level ([CompressLevel] labels),
+ * target name (the required extension is appended by the ViewModel per format) and the
+ * destination folder (archive-folder setting or the current folder), shown under the
+ * name field. All state lives in the ViewModel; the dialog is pure UI.
+ */
+@Composable
+private fun CompressDialog(
+    count: Int,
+    name: String,
+    destination: File?,
+    format: ArchiveFormat,
+    level: CompressLevel,
+    onNameChange: (String) -> Unit,
+    onFormatChange: (ArchiveFormat) -> Unit,
+    onLevelChange: (CompressLevel) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Compress ${if (count == 1) "1 item" else "$count items"}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    singleLine = true,
+                    label = { Text("Archive name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                destination?.let {
+                    Text(
+                        "Into ${it.path}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Format", style = MaterialTheme.typography.titleSmall)
+                ArchiveFormat.entries.forEach { f ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onFormatChange(f) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = format == f, onClick = { onFormatChange(f) })
+                        Text(f.label, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Compression level", style = MaterialTheme.typography.titleSmall)
+                CompressLevel.entries.forEach { l ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onLevelChange(l) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = level == l, onClick = { onLevelChange(l) })
+                        Text(l.label, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = name.isNotBlank()) { Text("Compress") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
