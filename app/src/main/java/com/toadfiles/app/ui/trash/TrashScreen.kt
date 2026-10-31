@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +53,7 @@ import com.toadfiles.app.ui.components.EmptyState
 fun TrashScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
     vm: TrashViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -71,7 +73,11 @@ fun TrashScreen(
             TopAppBar(
                 title = { Text("Trash") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                    if (onOpenDrawer != null) {
+                        IconButton(onClick = onOpenDrawer) { Icon(Icons.Outlined.Menu, "Open navigation menu") }
+                    } else {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                    }
                 },
                 actions = {
                     IconButton(onClick = { vm.requestEmpty() }, enabled = state.entries.isNotEmpty()) {
