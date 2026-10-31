@@ -60,11 +60,8 @@ import java.io.File
  * MI Files / Google Files style storage analyzer: category breakdown, biggest files and
  * largest folders for one volume, from a single on-demand recursive walk.
  *
- * TODO(integration): register the route in ToadNavHost (Routes + composable), e.g.
+ * Route Routes.STORAGE_ANALYZER is registered in ToadNavHost (v1.7.3 integration):
  * ```
- * const val STORAGE_ANALYZER = "storage_analyzer?root={root}"
- * fun storageAnalyzer(root: String = "") = "storage_analyzer?root=${Uri.encode(root)}"
- *
  * composable(
  *     route = Routes.STORAGE_ANALYZER,
  *     arguments = listOf(navArgument("root") { type = NavType.StringType; defaultValue = "" }),
