@@ -57,11 +57,9 @@ fun StorageScreen(
      * Opens the full storage analyzer (ui/analyzer — category breakdown, biggest files,
      * largest folders).
      *
-     * TODO(integration): register the "storage_analyzer" route in ToadNavHost and pass a
-     * real callback here, e.g. navController.navigateSingleTop(Routes.storageAnalyzer()).
-     * Defaults to a no-op so this worktree keeps compiling before the route lands.
+     * Wired in ToadNavHost to Routes.STORAGE_ANALYZER (v1.7.3 integration).
      */
-    onOpenAnalyzer: () -> Unit = {},
+    onOpenAnalyzer: () -> Unit,
     vm: StorageViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()

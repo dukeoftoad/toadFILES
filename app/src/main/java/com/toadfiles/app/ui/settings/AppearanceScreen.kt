@@ -55,9 +55,8 @@ import com.toadfiles.app.ui.theme.AccentPalettes
  * moved out of the main Settings list. The main Settings screen keeps a single
  * "Appearance" card that navigates here.
  *
- * TODO(integration): register route "appearance" in ToadNavHost and navigate from
- * Settings (pass the callback as SettingsScreen's onOpenAppearance). Also pass
- * onOpenDrawer here if the shell should offer the drawer from this page.
+ * Route "appearance" is registered in ToadNavHost; Settings navigates here via its
+ * onOpenAppearance callback (v1.7.3 integration).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
