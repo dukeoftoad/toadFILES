@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -50,6 +52,15 @@ fun StorageScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
     onOpenFolder: (String) -> Unit,
+    /**
+     * Opens the full storage analyzer (ui/analyzer — category breakdown, biggest files,
+     * largest folders).
+     *
+     * TODO(integration): register the "storage_analyzer" route in ToadNavHost and pass a
+     * real callback here, e.g. navController.navigateSingleTop(Routes.storageAnalyzer()).
+     * Defaults to a no-op so this worktree keeps compiling before the route lands.
+     */
+    onOpenAnalyzer: () -> Unit = {},
     vm: StorageViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -93,6 +104,43 @@ fun StorageScreen(
                     onOpen = { onOpenFolder(root.dir.path) },
                     onAnalyze = { vm.analyzeTopLevel(root.dir) },
                 )
+            }
+
+            // ---- Full analyzer entry (MI Files style "what's eating space") ----
+            item {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    onClick = onOpenAnalyzer,
+                ) {
+                    Row(
+                        Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Analytics,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Analyze storage", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Find what's taking up space — categories, biggest files " +
+                                    "and largest folders.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowForward,
+                            "Open analyzer",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
 
             // ---- Media library by type (real MediaStore numbers) ----
