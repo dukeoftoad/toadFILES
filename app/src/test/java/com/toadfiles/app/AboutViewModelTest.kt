@@ -112,12 +112,21 @@ class AboutViewModelTest {
         }
     }
 
-    private fun release(tag: String = "v1.7.0") = GitHubRelease(
+    // Fixtures derive from BuildConfig.VERSION_NAME so a version bump in
+    // app/build.gradle.kts cannot silently flip "newer release" cases.
+    private val installedTag = "v${BuildConfig.VERSION_NAME}"
+
+    private fun newerTag(): String {
+        val parts = BuildConfig.VERSION_NAME.split('.').map { it.toIntOrNull() ?: 0 }
+        return "v${parts.getOrElse(0) { 0 }}.${parts.getOrElse(1) { 0 } + 1}.0"
+    }
+
+    private fun release(tag: String = newerTag()) = GitHubRelease(
         tagName = tag,
         htmlUrl = "https://github.com/dukeoftoad/toadFILES/releases/tag/$tag",
         notes = "Faster unzip and an update check.",
-        apkName = "toadfiles-1.7.0.apk",
-        apkUrl = "https://github.com/dukeoftoad/toadFILES/releases/download/$tag/toadfiles-1.7.0.apk",
+        apkName = "toadfiles-${tag.removePrefix("v")}.apk",
+        apkUrl = "https://github.com/dukeoftoad/toadFILES/releases/download/$tag/toadfiles-${tag.removePrefix("v")}.apk",
         apkSizeBytes = 7340032L,
     )
 
@@ -160,27 +169,25 @@ class AboutViewModelTest {
 
     @Test
     fun `checkForUpdates moves Idle to Available with the release metadata`() = runTest {
-        checker.release = release("v1.7.0")
+        val fake = release()
+        checker.release = fake
 
         vm.checkForUpdates()
         val available = awaitAvailable()
 
-        assertEquals("v1.7.0", available.version)
-        assertEquals(
-            "https://github.com/dukeoftoad/toadFILES/releases/download/v1.7.0/toadfiles-1.7.0.apk",
-            available.apkUrl,
-        )
-        assertEquals("toadfiles-1.7.0.apk", available.fileName)
+        assertEquals(fake.tagName, available.version)
+        assertEquals(fake.apkUrl, available.apkUrl)
+        assertEquals(fake.apkName, available.fileName)
         assertEquals(7340032L, available.sizeBytes)
         assertEquals("Faster unzip and an update check.", available.notes)
-        assertTrue(available.htmlUrl.endsWith("v1.7.0"))
+        assertEquals(fake.htmlUrl, available.htmlUrl)
         assertFalse(available.downloadInProgress)
         assertEquals(null, available.downloadedUri)
     }
 
     @Test
     fun `checkForUpdates reports UpToDate when the release is not newer`() = runTest {
-        checker.release = release("1.6.1") // equals the installed version
+        checker.release = release(installedTag) // equals the installed version
 
         vm.checkForUpdates()
 
@@ -245,7 +252,7 @@ class AboutViewModelTest {
         assertEquals(1, downloader.enqueued)
         assertEquals(available.apkUrl, downloader.lastRequest?.url)
         assertEquals(available.fileName, downloader.lastRequest?.fileName)
-        assertEquals("toadFILES v1.7.0", downloader.lastRequest?.title)
+        assertEquals("toadFILES ${available.version}", downloader.lastRequest?.title)
     }
 
     @Test
