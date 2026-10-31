@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +41,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.rememberNavController
 import com.toadfiles.app.data.ThemeMode
+import com.toadfiles.app.update.StartupUpdateCheck
+import com.toadfiles.app.update.UpdateBanner
+import com.toadfiles.app.ui.Routes
 import com.toadfiles.app.ui.ToadNavHost
 import com.toadfiles.app.ui.theme.ToadTheme
 import kotlinx.coroutines.Dispatchers
@@ -71,18 +77,37 @@ class MainActivity : ComponentActivity() {
                     initialValue = com.toadfiles.app.data.ToadSettings(),
                 )
             }.collectAsStateWithLifecycle()
+
+            // v1.7.1 OTA: one silent update check per app process, fired on open —
+            // never periodic, never a download. Failures (airplane mode etc.) stay silent.
+            val startupUpdate = remember { StartupUpdateCheck.instance }
+            LaunchedEffect(Unit) { startupUpdate.checkOnce(appScope) }
+            val updateBanner by startupUpdate.banner.collectAsStateWithLifecycle()
+
+            // Hoisted so the banner's "Update" can deep-link into the existing About flow.
+            val navController = rememberNavController()
+
             ToadTheme(
                 themeMode = settings.value.themeMode,
                 dynamicColor = settings.value.dynamicColor,
                 accentColor = settings.value.accentColor,
             ) {
-                if (hasFileAccess()) {
-                    ToadNavHost()
-                } else {
-                    OnboardingScreen(
-                        onGrant = { requestFileAccess() },
-                        onOpenSettings = { openAppSettings() },
-                    )
+                Column(Modifier.fillMaxSize()) {
+                    if (hasFileAccess()) {
+                        UpdateBanner(
+                            release = updateBanner,
+                            onOpenUpdateFlow = {
+                                navController.navigate(Routes.ABOUT) { launchSingleTop = true }
+                            },
+                            onDismiss = startupUpdate::dismissBanner,
+                        )
+                        Box(Modifier.weight(1f)) { ToadNavHost(navController) }
+                    } else {
+                        OnboardingScreen(
+                            onGrant = { requestFileAccess() },
+                            onOpenSettings = { openAppSettings() },
+                        )
+                    }
                 }
             }
         }
@@ -197,8 +222,9 @@ private fun OnboardingScreen(onGrant: () -> Unit, onOpenSettings: () -> Unit) {
             Text(
                 "toadFILES manages the files on this device locally. " +
                     "It never uploads anything, and nothing runs in the background.\n\n" +
-                    "Its only network use is the optional \"Check for updates\" button " +
-                    "on the About page, which talks to GitHub Releases.\n\n" +
+                    "Its only network use is the update check, which runs once when you " +
+                    "open the app and when you tap \"Check for updates\" on the About " +
+                    "page, and talks to GitHub Releases.\n\n" +
                     "To browse and organise your files, grant \"All files access\" " +
                     "in the next screen. Android requires this special permission for " +
                     "file managers to work on modern versions.",
