@@ -11,6 +11,7 @@ import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.ui.components.OpRunner
+import com.toadfiles.app.ui.components.PendingPasswordRetry
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,6 +32,10 @@ data class RecentUiState(
     val pendingDelete: List<MediaRepository.MediaEntry>? = null,
     val detailsOf: MediaRepository.MediaEntry? = null,
     val toast: String? = null,
+    /** Encrypted archive whose extraction is waiting for a password (drives PasswordPromptDialog). */
+    val pendingPasswordFor: File? = null,
+    /** Retry context for [pendingPasswordFor]: same target dir / replace semantics as the original call. */
+    val pendingPasswordRetry: PendingPasswordRetry? = null,
     // extract op (same op/progress/result model as Browse)
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
@@ -166,16 +171,50 @@ class RecentViewModel(
             requestToast("A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
             return
         }
+        runExtract(file, target)
+    }
+
+    private fun runExtract(file: File, target: File, replace: Boolean = false, password: CharArray? = null) {
         _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.extract(file, target, false, onProgress = onP) },
+            op = { onP -> ArchiveOps.extract(file, target, replace, password = password, onProgress = onP) },
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
+                if (r.passwordRequired) {
+                    // Encrypted archive: ask for the password, don't report a failure.
+                    // Nothing was extracted, so no refresh is needed either.
+                    _state.update {
+                        it.copy(
+                            progress = null, result = null,
+                            pendingPasswordFor = file,
+                            pendingPasswordRetry = PendingPasswordRetry(file, target, replace),
+                        )
+                    }
+                    return@onDone
+                }
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
                 if (r.fullySucceeded) trashArchiveAfterExtract(file)
                 refresh()
             },
         )
+    }
+
+    /** Retry hook for [PasswordPromptDialog]: re-runs the stored extract with the typed
+     *  password, keeping the original target dir / replace semantics. A wrong password
+     *  comes back as a normal failure result through the existing result dialog, and
+     *  the user can try again from the archive. */
+    fun retryExtractWithPassword(password: String) {
+        val ctx = _state.value.pendingPasswordRetry ?: return
+        dismissPasswordPrompt()
+        if (password.isBlank()) {
+            requestToast("Enter a password")
+            return
+        }
+        runExtract(ctx.archive, ctx.target, ctx.replace, password.toCharArray())
+    }
+
+    fun dismissPasswordPrompt() = _state.update {
+        it.copy(pendingPasswordFor = null, pendingPasswordRetry = null)
     }
 
     /**

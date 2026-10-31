@@ -70,6 +70,7 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
+import com.toadfiles.app.ui.components.PasswordPromptDialog
 import com.toadfiles.app.util.Intents
 
 /**
@@ -311,6 +312,16 @@ fun RecentScreen(
         onCancel = { vm.cancelOp() },
         onDismissResult = { vm.dismissResult() },
     )
+
+    // Encrypted archive: the extract came back passwordRequired — ask, then retry
+    // with the same target dir / replace semantics (v1.8.0).
+    state.pendingPasswordFor?.let { archive ->
+        PasswordPromptDialog(
+            archiveName = archive.name,
+            onRetry = { pw -> vm.retryExtractWithPassword(pw) },
+            onCancel = { vm.dismissPasswordPrompt() },
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
