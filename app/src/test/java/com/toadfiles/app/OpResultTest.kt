@@ -35,4 +35,26 @@ class OpResultTest {
         assertEquals(2, r.failures.size)
         assertFalse(r.cancelled)
     }
+
+    // ---------- fullySucceeded (v1.7.4 audit: delete-after gate) ----------
+
+    @Test
+    fun `fullySucceeded requires successes and no failures`() {
+        assertTrue(OpResult(succeeded = 3, skipped = 0, failed = 0).fullySucceeded)
+        assertFalse(OpResult(succeeded = 0, skipped = 0, failed = 0).fullySucceeded)
+        assertFalse(OpResult(succeeded = 2, skipped = 0, failed = 1).fullySucceeded)
+        assertFalse(OpResult(succeeded = 0, skipped = 2, failed = 0).fullySucceeded)
+    }
+
+    @Test
+    fun `fullySucceeded is false when cancelled even with successes`() {
+        // A cancelled run rolls back / stays incomplete: the sources must survive.
+        assertFalse(OpResult(succeeded = 2, skipped = 0, failed = 0, cancelled = true).fullySucceeded)
+    }
+
+    @Test
+    fun `skips alone do not spoil a fully successful run`() {
+        // Skipped collisions are expected outcomes (replace off), not errors.
+        assertTrue(OpResult(succeeded = 2, skipped = 1, failed = 0).fullySucceeded)
+    }
 }

@@ -4,6 +4,19 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased]
+
+### Fixed
+- **Delete-after-extract never fires on a partial failure or abort**: the archive is
+  only moved to the trash when the extraction completed with zero failures and no
+  cancellation (all surfaces: Browse, Categories, Recent). Previously an archive
+  with one corrupt entry was trashed even though the extraction was incomplete.
+- **Categories now honors delete-after-compression**: successful compressions from
+  the Categories drill-in move the sources to the trash when the setting is on,
+  matching Browse.
+- **Categories "Extract to…" and Compress now default to the archive-folder
+  setting** (when set), matching Browse's destinations.
+
 ## [1.7.3] — 2026-10-31
 
 Big UX release: 7z creation, a redesigned Settings with Appearance page and

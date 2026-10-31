@@ -330,6 +330,87 @@ class CategoriesViewModelTest {
     }
 
     @Test
+    fun `zip flow honors delete-after-compress by trashing the sources`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipdel-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            container.settingsRepo.setDeleteAfterCompress(true)
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            vm.confirmZip("packed")
+            await { vm.state.value.result != null }
+            await { !a.exists() }
+            // The archive itself survives; the source went to the trash (undoable).
+            assertTrue(File(root, "packed.zip").exists())
+
+            container.settingsRepo.setDeleteAfterCompress(false)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `zip flow keeps the sources when delete-after-compress is off`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipkeep-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            vm.confirmZip("packed")
+            await { vm.state.value.result != null }
+            assertTrue(a.exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `zip flow defaults to the archive folder when one is set`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipfolder-${System.nanoTime()}")
+        root.mkdirs()
+        val archiveFolder = File(root, "archdest").apply { mkdirs() }
+        try {
+            container.settingsRepo.setArchiveFolder(archiveFolder.path)
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            vm.confirmZip("packed")
+            await { vm.state.value.result != null }
+            assertTrue(File(archiveFolder, "packed.zip").exists())
+            assertFalse(File(root, "packed.zip").exists())
+
+            container.settingsRepo.setArchiveFolder("")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `extract to uses the archive folder as default destination`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-extractfolder-${System.nanoTime()}")
+        root.mkdirs()
+        val archiveFolder = File(root, "archdest").apply { mkdirs() }
+        try {
+            container.settingsRepo.setArchiveFolder(archiveFolder.path)
+            val zip = File(root, "bundle.zip")
+            makeZip(zip, mapOf("inner.txt" to "zipbody".toByteArray()))
+
+            vm.extractZip(zip, targetName = "unpacked")
+            await { vm.state.value.result != null }
+            assertEquals(0, vm.state.value.result!!.failed)
+            // Landed under the archive folder, not next to the source.
+            assertEquals("zipbody", File(archiveFolder, "unpacked/inner.txt").readText())
+            assertFalse(File(root, "unpacked").exists())
+
+            container.settingsRepo.setArchiveFolder("")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `extract to an existing folder asks for a strategy and keep-both extracts aside`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "cat-extractto-${System.nanoTime()}")
         root.mkdirs()
