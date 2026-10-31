@@ -81,6 +81,7 @@ fun TrashScreen(
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
             TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                 title = {
                     Text(if (state.selection.isEmpty()) "Trash" else "${state.selection.size} selected")
                 },

@@ -15,14 +15,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -75,12 +73,10 @@ fun AboutScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                 title = { Text("About") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
-                },
-                actions = {
-                    IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
                 },
             )
         },
@@ -107,7 +103,7 @@ fun AboutScreen(
                     Spacer(Modifier.height(12.dp))
                     VersionRow("Version", BuildConfig.VERSION_NAME)
                     VersionRow("Build", BuildConfig.VERSION_CODE.toString())
-                    VersionRow("Min Android", "8.0 (API 26)")
+                    VersionRow("Min Android", "14 (API 34)")
                     VersionRow("Target Android", "API 36+")
                     VersionRow("Package", BuildConfig.APPLICATION_ID)
                     Spacer(Modifier.height(8.dp))
@@ -125,69 +121,10 @@ fun AboutScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ---- Storage usage ----
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Storage on this device", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(12.dp))
-                    val stats = state.storage
-                    if (stats == null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Reading storage…", style = MaterialTheme.typography.labelMedium)
-                        }
-                    } else {
-                        LinearProgressIndicator(
-                            progress = { stats.usedFraction },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(10.dp),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "${Format.size(stats.usedBytes)} used of ${Format.size(stats.totalBytes)} · " +
-                                "${Format.size(stats.freeBytes)} free",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // ---- File counts by type ----
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Files on this device", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(10.dp))
-                    if (state.categoryCounts.isEmpty() && state.loading) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Counting…", style = MaterialTheme.typography.labelMedium)
-                        }
-                    } else {
-                        val maxBytes = state.categoryCounts.maxOfOrNull { it.totalBytes } ?: 0L
-                        state.categoryCounts.forEach { c ->
-                            CategoryStatRow(
-                                name = c.category.label,
-                                count = c.count,
-                                bytes = c.totalBytes,
-                                fillFraction = if (maxBytes > 0L) {
-                                    (c.totalBytes.toFloat() / maxBytes).coerceIn(0.05f, 1f)
-                                } else 0f,
-                            )
-                            Spacer(Modifier.height(8.dp))
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
             // ---- Updates (strictly user-initiated check against GitHub Releases) ----
+            // v1.8.1: the "Storage on this device" and "Files on this device" data
+            // cards were removed from About — that live storage/usage information lives
+            // on the Home storage card and the Storage page, where it belongs.
             Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp)) {
                     Text("Updates", style = MaterialTheme.typography.titleMedium)
@@ -218,7 +155,9 @@ fun AboutScreen(
                 Column(Modifier.padding(20.dp)) {
                     Text("What's new", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    ChangelogEntries.forEach { (version, lines) ->
+                    // v1.8.1: only the latest two updates are shown — the full history
+                    // lives in the repository's CHANGELOG.md.
+                    ChangelogEntries.take(2).forEach { (version, lines) ->
                         Text(
                             version,
                             style = MaterialTheme.typography.titleSmall,
@@ -226,6 +165,12 @@ fun AboutScreen(
                         )
                         lines.forEach { line -> ChangelogBullet(line) }
                     }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Older releases: see CHANGELOG.md in the toadFILES repository.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
                 }
             }
 
@@ -282,27 +227,6 @@ private fun VersionRow(label: String, value: String) {
             modifier = Modifier.weight(1f),
         )
         Text(value, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
-    }
-}
-
-@Composable
-private fun CategoryStatRow(name: String, count: Int, bytes: Long, fillFraction: Float) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            Text(
-                "$count item(s) · ${Format.size(bytes)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        LinearProgressIndicator(
-            progress = { fillFraction },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp),
-        )
     }
 }
 
@@ -445,6 +369,14 @@ private fun UpdateAvailable(
  * download. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.8.1" to listOf(
+        "Trash moved into Quick access: a permanent tile on Home replaces the top-right toolbar icon, so every destination is reachable the same way.",
+        "Top spacing fixed for good: the status-bar inset is now applied exactly once by the navigation shell, cards and margins tightened — no more blank band at the top of any screen.",
+        "Settings redesigned: tonal icon chips, grouped cards and smooth animated transitions, plus gentle cross-fade navigation between screens.",
+        "Recent gets a list/grid layout toggle (persisted), like Browse and Categories.",
+        "About is leaner: What's new shows the latest two updates only, and the storage/file-count data cards moved out (they live on Home and the Storage page).",
+        "Minimum Android version raised to 14 (API 34); legacy storage permissions dropped.",
+    ),
     "v1.8.0" to listOf(
         "Password-protected 7z archives: create AES-256 encrypted archives right from the Compress dialog, and get a password prompt when extracting one — wrong passwords never publish anything.",
         "Split into volumes: create name.001, name.002… archive sets (fixed sizes or custom), and extract any volume set by tapping its .001 file.",

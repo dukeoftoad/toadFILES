@@ -1,6 +1,11 @@
 package com.toadfiles.app.ui
 
 import android.net.Uri
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Category
@@ -173,10 +178,24 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
         NavHost(
             navController = navController,
             startDestination = Routes.HOME,
+            // v1.8.1: the shell applies the status-bar inset exactly ONCE, here. Every
+            // screen Scaffold and TopAppBar zeroes its own window insets, so no screen
+            // can double-pad (blank band) or skip padding (content under the clock).
+            modifier = Modifier.padding(top = padding.calculateTopPadding()),
+            // v1.8.1: gentle cross-fade + micro-slide instead of the abrupt swap.
+            enterTransition = {
+                fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 24 }
+            },
+            exitTransition = { fadeOut(tween(180)) },
+            popEnterTransition = { fadeIn(tween(220)) },
+            popExitTransition = {
+                fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 24 }
+            },
         ) {
             composable(Routes.HOME) {
                 HomeScreen(
                     bottomPadding = padding.calculateBottomPadding(),
+                    topPadding = padding.calculateTopPadding(),
                     onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
                     onOpenStorage = { navController.navigateSingleTop(Routes.STORAGE) },
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },

@@ -7,12 +7,9 @@
          "Check for updates" flow and its APK download) — no periodic network,
          analytics or telemetry. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
+    <!-- v1.8.1: with minSdk 34 (Android 14) the legacy READ/WRITE_EXTERNAL_STORAGE
+         permissions and requestLegacyExternalStorage are obsolete — "All files access"
+         (MANAGE_EXTERNAL_STORAGE) is the one permission this app needs. -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
@@ -20,10 +17,6 @@
          Android still asks the user to allow installs from this app first. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- requestLegacyExternalStorage is honored only on Android 10 (API 29) devices, where
-         MANAGE_EXTERNAL_STORAGE does not exist yet — the flag is what gives
-         WRITE_EXTERNAL_STORAGE full-filesystem access there. Android 11+ ignores it, and
-         with minSdk 26 the pre-R range must keep working: remove only with a minSdk raise. -->
     <application
         android:name=".ToadApp"
         android:allowBackup="false"
@@ -33,7 +26,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.ToadFiles"
         tools:targetApi="36">
 

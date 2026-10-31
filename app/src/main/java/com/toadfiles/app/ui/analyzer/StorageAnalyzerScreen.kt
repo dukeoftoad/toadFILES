@@ -105,6 +105,7 @@ fun StorageAnalyzerScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                 title = { Text("Analyze storage") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }

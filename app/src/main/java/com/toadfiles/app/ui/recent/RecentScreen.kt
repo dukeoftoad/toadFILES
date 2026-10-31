@@ -19,18 +19,27 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +74,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.EmptyState
@@ -115,6 +125,7 @@ fun RecentScreen(
         topBar = {
             if (inSelection) {
                 TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text("${state.selection.size} selected") },
                     navigationIcon = {
                         IconButton(onClick = { vm.clearSelection() }) {
@@ -142,12 +153,23 @@ fun RecentScreen(
                 )
             } else {
                 TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text("Recent") },
                     navigationIcon = {
                         if (onOpenDrawer != null) {
                             IconButton(onClick = onOpenDrawer) { Icon(Icons.Outlined.Menu, "Open navigation menu") }
                         } else {
                             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                        }
+                    },
+                    // v1.8.1: list ⇄ grid, same affordance as Browse and Categories.
+                    actions = {
+                        IconButton(onClick = { vm.toggleLayout() }) {
+                            Icon(
+                                if (state.layout == BrowseLayout.GRID)
+                                    Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
+                                "Toggle list / grid view",
+                            )
                         }
                     },
                     // v1.7.3: the toolbar Refresh button was replaced by pull-to-refresh
@@ -210,7 +232,21 @@ fun RecentScreen(
                     Modifier.fillMaxSize(),
                 )
 
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> if (state.layout == BrowseLayout.GRID) {
+                    RecentGrid(
+                        grouped = grouped,
+                        state = state,
+                        inSelection = inSelection,
+                        onEntryTap = { e ->
+                            if (inSelection) vm.toggleSelection(e)
+                            else if (!Intents.openContent(context, e.uri, e.mime)) {
+                                vm.requestToast("No app can open this file")
+                            }
+                        },
+                        onEntryLongPress = { e -> vm.toggleSelection(e) },
+                        onEntryMore = { e -> actionSheetFor = e },
+                    )
+                } else LazyColumn(Modifier.fillMaxSize()) {
                     grouped.forEach { (group, groupEntries) ->
                         stickyHeader(key = "header#${group.name}") {
                             Text(
@@ -399,6 +435,151 @@ private fun RecentRow(
             if (selected) {
                 Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
             }
+        }
+    }
+}
+
+/**
+ * v1.8.1: grid layout for Recent — the same toggle Browse and Categories have. Group
+ * headers span the full width; each cell shows the media thumbnail (or an extension
+ * badge), the name and the date. Long-press still starts multi-select, the ⋮ keeps the
+ * action sheet one tap away, and the selected state mirrors the list's check mark.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecentGrid(
+    grouped: List<Pair<RecentGroup, List<MediaRepository.MediaEntry>>>,
+    state: RecentUiState,
+    inSelection: Boolean,
+    onEntryTap: (MediaRepository.MediaEntry) -> Unit,
+    onEntryLongPress: (MediaRepository.MediaEntry) -> Unit,
+    onEntryMore: (MediaRepository.MediaEntry) -> Unit,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 112.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        grouped.forEach { (group, groupEntries) ->
+            item(key = "header#${group.name}", span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    group.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+            gridItems(groupEntries, key = { "${it.category.name}#${it.id}" }) { e ->
+                RecentGridCell(
+                    e = e,
+                    selected = e.uri.toString() in state.selection,
+                    onClick = { onEntryTap(e) },
+                    onLongClick = { onEntryLongPress(e) },
+                    onMore = { onEntryMore(e) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecentGridCell(
+    e: MediaRepository.MediaEntry,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onMore: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .padding(4.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = RoundedCornerShape(14.dp),
+        colors = if (selected) CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ) else CardDefaults.cardColors(),
+    ) {
+        Column(Modifier.padding(8.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(96.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (e.category == FileCategory.IMAGES || e.category == FileCategory.VIDEOS) {
+                    AsyncImage(
+                        model = e.data?.let { java.io.File(it) } ?: e.uri,
+                        contentDescription = e.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(96.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(10.dp),
+                            ),
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(96.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            e.name.substringAfterLast('.', "?").uppercase().take(4),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                if (selected) {
+                    Icon(
+                        Icons.Outlined.Check,
+                        "Selected",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(20.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surface,
+                                CircleShape,
+                            )
+                            .padding(2.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    e.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!selected) {
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "More actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .combinedClickable(onClick = onMore, onLongClick = onMore),
+                    )
+                }
+            }
+            Text(
+                Format.date(e.dateModified),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
