@@ -37,7 +37,9 @@ import javax.imageio.ImageIO
  * Browse-parity actions (Extract here, Extract to…, Rename, Zip, Properties).
  */
 @RunWith(AndroidJUnit4::class)
-@Config(application = ToadApp::class, sdk = [35])
+// qualifiers: a tall virtual screen so every category tile in the LazyVerticalGrid
+// (Archives sits below the fold on Robolectric's default 320x470) is composed.
+@Config(application = ToadApp::class, sdk = [35], qualifiers = "w411dp-h1200dp")
 class CategoriesScreenTest {
 
     @get:Rule
@@ -95,6 +97,10 @@ class CategoriesScreenTest {
         render()
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Media library").fetchSemanticsNodes().isNotEmpty()
+        }
+        // The grid tiles land asynchronously (summaries query) — never race the click.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText(tileLabel).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText(tileLabel).performClick()
     }

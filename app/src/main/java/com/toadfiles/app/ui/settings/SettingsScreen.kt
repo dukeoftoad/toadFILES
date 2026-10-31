@@ -57,13 +57,12 @@ private val SEARCH_LIMIT_CHOICES = listOf(100, 250, 500, 1000, 2000)
 fun SettingsScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
-    // Kept so the existing ToadNavHost call keeps compiling; the Trash card was removed
-    // in v1.7.3 (Trash already lives in the drawer).
-    // TODO(integration): drop this parameter from the SettingsScreen call in ToadNavHost.
+    // Deprecated no-op kept for source compatibility; the Trash card was removed in
+    // v1.7.3 (Trash lives in the side menu).
+    @Suppress("DEPRECATION", "unused")
     onOpenTrash: (() -> Unit)? = null,
     onOpenAbout: () -> Unit,
-    // TODO(integration): register route "appearance" in ToadNavHost and pass its
-    // navController.popBackStack-style lambda here.
+    // Wired in ToadNavHost to the "appearance" route.
     onOpenAppearance: (() -> Unit)? = null,
     onOpenDrawer: (() -> Unit)? = null,
     vm: SettingsViewModel = viewModel(factory = ToadViewModelFactory),

@@ -35,7 +35,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.InstallMobile
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Refresh
+
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Delete
@@ -49,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -285,18 +286,23 @@ fun CategoriesScreen(
                                 onDismiss = { sortMenuOpen = false },
                             )
                         }
-                        IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
                     },
                 )
             }
         },
     ) { padding ->
+        // Pull-to-refresh (v1.7.3): drag down anywhere to re-query the media library.
+        PullToRefreshBox(
+            isRefreshing = state.loading,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
         if (state.selected == null) {
             CategoryGrid(
                 state = state,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 onOpen = vm::open,
             )
         } else {
@@ -318,6 +324,7 @@ fun CategoriesScreen(
                 },
                 onEntryMore = { e -> actionSheetFor = e },
             )
+        }
         }
     }
 

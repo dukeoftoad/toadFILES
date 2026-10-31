@@ -441,6 +441,15 @@ private fun UpdateAvailable(
  * download. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.7.3" to listOf(
+        "Create 7z archives, not just extract them: the compress dialog now offers ZIP and 7z with a compression level (Store / Fast / Normal / Maximum), destination shown, overwrite protection and delete-source options.",
+        "Settings rebuilt: a dedicated Appearance page, and a new General section — per-format archive open actions (ZIP and 7z separately), back-key action, navigation style (bottom bar or side menu), delete after compress/extract, abort and overwrite confirmations, and a default archive folder used for storing and extracting.",
+        "Categories now uses the exact same components and features as Browse: full action sheet (extract to…, rename, compress, properties), sort and list/grid controls, and batch operations in multi-select.",
+        "New MI Files-style storage analyzer (category breakdown, biggest files, largest folders), pull-to-refresh everywhere in place of refresh buttons, and the app got lighter with shared components.",
+    ),
+    "v1.7.2" to listOf(
+        "Fixed: the app stays fully usable right after granting storage access — the optional update banner no longer gates the main UI behind the permission check.",
+    ),
     "v1.7.1" to listOf(
         "Tapping an archive now opens its actions (Extract) instead of asking which app to open it with, and after extraction you land straight in the extracted folder.",
         "ZIP and 7z operations show a real progress bar, and 7z archives are now supported for extraction (password-protected archives are detected and declined politely).",

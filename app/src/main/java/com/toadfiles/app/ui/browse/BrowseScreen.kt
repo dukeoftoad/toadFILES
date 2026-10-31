@@ -125,6 +125,9 @@ fun BrowseScreen(
     var sortMenuOpen by remember { mutableStateOf(false) }
     var filterMenuOpen by remember { mutableStateOf(false) }
     var moreMenuOpen by remember { mutableStateOf(false) }
+    // v1.7.3 abortConfirm: set when the user cancels the progress overlay while the
+    // confirmation setting is on; cleared by the dialog's buttons.
+    var pendingAbortConfirm by remember { mutableStateOf(false) }
 
     val rootDir = remember(initialDir) {
         // Bottom-bar Browse passes an empty dir; default to the external storage root
@@ -565,7 +568,7 @@ fun BrowseScreen(
         ConfirmDialog(
             title = "Overwrite \"${target.name}\"?",
             message = "An archive with this name already exists in " +
-                "${target.parent?.path ?: "the destination"}. Compressing again will replace it.",
+                "${target.parent ?: "the destination"}. Compressing again will replace it.",
             confirmLabel = "Overwrite",
             destructive = true,
             onConfirm = { vm.confirmZipOverwrite() },
@@ -659,7 +662,25 @@ fun BrowseScreen(
         ProgressOverlay(
             text = title,
             fraction = if (p.total > 0) p.done.toFloat() / p.total else null,
-            onCancel = { vm.cancelOp() },
+            onCancel = {
+                // v1.7.3 abortConfirm: ask before killing a running archive operation
+                // unless the user turned the confirmation off in Settings.
+                if (state.settings.abortConfirm) {
+                    pendingAbortConfirm = true
+                } else {
+                    vm.cancelOp()
+                }
+            },
+        )
+    }
+    if (pendingAbortConfirm) {
+        ConfirmDialog(
+            title = "Abort operation?",
+            message = "The operation will stop. Already completed items are kept.",
+            confirmLabel = "Abort",
+            destructive = true,
+            onConfirm = { pendingAbortConfirm = false; vm.cancelOp() },
+            onDismiss = { pendingAbortConfirm = false },
         )
     }
     state.result?.let { r ->

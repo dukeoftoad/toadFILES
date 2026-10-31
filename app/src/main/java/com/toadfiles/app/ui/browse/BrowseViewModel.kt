@@ -699,8 +699,8 @@ class BrowseViewModel(
             // Post-extract redirect (v1.7.1): navigate into the extracted folder.
             if (kind == OpKind.ZIP_EXTRACT && r.succeeded > 0) {
                 extractDest?.let { d -> _events.tryEmit(ExtractEvent.ExtractCompleted(d)) }
-                // v1.7.3 delete-after-extract (conflict-dialog path).
-                // TODO(integration): mirror this in Recent's and Categories' extract flows.
+                // v1.7.3 delete-after-extract (conflict-dialog path); the media
+                // flows (Recent/Categories) mirror this via trashArchiveAfterExtract.
                 if (_state.value.settings.deleteAfterExtract) trashSourcesAfterArchiveOp(sources)
             }
         }
@@ -932,9 +932,8 @@ class BrowseViewModel(
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
             if (r.succeeded > 0) {
                 _events.tryEmit(ExtractEvent.ExtractCompleted(target))
-                // TODO(integration): Recent's and Categories' extract flows should honor
-                // deleteAfterExtract through the same trash-based convention once they
-                // adopt a shared helper.
+                // The media flows (Recent/Categories) honor this too via
+                // trashArchiveAfterExtract — same trash-based convention.
                 if (_state.value.settings.deleteAfterExtract) trashSourcesAfterArchiveOp(listOf(file))
             }
             load(target.parentFile ?: return@launch)
