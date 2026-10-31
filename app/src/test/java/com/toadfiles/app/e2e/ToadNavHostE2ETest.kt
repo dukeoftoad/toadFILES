@@ -3,6 +3,7 @@ package com.toadfiles.app.e2e
 import android.os.Environment
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -42,7 +43,7 @@ class ToadNavHostE2ETest {
     @Test
     fun `home screen renders the app shell`() {
         compose.setContent { ToadTheme { ToadNavHost() } }
-        compose.onNodeWithText("Home").assertIsSelected()
+        compose.onNodeWithTag("tab_Home").assertIsSelected()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
         }
@@ -56,23 +57,23 @@ class ToadNavHostE2ETest {
         // because the TopAppBar title shows the current dir's name, not the literal
         // "Browse". The old >= 2 assertion only worked for Categories, where the
         // CategoriesScreen TopAppBar title was the literal "Categories".
-        compose.onNodeWithText("Browse").performClick()
+        compose.onNodeWithTag("tab_Browse").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Browse").fetchSemanticsNodes().isNotEmpty()
         }
 
         // Settings — a setting row is rendered
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithTag("tab_Settings").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Show hidden files").fetchSemanticsNodes().isNotEmpty()
         }
 
         // Back to Home
-        compose.onNodeWithText("Home").performClick()
+        compose.onNodeWithTag("tab_Home").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("Home").assertIsSelected()
+        compose.onNodeWithTag("tab_Home").assertIsSelected()
     }
 
     @Test
@@ -89,7 +90,7 @@ class ToadNavHostE2ETest {
         }
 
         // Categories: the grid renders the media-library header plus one tile per category.
-        compose.onNodeWithText("Categories").performClick()
+        compose.onNodeWithTag("tab_Categories").performClick()
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Media library").fetchSemanticsNodes().isNotEmpty()
         }
@@ -98,7 +99,7 @@ class ToadNavHostE2ETest {
         }
 
         // Settings is still reachable with Categories sitting between Browse and it.
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithTag("tab_Settings").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Show hidden files").fetchSemanticsNodes().isNotEmpty()
         }
@@ -115,7 +116,7 @@ class ToadNavHostE2ETest {
         try {
             compose.setContent { ToadTheme { ToadNavHost() } }
 
-            compose.onNodeWithText("Browse").performClick()
+            compose.onNodeWithTag("tab_Browse").performClick()
             compose.waitForIdle()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("e2e_browse_note.txt").fetchSemanticsNodes().isNotEmpty()

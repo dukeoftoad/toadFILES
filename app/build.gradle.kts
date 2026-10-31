@@ -111,6 +111,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     // 7z read support (pure Java, minSdk-26 safe). ZIP stays on java.util.zip.
     implementation("org.apache.commons:commons-compress:1.27.1")
+    // XZ for Java: commons-compress needs it for LZMA-based 7z entries at runtime.
+    implementation("org.tukaani:xz:1.10")
 
     // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
     testImplementation(libs.junit)

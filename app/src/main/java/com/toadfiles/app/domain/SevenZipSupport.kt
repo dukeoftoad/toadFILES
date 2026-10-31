@@ -71,7 +71,7 @@ object SevenZipSupport {
             }
             if (seven != null) {
                 seven.use { sz ->
-                    val allEntries = sz.entries
+                    val allEntries = sz.entries.toList()
                     total = allEntries.size
                     for (entry in allEntries) {
                         val name = entry.name
@@ -195,7 +195,7 @@ object SevenZipSupport {
     /** Entry count from the 7z header, for determinate progress before the op starts;
      *  null when the archive can't be opened (the op itself will report the error). */
     fun entryCount(sevenZFile: File): Int? = try {
-        SevenZFile(sevenZFile).use { it.entries.size }
+        SevenZFile(sevenZFile).use { it.entries.toList().size }
     } catch (_: Exception) {
         null
     }
