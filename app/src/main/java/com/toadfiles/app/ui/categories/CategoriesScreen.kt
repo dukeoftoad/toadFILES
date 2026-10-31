@@ -249,7 +249,7 @@ fun CategoriesScreen(
             title = { Text("Move ${entries.size} item(s) to trash?") },
             text = {
                 Text("Items are moved to the toadFILES trash and kept for 30 days. " +
-                    "You can restore them from Settings → Trash.")
+                    "You can restore them from the Trash page in the side menu.")
             },
             confirmButton = {
                 TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }
