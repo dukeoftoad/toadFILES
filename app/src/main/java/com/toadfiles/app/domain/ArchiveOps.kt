@@ -20,6 +20,12 @@ enum class ArchiveFormat(val extension: String, val label: String) {
  *
  * v1.7.3: [compress] routes to the format's pipeline with the shared [CompressLevel]
  * chooser (Deflater levels for zip, LZMA2 presets / COPY for 7z).
+ *
+ * v1.8.0: [compress]/[extract] accept a password. Only the 7z pipeline uses it
+ * (AES-256 data-only encryption, [SevenZipSupport.create7z]); the zip pipeline takes
+ * the parameter for signature symmetry but keeps declining encrypted zips — and
+ * [extract] reports [OpResult.passwordRequired] when an encrypted 7z is opened without
+ * a usable password, so the UI can prompt and retry.
  */
 object ArchiveOps {
 
@@ -42,29 +48,36 @@ object ArchiveOps {
         else -> null
     }
 
-    /** Extracts [archive] into [targetDir] with the format's hardened pipeline. */
+    /** Extracts [archive] into [targetDir] with the format's hardened pipeline.
+     *  [password] is used by the 7z pipeline for AES-256 encrypted archives. */
     suspend fun extract(
         archive: File,
         targetDir: File,
         replace: Boolean,
         limits: ZipSupport.Limits = ZipSupport.Limits(),
+        password: CharArray? = null,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = when (extension(archive.name)) {
-        "zip" -> ZipSupport.extract(archive, targetDir, replace, limits, onProgress)
-        "7z" -> SevenZipSupport.extract(archive, targetDir, replace, limits, onProgress)
+        "zip" -> ZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
+        "7z" -> SevenZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
         else -> OpResult(0, 0, 1, false, listOf("${archive.name}: unsupported archive type"))
     }
 
-    /** Compresses [sources] into [outFile] with the chosen [format] and [level] (v1.7.3). */
+    /** Compresses [sources] into [outFile] with the chosen [format] and [level] (v1.7.3).
+     *  v1.8.0: [password] encrypts 7z archives (AES-256, data-only); the zip pipeline
+     *  ignores it — encrypted zip creation isn't supported. */
     suspend fun compress(
         sources: List<File>,
         outFile: File,
         format: ArchiveFormat,
         level: CompressLevel = CompressLevel.NORMAL,
+        password: CharArray? = null,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = when (format) {
         ArchiveFormat.ZIP -> ZipSupport.zip(sources, outFile, level, onProgress)
-        ArchiveFormat.SEVEN_Z -> SevenZipSupport.create7z(sources, outFile, level, onProgress = onProgress)
+        ArchiveFormat.SEVEN_Z -> SevenZipSupport.create7z(
+            sources, outFile, level, password = password, onProgress = onProgress,
+        )
     }
 
     /** Zip creation kept for the v1.7.1–1.7.2 call sites; new code uses [compress]. */

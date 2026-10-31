@@ -24,10 +24,11 @@ import java.io.File
 /**
  * v1.7.1 7z support: entry iteration, extraction through the shared hardened staging
  * pipeline, ZIP-slip rejection, determinate progress and dispatch via ArchiveOps.
- * v1.7.3 adds the creation pipeline: round-trips, level mapping (COPY for STORE, LZMA2
+ * v1.7.3 adds the creation pipeline: round-trips, level mapping (COPY for NONE, LZMA2
  * presets otherwise), staging atomicity, entry caps and the no-follow link policy.
- * (Password handling can't be tested without a real encrypted fixture — the
- * PasswordRequiredException mapping is plain try/catch around the commons-compress API.)
+ * v1.8.0 adds the six ZArchiver levels (FASTEST/ULTRA, 128 MiB ultra dictionary) and
+ * AES-256 password round-trips: create with a password, extract with the same one,
+ * passwordRequired when none is given, "Wrong password" when a wrong one is.
  */
 class SevenZipSupportTest {
 
@@ -139,19 +140,24 @@ class SevenZipSupportTest {
     // ---------- creation (v1.7.3) ----------
 
     @Test
-    fun `compress levels map to 7z methods and LZMA2 presets`() {
-        // STORE stores verbatim via the COPY codec — no LZMA2 preset at all.
-        val store = SevenZipSupport.contentMethodsFor(CompressLevel.STORE)
-        assertEquals(SevenZMethod.COPY, store.single().method)
-        assertNull(store.single().options)
-        // The compressing levels map to the xz presets 1 / 6 / 9 (dict 1 / 8 / 64 MiB).
-        assertEquals(1, SevenZipSupport.lzma2Preset(CompressLevel.FAST))
+    fun `compress levels map to 7z methods, LZMA2 presets and dictionaries`() {
+        // NONE stores verbatim via the COPY codec — no LZMA2 preset at all.
+        val none = SevenZipSupport.contentMethodsFor(CompressLevel.NONE)
+        assertEquals(SevenZMethod.COPY, none.single().method)
+        assertNull(none.single().options)
+        // The compressing levels map to the xz presets 1 / 3 / 6 / 9 / 9.
+        assertEquals(1, SevenZipSupport.lzma2Preset(CompressLevel.FASTEST))
+        assertEquals(3, SevenZipSupport.lzma2Preset(CompressLevel.FAST))
         assertEquals(6, SevenZipSupport.lzma2Preset(CompressLevel.NORMAL))
         assertEquals(9, SevenZipSupport.lzma2Preset(CompressLevel.MAXIMUM))
+        assertEquals(9, SevenZipSupport.lzma2Preset(CompressLevel.ULTRA)) // dict differs, preset doesn't
         val dictByLevel = mapOf(
-            CompressLevel.FAST to (1 shl 20),
-            CompressLevel.NORMAL to (1 shl 23),
-            CompressLevel.MAXIMUM to (1 shl 26),
+            CompressLevel.FASTEST to (1 shl 20), // 1 MiB
+            CompressLevel.FAST to (1 shl 22),    // 4 MiB
+            CompressLevel.NORMAL to (1 shl 23),  // 8 MiB
+            CompressLevel.MAXIMUM to (1 shl 26), // 64 MiB
+            // ULTRA is NOT plain preset 9: the dictionary is pushed to 128 MiB.
+            CompressLevel.ULTRA to SevenZipSupport.ULTRA_DICT_BYTES,
         )
         for ((level, expectedDict) in dictByLevel) {
             val m = SevenZipSupport.contentMethodsFor(level).single()
@@ -159,6 +165,8 @@ class SevenZipSupportTest {
             val options = m.options as LZMA2Options
             assertEquals("dict size for $level", expectedDict, options.dictSize)
         }
+        // ULTRA's 128 MiB must be exactly that — not the preset-9 default 64 MiB.
+        assertEquals(128 * 1024 * 1024, SevenZipSupport.ULTRA_DICT_BYTES)
     }
 
     @Test
@@ -195,6 +203,14 @@ class SevenZipSupportTest {
                     Runtime.getRuntime().maxMemory() > 1_200_000_000L,
                 )
             }
+            if (level == CompressLevel.ULTRA) {
+                // 128 MiB dictionary ≈ 1.3 GB encoder memory; extraction alone needs the
+                // 128 MiB dict buffer. Only exercise it on a desktop-grade heap.
+                assumeTrue(
+                    "ULTRA needs a ~2 GiB heap for its 128 MiB LZMA2 dictionary",
+                    Runtime.getRuntime().maxMemory() > 2_000_000_000L,
+                )
+            }
             val dir = tmp.newFolder("lv-${level.name}")
             val src = File(dir, "data.txt").apply { writeText("toad ".repeat(5000)) }
             val out = File(dir, "a.7z")
@@ -211,13 +227,13 @@ class SevenZipSupportTest {
     }
 
     @Test
-    fun `STORE creates an uncompressed archive and LZMA2 compresses`() = runBlocking {
+    fun `NONE creates an uncompressed archive and LZMA2 compresses`() = runBlocking {
         val dir = tmp.newFolder("c2")
-        // Incompressible payload: COPY can't shrink it, so the STORE archive must be at
+        // Incompressible payload: COPY can't shrink it, so the NONE archive must be at
         // least as large as the payload itself.
         val blob = File(dir, "blob.bin").apply { writeBytes(ByteArray(100_000) { (it % 251).toByte() }) }
         val stored = File(dir, "stored.7z")
-        assertEquals(1, SevenZipSupport.create7z(listOf(blob), stored, CompressLevel.STORE).succeeded)
+        assertEquals(1, SevenZipSupport.create7z(listOf(blob), stored, CompressLevel.NONE).succeeded)
         assertTrue(
             "COPY must not shrink anything (archive ${stored.length()} vs payload ${blob.length()})",
             stored.length() >= blob.length(),
@@ -351,5 +367,124 @@ class SevenZipSupportTest {
         val target = File(dir, "out")
         assertEquals(1, ArchiveOps.extract(out, target, replace = false).succeeded)
         assertEquals("via dispatch", File(target, "f.txt").readText())
+    }
+
+    // ---------- v1.8.0 passwords (AES-256, data-only) ----------
+
+    /** Creates an encrypted 7z fixture through the real creation pipeline. */
+    private fun makeEncryptedSevenZ(out: File, password: CharArray, entries: Map<String, ByteArray>) {
+        SevenZOutputFile(out, password).use { sz ->
+            entries.forEach { (name, content) ->
+                val e = SevenZArchiveEntry()
+                e.name = name
+                sz.putArchiveEntry(e)
+                sz.write(content)
+                sz.closeArchiveEntry()
+            }
+        }
+    }
+
+    @Test
+    fun `encrypted 7z round-trips with the right password`() = runBlocking {
+        val dir = tmp.newFolder("p1")
+        val src = File(dir, "src").apply { mkdirs() }
+        File(src, "one.txt").writeText("secret one")
+        File(File(src, "nested").apply { mkdirs() }, "two.txt").writeText("secret two")
+        val out = File(dir, "locked.7z")
+        val pw = "toad-sparks".toCharArray()
+
+        val r = SevenZipSupport.create7z(listOf(src), out, CompressLevel.FASTEST, password = pw)
+
+        assertEquals(0, r.failed)
+        assertEquals(1, r.succeeded)
+        assertTrue(out.exists() && out.length() > 0)
+        val target = File(dir, "unlocked")
+        val x = SevenZipSupport.extract(out, target, replace = false, password = pw)
+        assertEquals(0, x.failed)
+        assertFalse(x.passwordRequired)
+        assertEquals("secret one", File(target, "src/one.txt").readText())
+        assertEquals("secret two", File(target, "src/nested/two.txt").readText())
+    }
+
+    @Test
+    fun `encrypted 7z headers stay readable without a password`() = runBlocking {
+        val dir = tmp.newFolder("p2")
+        val out = File(dir, "locked.7z")
+        makeEncryptedSevenZ(
+            out, "pw".toCharArray(),
+            mapOf("one.txt" to "hello".toByteArray(), "sub/two.txt" to "world".toByteArray()),
+        )
+        // Data-only encryption: the header (entry list) is unencrypted, so entry counts
+        // and determinate progress still work without any password.
+        assertEquals(2, SevenZipSupport.entryCount(out))
+        assertEquals(2, ArchiveOps.entryCount(out))
+    }
+
+    @Test
+    fun `encrypted 7z without a password reports passwordRequired and publishes nothing`() = runBlocking {
+        val dir = tmp.newFolder("p3")
+        val src = File(dir, "src").apply { mkdirs() }
+        File(src, "one.txt").writeText("secret one")
+        File(src, "two.txt").writeText("secret two")
+        val out = File(dir, "locked.7z")
+        assertEquals(0, SevenZipSupport.create7z(listOf(src), out, CompressLevel.FASTEST, password = "pw".toCharArray()).failed)
+
+        val target = File(dir, "out")
+        val r = SevenZipSupport.extract(out, target, replace = false) // no password
+
+        assertTrue("expected passwordRequired, got $r", r.passwordRequired)
+        assertEquals(0, r.succeeded)
+        assertTrue("passwordRequired must carry a friendly message", r.failures.any { it == SevenZipSupport.PASSWORD_REQUIRED })
+        assertTrue("nothing may be published", target.listFiles().isNullOrEmpty())
+    }
+
+    @Test
+    fun `encrypted 7z with a wrong password fails friendly and publishes nothing`() = runBlocking {
+        val dir = tmp.newFolder("p4")
+        val src = File(dir, "src").apply { mkdirs() }
+        File(src, "one.txt").writeText("secret one")
+        File(src, "two.txt").writeText("secret two")
+        val out = File(dir, "locked.7z")
+        assertEquals(0, SevenZipSupport.create7z(listOf(src), out, CompressLevel.FASTEST, password = "right".toCharArray()).failed)
+
+        val target = File(dir, "out")
+        val r = SevenZipSupport.extract(out, target, replace = false, password = "wrong".toCharArray())
+
+        assertFalse(r.passwordRequired) // a password WAS supplied — it's just wrong
+        assertEquals(0, r.succeeded)
+        assertTrue("expected the friendly wrong-password copy, got $r", r.failures.any { it == SevenZipSupport.WRONG_PASSWORD })
+        assertTrue("nothing may be published", target.listFiles().isNullOrEmpty())
+    }
+
+    @Test
+    fun `empty password behaves like no password on creation`() = runBlocking {
+        val dir = tmp.newFolder("p5")
+        val src = File(dir, "plain.txt").apply { writeText("not encrypted") }
+        val out = File(dir, "plain.7z")
+
+        // Empty char array must NOT turn on encryption.
+        val r = SevenZipSupport.create7z(listOf(src), out, CompressLevel.FASTEST, password = CharArray(0))
+
+        assertEquals(0, r.failed)
+        val target = File(dir, "out")
+        val x = SevenZipSupport.extract(out, target, replace = false) // extractable without any password
+        assertEquals(0, x.failed)
+        assertFalse(x.passwordRequired)
+        assertEquals("not encrypted", File(target, "plain.txt").readText())
+    }
+
+    @Test
+    fun `unencrypted 7z ignores a supplied password on extraction`() = runBlocking {
+        val dir = tmp.newFolder("p6")
+        val f = File(dir, "a.7z")
+        makeSevenZ(f, mapOf("one.txt" to "open".toByteArray()))
+        val target = File(dir, "out").apply { mkdirs() }
+
+        // A password on a plain archive is simply never needed.
+        val r = SevenZipSupport.extract(f, target, replace = false, password = "irrelevant".toCharArray())
+
+        assertEquals(0, r.failed)
+        assertFalse(r.passwordRequired)
+        assertEquals("open", File(target, "one.txt").readText())
     }
 }

@@ -176,4 +176,44 @@ class ArchiveOpsTest {
         val target = File(dir, "out")
         assertEquals(1, ArchiveOps.extract(out, target, replace = false).succeeded)
     }
+
+    // ---------- v1.8.0 password dispatch ----------
+
+    @Test
+    fun `compress with a password creates an encrypted 7z through the dispatcher`() = runBlocking {
+        val dir = tmp.newFolder("pw1")
+        val src = File(dir, "secret.txt").apply { writeText("classified") }
+        val out = File(dir, "locked.7z")
+
+        val r = ArchiveOps.compress(listOf(src), out, ArchiveFormat.SEVEN_Z, CompressLevel.FASTEST, password = "toad".toCharArray())
+
+        assertEquals(0, r.failed)
+        // Opening it without the password asks for one (passwordRequired), with the right one it round-trips.
+        val bare = File(dir, "bare")
+        val rb = ArchiveOps.extract(out, bare, replace = false)
+        assertTrue("expected passwordRequired via dispatch, got $rb", rb.passwordRequired)
+        assertEquals(0, rb.succeeded)
+        val open = File(dir, "open")
+        val ro = ArchiveOps.extract(out, open, replace = false, password = "toad".toCharArray())
+        assertEquals(0, ro.failed)
+        assertEquals("classified", File(open, "secret.txt").readText())
+    }
+
+    @Test
+    fun `compress with a password ignores it for zip`() = runBlocking {
+        val dir = tmp.newFolder("pw2")
+        val src = File(dir, "plain.txt").apply { writeText("zips can't encrypt here") }
+        val out = File(dir, "plain.zip")
+
+        // Signature symmetry only: the password is accepted but not used — java.util.zip
+        // has no encryption, so the archive stays plain and extractable without one.
+        val r = ArchiveOps.compress(listOf(src), out, ArchiveFormat.ZIP, CompressLevel.NORMAL, password = "toad".toCharArray())
+
+        assertEquals(0, r.failed)
+        val target = File(dir, "out")
+        val x = ArchiveOps.extract(out, target, replace = false)
+        assertEquals(0, x.failed)
+        assertFalse(x.passwordRequired)
+        assertEquals("zips can't encrypt here", File(target, "plain.txt").readText())
+    }
 }
