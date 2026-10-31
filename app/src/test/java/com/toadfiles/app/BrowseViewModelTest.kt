@@ -539,6 +539,38 @@ class BrowseViewModelTest {
         }
     }
 
+    /**
+     * A two-entry zip whose SECOND entry's stored bytes are corrupted after writing, so
+     * extraction succeeds for the first entry and then fails the second one's CRC check —
+     * the exact partial-failure shape the delete-after-extract gate must survive.
+     */
+    private fun makeCorruptedSecondEntryZip(out: File) {
+        val good = "good bytes".toByteArray()
+        val bad = "bad bytes!".toByteArray()
+        fun stored(name: String, content: ByteArray) = ZipEntry(name).apply {
+            method = ZipEntry.STORED
+            val crc = java.util.zip.CRC32().apply { update(content) }
+            this.crc = crc.value
+            size = content.size.toLong()
+            compressedSize = content.size.toLong()
+        }
+        ZipOutputStream(FileOutputStream(out)).use { zos ->
+            zos.putNextEntry(stored("good.txt", good))
+            zos.write(good)
+            zos.closeEntry()
+            zos.putNextEntry(stored("bad.txt", bad))
+            zos.write(bad)
+            zos.closeEntry()
+        }
+        // STORED entries keep their bytes verbatim: flip one inside the second entry's
+        // data region so its CRC no longer matches.
+        val bytes = out.readBytes()
+        val idx = bytes.indexOfSublist(bad.toList())
+        check(idx > 0) { "test setup: stored bytes not found" }
+        bytes[idx] = (bytes[idx].toInt() xor 0x5A).toByte()
+        out.writeBytes(bytes)
+    }
+
     @Test
     fun `extractZip without a target keeps extracting into a sibling folder`() = runTest {
         val zip = File(dir, "plain.zip")
@@ -753,6 +785,25 @@ class BrowseViewModelTest {
         assertEquals("hello", File(dir, "pack/one.txt").readText())
         assertEquals(1, vm.state.value.lastTrashed?.size)
         assertTrue(vm.state.value.lastTrashed!!.none { it == zip })
+    }
+
+    @Test
+    fun `delete after extract keeps the archive when an entry fails`() = runTest {
+        container.settingsRepo.setDeleteAfterExtract(true)
+        val zip = File(dir, "partly-broken.zip")
+        makeCorruptedSecondEntryZip(zip)
+        vm.openDir(dir)
+        await { vm.state.value.settings.deleteAfterExtract }
+
+        vm.extractZip(zip)
+
+        // Partial failure: some entries extracted, one failed — the extraction is
+        // incomplete, so the archive must survive (v1.7.4 audit fix).
+        await { vm.state.value.result != null }
+        assertTrue(vm.state.value.result!!.succeeded > 0)
+        assertTrue(vm.state.value.result!!.failed > 0)
+        assertTrue("archive survives a partial failure", zip.exists())
+        assertNull(vm.state.value.lastTrashed)
     }
 
     @Test

@@ -32,6 +32,17 @@ data class OpResult(
             if (failed > 0) append(", ").append(failed).append(" failed")
             if (cancelled) append(" (cancelled)")
         }
+
+    /**
+     * True only when the operation completed fully: nothing failed, nothing was
+     * cancelled and at least one item succeeded. This is the gate the v1.7.3
+     * delete-after-compress / delete-after-extract settings must honor — deleting
+     * sources after a partial failure or an abort would throw away data the user
+     * still needs (the archive/result is incomplete, so the sources are the only
+     * complete copy).
+     */
+    val fullySucceeded: Boolean
+        get() = !cancelled && failed == 0 && succeeded > 0
 }
 
 /**
