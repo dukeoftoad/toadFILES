@@ -18,7 +18,7 @@ import com.toadfiles.app.domain.PathSafety
 import com.toadfiles.app.domain.PropertiesBuilder
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
-import com.toadfiles.app.domain.ZipSupport
+import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +26,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
@@ -81,6 +83,12 @@ data class PendingConflict(val op: OpKind, val targetDir: File, val sources: Lis
 
 enum class OpKind { COPY, MOVE, ZIP_EXTRACT }
 
+/** One-shot UI events — navigation after an extract, … — never replayed as state. */
+sealed interface ExtractEvent {
+    /** A finished extraction published at least one item; the UI can navigate into it. */
+    data class ExtractCompleted(val destination: File) : ExtractEvent
+}
+
 /**
  * Computed detail behind the Browse properties sheet. Folder sizes/counts arrive
  * asynchronously (recursive walk on IO); [error] carries the app's standard error copy
@@ -108,6 +116,10 @@ class BrowseViewModel(
 
     private val _state = MutableStateFlow(BrowseUiState())
     val state: StateFlow<BrowseUiState> = _state
+
+    /** One-shot navigation events (post-extract redirect, …); see [ExtractEvent]. */
+    private val _events = MutableSharedFlow<ExtractEvent>(extraBufferCapacity = 4)
+    val events: SharedFlow<ExtractEvent> = _events
 
     private var searchJob: Job? = null
 
@@ -617,7 +629,16 @@ class BrowseViewModel(
             _state.update { it.copy(toast = e.message) }
             return
         }
-        _state.update { it.copy(progress = label(kind) to OpProgress(0, sources.size, "")) }
+        _state.update {
+            it.copy(
+                progress = label(kind) to OpProgress(
+                    0,
+                    if (kind == OpKind.ZIP_EXTRACT) ArchiveOps.entryCount(sources.first()) ?: 1 else sources.size,
+                    "",
+                ),
+            )
+        }
+        var extractDest: File? = null
         runOp(label(kind), { onP ->
             when (kind) {
                 OpKind.COPY -> FileOps.copy(sources, target, strategy, onP)
@@ -630,11 +651,16 @@ class BrowseViewModel(
                         val parent = target.parentFile ?: target
                         File(parent, PathSafety.uniqueName(parent, target.name))
                     } else target
-                    ZipSupport.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, onProgress = onP)
+                    extractDest = dest
+                    ArchiveOps.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, onProgress = onP)
                 }
             }
         }) { r ->
             if (kind == OpKind.MOVE && r.succeeded > 0) remapMovedFavorites(sources, target)
+            // Post-extract redirect (v1.7.1): navigate into the extracted folder.
+            if (kind == OpKind.ZIP_EXTRACT && r.succeeded > 0) {
+                extractDest?.let { d -> _events.tryEmit(ExtractEvent.ExtractCompleted(d)) }
+            }
         }
         // Extraction doesn't touch the clipboard — don't drop a pending paste batch.
         if (kind != OpKind.ZIP_EXTRACT) container.clipboard.clear()
@@ -712,18 +738,19 @@ class BrowseViewModel(
         val dir = _state.value.dir ?: return
         _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ZipSupport.zip(files, out) { p -> _state.update { it.copy(progress = "Zipping" to p) } }
+            val r = ArchiveOps.zip(files, out) { p -> _state.update { it.copy(progress = "Zipping" to p) } }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }
             load(dir)
         }
     }
 
     /**
-     * Extracts [file] into a folder named after the archive next to it — or, when
-     * [targetName] is set ("Extract to…"), into a folder with that name under the current
-     * directory. The default flow refuses an existing destination (as before); the named
-     * flow asks via the shared conflict dialog: Replace overwrites colliding entries,
-     * Keep both extracts into a uniquely named sibling, Skip merges without overwriting.
+     * Extracts an archive (.zip or .7z) into a folder named after it next to it — or,
+     * when [targetName] is set ("Extract to…"), into a folder with that name under the
+     * current directory. The default flow refuses an existing destination (as before);
+     * the named flow asks via the shared conflict dialog: Replace overwrites colliding
+     * entries, Keep both extracts into a uniquely named sibling, Skip merges without
+     * overwriting.
      */
     fun extractZip(file: File, targetName: String? = null) {
         if (targetName == null) {
@@ -755,14 +782,19 @@ class BrowseViewModel(
         }
     }
 
-    /** Runs the ZipSupport extract with Browse's standard progress/result plumbing. */
+    /** Runs the ArchiveOps extract with Browse's standard progress/result plumbing and
+     *  emits an [ExtractEvent.ExtractCompleted] one-shot so the screen can navigate into
+     *  the extracted folder (v1.7.1 post-extract redirect). */
     private fun startExtract(file: File, target: File) {
-        _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
+        _state.update {
+            it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, ""))
+        }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ZipSupport.extract(file, target, false) { p ->
+            val r = ArchiveOps.extract(file, target, false) { p ->
                 _state.update { it.copy(progress = "Extracting" to p) }
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
+            if (r.succeeded > 0) _events.tryEmit(ExtractEvent.ExtractCompleted(target))
             load(target.parentFile ?: return@launch)
         }
     }

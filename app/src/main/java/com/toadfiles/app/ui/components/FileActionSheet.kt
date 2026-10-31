@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
 
@@ -120,11 +121,13 @@ fun FileActionSheet(
             SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = onCopy)
             SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
 
-            // Organize: Delete / Zip
+            // Organize: Delete / Zip / Extract. Archives toadFILES can extract (.zip,
+            // .7z) get Extract actions instead of "Zip this file" — 7z is extract-only,
+            // zip keeps its compress flow on the selection toolbar and folder rows.
             SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
             if (item.isDir) {
                 SheetRow(Icons.Outlined.Archive, "Zip this folder", onClick = onZip)
-            } else if (item.name.lowercase().endsWith(".zip")) {
+            } else if (ArchiveOps.canExtract(item.name)) {
                 SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = { onExtract?.invoke() })
                 // Destination picking is optional plumbing: hide the row when a screen
                 // can't handle it, like every other non-applicable action here.
