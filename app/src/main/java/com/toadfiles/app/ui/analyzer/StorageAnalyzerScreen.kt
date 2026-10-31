@@ -49,7 +49,7 @@ import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.StorageRoot
-import com.toadfiles.app.ui.browse.PropertiesDetail
+import com.toadfiles.app.ui.components.PropertiesDetail
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.PropertiesSheet
 import com.toadfiles.app.ui.components.filterIconFor

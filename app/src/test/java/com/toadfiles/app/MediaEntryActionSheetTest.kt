@@ -105,7 +105,7 @@ class MediaEntryActionSheetTest {
         assertRowHidden("Extract here")
         assertRowHidden("Extract to…")
         assertRowHidden("Rename")
-        assertRowHidden("Zip this file")
+        assertRowHidden("Compress this file")
         assertRowHidden("Delete")
         assertRowHidden("Copy path")
         assertRowHidden("Show in folder")
@@ -114,7 +114,7 @@ class MediaEntryActionSheetTest {
     @Test
     fun `wired Browse-parity rows appear for entries with a path`() {
         // Categories wires rename/zip/extract-to — those rows must render, plus the
-        // fallback "Zip this file" for a non-archive.
+        // fallback "Compress this file" for a non-archive.
         renderSheet(
             entry("song.mp3", category = FileCategory.AUDIO, data = "/tmp/song.mp3"),
             onRename = {},
@@ -122,7 +122,7 @@ class MediaEntryActionSheetTest {
             onExtractTo = {},
         )
         assertRowShown("Rename")
-        assertRowShown("Zip this file")
+        assertRowShown("Compress this file")
         assertRowShown("Properties")
         // Extract to… only ever rides along "Extract here" (archives only).
         assertRowHidden("Extract to…")

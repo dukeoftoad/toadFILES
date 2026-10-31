@@ -149,9 +149,9 @@ class SevenZipSupportTest {
         assertEquals(6, SevenZipSupport.lzma2Preset(CompressLevel.NORMAL))
         assertEquals(9, SevenZipSupport.lzma2Preset(CompressLevel.MAXIMUM))
         val dictByLevel = mapOf(
-            CompressLevel.FAST to 1 shl 20,
-            CompressLevel.NORMAL to 1 shl 23,
-            CompressLevel.MAXIMUM to 1 shl 26,
+            CompressLevel.FAST to (1 shl 20),
+            CompressLevel.NORMAL to (1 shl 23),
+            CompressLevel.MAXIMUM to (1 shl 26),
         )
         for ((level, expectedDict) in dictByLevel) {
             val m = SevenZipSupport.contentMethodsFor(level).single()

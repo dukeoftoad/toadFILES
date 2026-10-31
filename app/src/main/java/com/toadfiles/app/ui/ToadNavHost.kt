@@ -39,13 +39,20 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import kotlinx.coroutines.launch
 import com.toadfiles.app.ui.about.AboutScreen
+import com.toadfiles.app.ui.analyzer.StorageAnalyzerScreen
 import com.toadfiles.app.ui.browse.BrowseScreen
 import com.toadfiles.app.ui.categories.CategoriesScreen
 import com.toadfiles.app.ui.home.HomeScreen
 import com.toadfiles.app.ui.recent.RecentScreen
+import com.toadfiles.app.ui.settings.AppearanceScreen
 import com.toadfiles.app.ui.settings.SettingsScreen
+import com.toadfiles.app.ui.settings.SettingsViewModel
 import com.toadfiles.app.ui.trash.TrashScreen
 import com.toadfiles.app.ui.storage.StorageScreen
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.domain.NavStyle
 
 object Routes {
     const val HOME = "home"
@@ -56,8 +63,12 @@ object Routes {
     const val ABOUT = "about"
     const val TRASH = "trash"
     const val STORAGE = "storage"
+    const val APPEARANCE = "appearance"
+    const val STORAGE_ANALYZER = "storage_analyzer?root={root}"
 
     fun browse(dir: String): String = "browse?dir=${Uri.encode(dir)}"
+    fun storageAnalyzer(root: String = ""): String =
+        "storage_analyzer?root=${Uri.encode(root)}"
 }
 
 private data class BottomDestination(val route: String, val label: String, val icon: @Composable () -> Unit)
@@ -76,6 +87,11 @@ private fun NavHostController.navigateSingleTop(route: String) {
 
 @Composable
 fun ToadNavHost(navController: NavHostController = rememberNavController()) {
+    // v1.7.3: the two shipped navigation styles ("UX designs"). BOTTOM_BAR keeps the
+    // classic bottom bar + drawer combo; SIDE_MENU is drawer-only (Google Files style).
+    val settingsVm: SettingsViewModel = viewModel(factory = ToadViewModelFactory)
+    val navSettings by settingsVm.settings.collectAsStateWithLifecycle()
+    val navStyle = navSettings.navStyle
     val destinations = listOf(
         BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) },
         BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) },
@@ -143,6 +159,9 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     ) {
     Scaffold(
         bottomBar = {
+            // SIDE_MENU = drawer-only navigation (the "two UX designs" switch);
+            // the classic bottom bar is hidden and the drawer becomes the primary nav.
+            if (navStyle == NavStyle.BOTTOM_BAR) {
             val backStack by navController.currentBackStackEntryAsState()
             val currentRoute = backStack?.destination?.route
             NavigationBar {
@@ -168,6 +187,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         modifier = Modifier.testTag("tab_${dest.label}"),
                     )
                 }
+            }
             }
         }
     ) { padding ->
@@ -215,9 +235,16 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 SettingsScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
-                    onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
                     onOpenAbout = { navController.navigateSingleTop(Routes.ABOUT) },
+                    onOpenAppearance = { navController.navigateSingleTop(Routes.APPEARANCE) },
                     onOpenDrawer = { scope.launch { drawerState.open() } },
+                )
+            }
+
+            composable(Routes.APPEARANCE) {
+                AppearanceScreen(
+                    bottomPadding = padding.calculateBottomPadding(),
+                    onBack = { navController.popBackStack() },
                 )
             }
 
@@ -240,6 +267,19 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
                     onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
+                    onOpenAnalyzer = { navController.navigateSingleTop(Routes.storageAnalyzer()) },
+                )
+            }
+
+            composable(
+                route = Routes.STORAGE_ANALYZER,
+                arguments = listOf(navArgument("root") { type = NavType.StringType; defaultValue = "" }),
+            ) { entry ->
+                StorageAnalyzerScreen(
+                    bottomPadding = padding.calculateBottomPadding(),
+                    onBack = { navController.popBackStack() },
+                    onOpenFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
+                    initialRoot = entry.arguments?.getString("root").orEmpty(),
                 )
             }
         }

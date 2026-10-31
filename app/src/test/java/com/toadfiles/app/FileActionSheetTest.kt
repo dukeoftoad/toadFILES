@@ -122,7 +122,7 @@ class FileActionSheetTest {
     @Test
     fun `7z file sheet shows Extract here instead of Compress this file`() {
         // The 7z twin keeps the same honest-visibility promise.
-        renderSheet(fileItem("archive.7z", isDir = false))
+        renderSheet(fileItem("archive.7z", isDir = false), onExtract = {})
         assertRowShown("Extract here")
         assertRowHidden("Compress this file")
     }
@@ -130,10 +130,10 @@ class FileActionSheetTest {
     @Test
     fun `Extract here is hidden when the screen cannot extract`() {
         // v1.7.3: an unwired extract (e.g. a media row without an on-disk path) must not
-        // hint at the action — the row hides, and a zippable file falls back to "Zip this file".
+        // hint at the action — the row hides, and a zippable file falls back to "Compress this file".
         renderSheet(fileItem("archive.zip", isDir = false), onExtract = null)
         assertRowHidden("Extract here")
-        assertRowShown("Zip this file")
+        assertRowShown("Compress this file")
     }
 
     @Test
@@ -148,7 +148,7 @@ class FileActionSheetTest {
         assertRowHidden("Rename")
         assertRowHidden("Copy to…")
         assertRowHidden("Move to…")
-        assertRowHidden("Zip this file")
+        assertRowHidden("Compress this file")
         assertRowHidden("Add favorite")
         assertRowHidden("Copy path")
         assertRowHidden("Open with…")

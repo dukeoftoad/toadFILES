@@ -6,7 +6,9 @@ import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.toFileItem
+import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.ConflictStrategy
@@ -30,6 +32,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.coroutines.coroutineContext
@@ -332,7 +335,7 @@ class CategoriesViewModel(
     private fun zipTo(files: List<File>, out: File) {
         _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.zip(files, out, onP) },
+            op = { onP -> ArchiveOps.compress(files, out, ArchiveFormat.ZIP, CompressLevel.NORMAL, onP) },
             onProgress = { p -> _state.update { it.copy(progress = "Zipping" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }
@@ -410,12 +413,29 @@ class CategoriesViewModel(
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
+                if (r.succeeded > 0) trashArchiveAfterExtract(file)
                 // Re-list the open category + summaries, like confirmDelete does, so any
                 // newly scanned files show up where the user is looking.
                 _state.value.selected?.let { open(it) }
                 refresh()
             },
         )
+    }
+
+    /**
+     * v1.7.3 delete-after-extract (media flows): after a successful extraction, honor
+     * the setting by moving the archive to the toadFILES trash (undoable) — the same
+     * convention BrowseViewModel.trashSourcesAfterArchiveOp follows.
+     */
+    private fun trashArchiveAfterExtract(file: File) {
+        viewModelScope.launch {
+            if (!container.settingsRepo.settings.first().deleteAfterExtract) return@launch
+            if (!file.exists()) return@launch
+            val roots = container.fileRepo.roots().map { it.dir }
+            if (Trash.trash(listOf(file), roots).failureCount > 0) {
+                requestToast("Could not delete the archive")
+            }
+        }
     }
 
     fun cancelOp() = ops.cancel { _state.update { it.copy(progress = null) } }

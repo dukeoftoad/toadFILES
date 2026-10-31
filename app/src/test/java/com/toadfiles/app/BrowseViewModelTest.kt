@@ -75,6 +75,28 @@ class BrowseViewModelTest {
         container = com.toadfiles.app.AppContainer(context)
         vm = BrowseViewModel(container, ioDispatcher = dispatcher)
         dir = File(context.cacheDir, "browse-${System.nanoTime()}").apply { mkdirs() }
+        // The preferencesDataStore delegate is a process-wide singleton, so settings
+        // written by an earlier test in THIS class leak into later ones (v1.7.3 added
+        // many settings-writing tests). Reset every key this VM reads to its shipped
+        // default so each test starts from the v1.7.2 baseline.
+        kotlinx.coroutines.runBlocking {
+            with(container.settingsRepo) {
+                setSortMode(com.toadfiles.app.domain.SortMode.NAME)
+                setSortOrder(com.toadfiles.app.domain.SortOrder.ASC)
+                setShowHidden(false)
+                setContentSearch(false)
+                setBrowseLayout(com.toadfiles.app.domain.BrowseLayout.LIST)
+                setZipOpenAction(com.toadfiles.app.domain.ZipOpenAction.MENU)
+                setSevenZipOpenAction(com.toadfiles.app.domain.SevenZipOpenAction.MENU)
+                setNavStyle(com.toadfiles.app.domain.NavStyle.BOTTOM_BAR)
+                setBackKeyAction(com.toadfiles.app.domain.BackKeyAction.PARENT)
+                setDeleteAfterCompress(false)
+                setDeleteAfterExtract(false)
+                setAbortConfirm(true)
+                setOverwriteConfirm(true)
+                setArchiveFolder("")
+            }
+        }
     }
 
     @After
@@ -707,8 +729,10 @@ class BrowseViewModelTest {
         vm.confirmZip("pack")
 
         await { vm.state.value.result != null && !f.exists() }
-        // App delete convention: trash (undoable), not a permanent erase.
-        assertEquals(listOf(f), vm.state.value.lastTrashed)
+        // App delete convention: trash (undoable), not a permanent erase. lastTrashed
+        // carries the trash-side destinations (what undo restores from).
+        assertEquals(1, vm.state.value.lastTrashed?.size)
+        assertTrue(vm.state.value.lastTrashed!!.none { it == f })
         assertTrue(File(dir, "pack.zip").exists())
 
         vm.undoDelete()
@@ -727,7 +751,8 @@ class BrowseViewModelTest {
 
         await { vm.state.value.result != null && !zip.exists() }
         assertEquals("hello", File(dir, "pack/one.txt").readText())
-        assertEquals(listOf(zip), vm.state.value.lastTrashed)
+        assertEquals(1, vm.state.value.lastTrashed?.size)
+        assertTrue(vm.state.value.lastTrashed!!.none { it == zip })
     }
 
     @Test
@@ -799,7 +824,7 @@ class BrowseViewModelTest {
     // -------------------------------------------------------------------------
 
     @Test
-    fun `archive tap action defaults to the v1.7.1 menu for both formats`() = runTest {
+    fun `archive tap action defaults to the menu for both formats`() = runTest {
         assertEquals(ArchiveTapAction.SHOW_MENU, vm.archiveTapAction("photos.zip"))
         assertEquals(ArchiveTapAction.SHOW_MENU, vm.archiveTapAction("backup.7z"))
     }
