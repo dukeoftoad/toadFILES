@@ -100,6 +100,7 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.CompressDialog
+import com.toadfiles.app.ui.components.PasswordPromptDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.FileActionSheet
@@ -550,9 +551,11 @@ fun BrowseScreen(
             onDismiss = { vm.dismissRename() },
         )
     }
-    // Compress dialog (v1.7.3): format (ZIP / 7z), compression level, target name and
-    // destination (archive-folder setting or current folder) — archives are never
-    // created under a silent auto name.
+    // Compress dialog (v1.8.0, ZArchiver-style): format and compression level dropdowns,
+    // 7z-only data encryption with a password pair, split-into-volumes (with Custom…),
+    // delete-sources and separate-archive checkboxes, target name and destination
+    // (archive-folder setting or current folder) — archives are never created under a
+    // silent auto name.
     state.pendingZipFiles?.let { files ->
         CompressDialog(
             count = files.size,
@@ -560,9 +563,24 @@ fun BrowseScreen(
             destination = state.pendingZipDestination,
             format = state.pendingZipFormat,
             level = state.pendingZipLevel,
+            encrypted = state.pendingZipEncrypted,
+            password = state.pendingZipPassword,
+            passwordConfirm = state.pendingZipPasswordConfirm,
+            volumeBytes = state.pendingZipVolumeBytes,
+            volumeCustom = state.pendingZipVolumeCustom,
+            volumeCustomText = state.pendingZipVolumeCustomText,
+            deleteSources = state.pendingZipDeleteSources,
+            separate = state.pendingZipSeparate,
             onNameChange = { vm.setZipName(it) },
             onFormatChange = { vm.setZipFormat(it) },
             onLevelChange = { vm.setZipLevel(it) },
+            onEncryptedChange = { vm.setZipEncrypted(it) },
+            onPasswordChange = { vm.setZipPassword(it) },
+            onPasswordConfirmChange = { vm.setZipPasswordConfirm(it) },
+            onVolumeChange = { vm.setZipVolume(it) },
+            onVolumeCustomTextChange = { vm.setZipVolumeCustomText(it) },
+            onDeleteSourcesChange = { vm.setZipDeleteSources(it) },
+            onSeparateChange = { vm.setZipSeparate(it) },
             onConfirm = { vm.confirmZip(state.pendingZipName) },
             onDismiss = { vm.dismissZipDialog() },
         )
@@ -615,6 +633,15 @@ fun BrowseScreen(
                 vm.extractZip(archive, targetName = it)
             },
             onDismiss = { pendingExtractTo = null },
+        )
+    }
+    // Encrypted archive: the extract came back passwordRequired — ask, then retry
+    // with the same target dir / replace semantics (v1.8.0).
+    state.pendingPasswordFor?.let { archive ->
+        PasswordPromptDialog(
+            archiveName = archive.name,
+            onRetry = { pw -> vm.retryExtractWithPassword(pw) },
+            onCancel = { vm.dismissPasswordPrompt() },
         )
     }
     pendingInstallApk?.let { apk ->

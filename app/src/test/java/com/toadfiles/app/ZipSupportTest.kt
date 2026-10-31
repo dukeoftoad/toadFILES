@@ -120,7 +120,7 @@ class ZipSupportTest {
 
     @Test
     fun `compress levels map to deflater constants`() {
-        assertEquals(Deflater.NO_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.STORE))
+        assertEquals(Deflater.NO_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.NONE))
         assertEquals(Deflater.BEST_SPEED, ZipSupport.deflaterLevel(CompressLevel.FAST))
         assertEquals(Deflater.DEFAULT_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.NORMAL))
         assertEquals(Deflater.BEST_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.MAXIMUM))
@@ -133,7 +133,7 @@ class ZipSupportTest {
         val src = File(dir, "blob.bin").apply { writeBytes(payload) }
         val out = File(dir, "stored.zip")
 
-        val r = ZipSupport.zip(listOf(src), out, CompressLevel.STORE)
+        val r = ZipSupport.zip(listOf(src), out, CompressLevel.NONE)
 
         assertEquals(1, r.succeeded)
         ZipFile(out).use { zf ->

@@ -141,7 +141,7 @@ class SevenZipSupportTest {
     @Test
     fun `compress levels map to 7z methods and LZMA2 presets`() {
         // STORE stores verbatim via the COPY codec — no LZMA2 preset at all.
-        val store = SevenZipSupport.contentMethodsFor(CompressLevel.STORE)
+        val store = SevenZipSupport.contentMethodsFor(CompressLevel.NONE)
         assertEquals(SevenZMethod.COPY, store.single().method)
         assertNull(store.single().options)
         // The compressing levels map to the xz presets 1 / 6 / 9 (dict 1 / 8 / 64 MiB).
@@ -217,7 +217,7 @@ class SevenZipSupportTest {
         // least as large as the payload itself.
         val blob = File(dir, "blob.bin").apply { writeBytes(ByteArray(100_000) { (it % 251).toByte() }) }
         val stored = File(dir, "stored.7z")
-        assertEquals(1, SevenZipSupport.create7z(listOf(blob), stored, CompressLevel.STORE).succeeded)
+        assertEquals(1, SevenZipSupport.create7z(listOf(blob), stored, CompressLevel.NONE).succeeded)
         assertTrue(
             "COPY must not shrink anything (archive ${stored.length()} vs payload ${blob.length()})",
             stored.length() >= blob.length(),
