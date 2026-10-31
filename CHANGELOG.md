@@ -4,6 +4,37 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.8.0] — 2026-10-31
+
+The ZArchiver-parity archive release: encryption, volumes and the full
+"Create archive" dialog.
+
+### Added
+- **Password-protected 7z archives (AES-256)**: the Create archive dialog
+  offers "Data (AES-256)" encryption for 7z — password + confirm fields with
+  a show/hide toggle. Encrypted archive names stay readable (data-only
+  encryption, like ZArchiver's "Data" option). Extracting an encrypted 7z
+  prompts for the password and retries; a wrong password says so and never
+  publishes anything. Encrypted ZIP stays unsupported (honest message) —
+  only 7z encryption is offered.
+- **Split into volumes**: create archives as "name.001, name.002, …" sets
+  (No / 5 MB / 10 MB / 50 MB / 100 MB / 700 MB / 1 GB / custom). Volume
+  sets are extracted by tapping the ".001" file — zip volumes and 7z volumes
+  both work; a set with a missing volume fails before anything is written.
+- **Six ZArchiver compression levels**: No compression, Fastest, Fast,
+  Normal, Maximum, Ultra (7z Ultra uses a 128 MiB dictionary; zip's Ultra
+  equals Maximum because deflate caps at level 9).
+- **Full ZArchiver-style Create archive dialog**: format and level
+  dropdowns, encryption selector, password pair, volume size selector, a
+  "Delete source files" checkbox (pre-filled from the setting) and
+  "Create separate archive for each item" for multi-select.
+- Volume sets created by other apps (ZArchiver, 7-Zip) are detected and
+  extracted too.
+
+### Fixed
+- Tapping a ".7z.001" volume start now honors the 7z open-action setting
+  instead of falling into the zip branch.
+
 ## [1.7.5] — 2026-10-31
 
 Closing the v1.7.4 audit's known gaps.

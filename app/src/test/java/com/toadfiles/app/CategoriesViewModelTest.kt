@@ -341,7 +341,7 @@ class CategoriesViewModelTest {
             assertEquals(com.toadfiles.app.domain.CompressLevel.NORMAL, vm.state.value.pendingZipLevel)
 
             vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
-            vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.STORE)
+            vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.NONE)
             vm.confirmZip("packed")
             assertNull(vm.state.value.pendingZipFiles)
             await { vm.state.value.result != null }
@@ -361,6 +361,9 @@ class CategoriesViewModelTest {
             val a = File(root, "a.txt").apply { writeText("aaa") }
 
             vm.requestZip(listOf(a))
+            // The checkbox initializes asynchronously from the persisted setting
+            // (DataStore read); wait for it before confirming.
+            await { vm.state.value.pendingZipDeleteSources }
             vm.confirmZip("packed")
             await { vm.state.value.result != null }
             await { !a.exists() }
@@ -381,9 +384,213 @@ class CategoriesViewModelTest {
             val a = File(root, "a.txt").apply { writeText("aaa") }
 
             vm.requestZip(listOf(a))
+            await { vm.state.value.pendingZipDestination != null }
             vm.confirmZip("packed")
             await { vm.state.value.result != null }
             assertTrue(a.exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    // ---------- v1.8.0: encryption, volumes, per-run delete, separate archives ----------
+
+    @Test
+    fun `unchecking delete sources overrides the setting and keeps the sources`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipoverride-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            container.settingsRepo.setDeleteAfterCompress(true)
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            await { vm.state.value.pendingZipDeleteSources }
+            vm.setZipDeleteSources(false) // the per-run override
+            vm.confirmZip("packed")
+            await { vm.state.value.result != null }
+            assertTrue(File(root, "packed.zip").exists())
+            assertTrue("the checkbox wins over the persisted setting", a.exists())
+
+            container.settingsRepo.setDeleteAfterCompress(false)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `switching the format to ZIP resets encryption and passwords`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipreset-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
+            vm.setZipEncrypted(true)
+            vm.setZipPassword("secret")
+            vm.setZipPasswordConfirm("secret")
+            assertTrue(vm.state.value.pendingZipEncrypted)
+
+            vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.ZIP)
+            // commons-compress cannot create encrypted zip: ZIP forces encryption off.
+            assertFalse(vm.state.value.pendingZipEncrypted)
+            assertEquals("", vm.state.value.pendingZipPassword)
+            assertEquals("", vm.state.value.pendingZipPasswordConfirm)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `encrypted 7z requires a non-blank password and matching confirmation`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zippw-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+
+            vm.requestZip(listOf(a))
+            vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
+            vm.setZipEncrypted(true)
+            vm.confirmZip("vault")
+
+            // Blank password: the dialog stays open, the user is told why.
+            assertEquals("Enter a password", vm.state.value.toast)
+            assertNotNull(vm.state.value.pendingZipFiles)
+
+            vm.setZipPassword("one")
+            vm.setZipPasswordConfirm("two")
+            vm.confirmZip("vault")
+            assertEquals("Passwords do not match", vm.state.value.toast)
+            assertNotNull(vm.state.value.pendingZipFiles)
+            assertFalse(File(root, "vault.7z").exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `separate archive per item creates one archive per source and aggregates results`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipsep-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+            val b = File(root, "b.txt").apply { writeText("bbb") }
+
+            vm.requestZip(listOf(a, b))
+            vm.setZipSeparate(true)
+            vm.confirmZip("ignored-in-separate-mode")
+
+            // One archive per source, named after the source, one combined result.
+            await {
+                vm.state.value.result != null &&
+                    File(root, "a.zip").exists() && File(root, "b.zip").exists()
+            }
+            assertEquals(2, vm.state.value.result!!.succeeded)
+            assertEquals(0, vm.state.value.result!!.failed)
+            assertEquals("Zipping", vm.state.value.resultTitle)
+            // deleteSources is off here: both sources survive.
+            assertTrue(a.exists() && b.exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `resolveVolumeBytes maps presets and custom text`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipvol-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            vm.requestZip(listOf(File(root, "a.txt")))
+            // Preset
+            vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.MB5)
+            assertEquals(5L * 1024 * 1024, vm.resolveVolumeBytes())
+            // Custom, valid
+            vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.CUSTOM)
+            vm.setZipVolumeCustomText("5")
+            assertEquals(5L * 1024 * 1024, vm.resolveVolumeBytes())
+            // Custom, invalid: blank / non-numeric / non-positive all mean "no split"
+            vm.setZipVolumeCustomText("")
+            assertNull(vm.resolveVolumeBytes())
+            vm.setZipVolumeCustomText("abc")
+            assertNull(vm.resolveVolumeBytes())
+            vm.setZipVolumeCustomText("0")
+            assertNull(vm.resolveVolumeBytes())
+            // Back to a preset after Custom clears the draft text
+            vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.NONE)
+            assertNull(vm.resolveVolumeBytes())
+            assertEquals("", vm.state.value.pendingZipVolumeCustomText)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * TODO(integration): needs Agent 1's domain (AES-256 7z creation + password-aware
+     * extraction). Round-trips the produced archive: extracting it without a password
+     * must come back passwordRequired, with the right password must succeed. Enable
+     * when the domain contract has landed.
+     */
+    @Test
+    fun `confirmZip passes the password to ArchiveOps for an encrypted 7z`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipcrypt-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("seven secrets") }
+
+            vm.requestZip(listOf(a))
+            vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
+            vm.setZipEncrypted(true)
+            vm.setZipPassword("hunter2")
+            vm.setZipPasswordConfirm("hunter2")
+            vm.confirmZip("vault")
+
+            await { vm.state.value.result != null && File(root, "vault.7z").exists() }
+            assertEquals(0, vm.state.value.result!!.failed)
+
+            // The produced archive really is encrypted: no password → passwordRequired.
+            val noPw = com.toadfiles.app.domain.ArchiveOps.extract(
+                File(root, "vault.7z"), File(root, "noluck"), replace = false,
+            )
+            assertTrue(noPw.passwordRequired)
+
+            // With the password it extracts to the original content.
+            val ok = com.toadfiles.app.domain.ArchiveOps.extract(
+                File(root, "vault.7z"), File(root, "unlocked"), replace = false,
+                password = "hunter2".toCharArray(),
+            )
+            assertEquals(1, ok.succeeded)
+            assertEquals("seven secrets", File(root, "unlocked/a.txt").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * TODO(integration): same domain dependency; covers the Categories extract
+     * password-prompt flow (prompt state + retry with the same target dir).
+     */
+    @Test
+    fun `passwordRequired opens the prompt and retry extracts with the password`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zipprompt-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val src = File(root, "a.txt").apply { writeText("secret stuff") }
+            val vault = File(root, "vault.7z")
+            com.toadfiles.app.domain.ArchiveOps.compress(
+                listOf(src), vault, com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z,
+                password = "hunter2".toCharArray(),
+            )
+
+            vm.extractZip(vault)
+            await { vm.state.value.pendingPasswordFor != null }
+            assertNull("a password ask is not a failure", vm.state.value.result)
+            assertEquals(vault, vm.state.value.pendingPasswordRetry!!.archive)
+
+            vm.retryExtractWithPassword("hunter2")
+            await { vm.state.value.result != null }
+            assertNull(vm.state.value.pendingPasswordFor)
+            assertEquals(0, vm.state.value.result!!.failed)
+            assertEquals("secret stuff", File(root, "vault/a.txt").readText())
         } finally {
             root.deleteRecursively()
         }

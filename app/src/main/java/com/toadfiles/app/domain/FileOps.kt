@@ -24,6 +24,10 @@ data class OpResult(
     val failed: Int,
     val cancelled: Boolean = false,
     val failures: List<String> = emptyList(),
+    /** v1.8.0: the archive needs a password and none (usable) was supplied — the
+     *  caller should prompt and retry, not treat it as a hard failure. Only the 7z
+     *  pipeline sets it (encrypted ZIP stays a plain failure: prompting can't help). */
+    val passwordRequired: Boolean = false,
 ) {
     val summary: String
         get() = buildString {

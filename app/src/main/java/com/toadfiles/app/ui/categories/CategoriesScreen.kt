@@ -90,6 +90,7 @@ import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
 import com.toadfiles.app.ui.components.CompressDialog
+import com.toadfiles.app.ui.components.PasswordPromptDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.NameInputDialog
 import com.toadfiles.app.ui.components.PropertiesSheet
@@ -376,8 +377,10 @@ fun CategoriesScreen(
         )
     }
 
-    // Compress dialog (v1.7.5, Browse parity): format (ZIP / 7z), compression level,
-    // target name and destination — archives are never created under a silent auto name.
+    // Compress dialog (v1.8.0, ZArchiver-style — Browse parity): format and compression
+    // level dropdowns, 7z-only data encryption with a password pair, split-into-volumes
+    // (with Custom…), delete-sources and separate-archive checkboxes, target name and
+    // destination — archives are never created under a silent auto name.
     state.pendingZipFiles?.let { files ->
         CompressDialog(
             count = files.size,
@@ -385,9 +388,24 @@ fun CategoriesScreen(
             destination = state.pendingZipDestination,
             format = state.pendingZipFormat,
             level = state.pendingZipLevel,
+            encrypted = state.pendingZipEncrypted,
+            password = state.pendingZipPassword,
+            passwordConfirm = state.pendingZipPasswordConfirm,
+            volumeBytes = state.pendingZipVolumeBytes,
+            volumeCustom = state.pendingZipVolumeCustom,
+            volumeCustomText = state.pendingZipVolumeCustomText,
+            deleteSources = state.pendingZipDeleteSources,
+            separate = state.pendingZipSeparate,
             onNameChange = { vm.setZipName(it) },
             onFormatChange = { vm.setZipFormat(it) },
             onLevelChange = { vm.setZipLevel(it) },
+            onEncryptedChange = { vm.setZipEncrypted(it) },
+            onPasswordChange = { vm.setZipPassword(it) },
+            onPasswordConfirmChange = { vm.setZipPasswordConfirm(it) },
+            onVolumeChange = { vm.setZipVolume(it) },
+            onVolumeCustomTextChange = { vm.setZipVolumeCustomText(it) },
+            onDeleteSourcesChange = { vm.setZipDeleteSources(it) },
+            onSeparateChange = { vm.setZipSeparate(it) },
             onConfirm = { vm.confirmZip(state.pendingZipName) },
             onDismiss = { vm.dismissZipDialog() },
         )
@@ -437,6 +455,16 @@ fun CategoriesScreen(
         onCancel = { vm.cancelOp() },
         onDismissResult = { vm.dismissResult() },
     )
+
+    // Encrypted archive: the extract came back passwordRequired — ask, then retry
+    // with the same target dir / overwrite semantics (v1.8.0).
+    state.pendingPasswordFor?.let { archive ->
+        PasswordPromptDialog(
+            archiveName = archive.name,
+            onRetry = { pw -> vm.retryExtractWithPassword(pw) },
+            onCancel = { vm.dismissPasswordPrompt() },
+        )
+    }
 }
 
 /** One common mime for a mixed batch of media entries (shareUris needs a single type). */

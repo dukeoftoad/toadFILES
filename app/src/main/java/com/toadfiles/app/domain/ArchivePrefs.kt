@@ -19,12 +19,15 @@ enum class NavStyle { BOTTOM_BAR, SIDE_MENU }
 enum class BackKeyAction { PARENT, EXIT }
 
 /**
- * Compression level offered by both zip and 7z creation (ZArchiver-style basics).
- * Mapped to Deflater level / LZMA2 preset by the archive pipeline.
+ * Compression level offered by both zip and 7z creation — the six ZArchiver levels
+ * (v1.8.0). Mapped to Deflater level (zip) / LZMA2 preset (7z) by the archive pipeline.
+ * Not persisted in settings, so renaming the entries is a clean break.
  */
 enum class CompressLevel(val label: String) {
-    STORE("Store (no compression)"),
+    NONE("No compression"),
+    FASTEST("Fastest"),
     FAST("Fast"),
-    NORMAL("Normal (default)"),
-    MAXIMUM("Maximum");
+    NORMAL("Normal"),
+    MAXIMUM("Maximum"),
+    ULTRA("Ultra"),
 }
