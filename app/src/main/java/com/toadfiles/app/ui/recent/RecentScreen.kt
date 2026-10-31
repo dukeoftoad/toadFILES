@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
@@ -45,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -145,17 +145,24 @@ fun RecentScreen(
                             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
                         }
                     },
-                    actions = {
-                        IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
-                    },
+                    // v1.7.3: the toolbar Refresh button was replaced by pull-to-refresh
+                    // on the list below (works on the empty state too).
                 )
             }
         },
     ) { padding ->
+        // Pull-to-refresh (v1.7.3) replaces the old toolbar Refresh button: drag down
+        // on the list — or the empty state — to re-query the media library.
+        PullToRefreshBox(
+            isRefreshing = state.loading,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
         ) {
             // Type filter tabs (All + every category) render independently of the result
             // state: picking a filter with no results must never hide the only way back
@@ -244,6 +251,7 @@ fun RecentScreen(
                     item { Spacer(Modifier.height(16.dp)) }
                 }
             }
+        }
         }
     }
 

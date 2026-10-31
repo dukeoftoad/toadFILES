@@ -66,6 +66,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,6 +85,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
@@ -127,8 +129,10 @@ fun BrowseScreen(
 
     var pendingInstallApk by remember { mutableStateOf<File?>(null) }
     var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
-    /** An archive (.zip/.7z) the user tapped: offer extract-or-open instead of an
-     *  open-with intent (v1.7.1 fix: archives never fall through to ACTION_VIEW). */
+    /** An archive (.zip/.7z) the user tapped: offered the extract-or-open dialog
+     *  instead of an open-with intent (v1.7.1 fix: archives never fall through to
+     *  ACTION_VIEW). v1.7.3: the dialog only shows for tap action MENU — EXTRACT and
+     *  OPEN_WITH (Settings → Archive actions) are dispatched directly in openItem. */
     var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
     /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
@@ -164,6 +168,14 @@ fun BrowseScreen(
     val selectionMode = state.selection.isNotEmpty()
     BackHandler(enabled = selectionMode) { vm.clearSelection() }
     BackHandler(enabled = !selectionMode) {
+        // v1.7.3 back-key setting: EXIT leaves Browse from any depth — the same thing
+        // the old back-at-root behavior did (onNavigateUp → popBackStack; Browse is a
+        // bottom-bar tab, so popping with an empty stack stays put, matching the
+        // previous root behavior exactly). PARENT walks up one folder per press.
+        if (state.settings.backKeyAction == BackKeyAction.EXIT) {
+            onNavigateUp()
+            return@BackHandler
+        }
         val dir = state.dir
         val canGoUp = dir != null && state.breadcrumbs.size > 1 && dir.parentFile?.canRead() == true
         val parent = dir?.parentFile
@@ -348,6 +360,14 @@ fun BrowseScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+                // Pull-to-refresh (v1.7.3): drag down anywhere on the listing (or the
+                // empty state) to re-list the current folder. A refresh is a plain
+                // folder reload — like every other load() it clears an active search.
+                PullToRefreshBox(
+                    isRefreshing = state.loading,
+                    onRefresh = { vm.refresh() },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                 val visible = state.items.filter { state.filterMode.matches(it.name) }
                 Column(Modifier.fillMaxSize()) {
                     if (!selectionMode) {
@@ -405,7 +425,17 @@ fun BrowseScreen(
                         selectionMode -> vm.toggleSelection(item)
                         item.isDir -> vm.openDir(item.file)
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
-                        ArchiveOps.canExtract(item.name) -> pendingArchiveTap = item.file
+                        ArchiveOps.canExtract(item.name) -> when (vm.archiveTapAction(item.name)) {
+                            // MENU: the v1.7.1 extract-or-open dialog (default).
+                            ArchiveTapAction.SHOW_MENU -> pendingArchiveTap = item.file
+                            // EXTRACT: the same pipeline as the dialog / "Extract here"
+                            // menu entry, including its target-exists handling.
+                            ArchiveTapAction.EXTRACT -> vm.extractZip(item.file)
+                            // OPEN_WITH: pre-v1.7.1 behavior — straight ACTION_VIEW.
+                            ArchiveTapAction.OPEN_WITH -> if (!Intents.openFile(context, item.file)) {
+                                vm.requestToast("No app can open this file")
+                            }
+                        }
                         else -> if (!Intents.openFile(context, item.file)) {
                             vm.requestToast("No app can open this file")
                         }
@@ -483,6 +513,7 @@ fun BrowseScreen(
                         .padding(bottom = 24.dp),
                 )
             }
+                }
         }
     }
 
