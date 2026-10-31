@@ -21,7 +21,6 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { container.settingsRepo.setThemeMode(mode) }
     fun setDynamic(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setDynamicColor(enabled) }
     fun setAccent(accent: AccentColor) = viewModelScope.launch { container.settingsRepo.setAccentColor(accent) }
-    fun setDiagnostics(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setDiagnosticsEnabled(enabled) }
     fun setShowHidden(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setShowHidden(enabled) }
     fun setSort(mode: SortMode) = viewModelScope.launch {
         container.settingsRepo.setSortMode(mode)

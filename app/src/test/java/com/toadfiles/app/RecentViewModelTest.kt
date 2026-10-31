@@ -6,6 +6,7 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.ui.recent.RecentViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -20,6 +21,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * Recent tab state machine: entries load from the media library, multi-select toggles by
@@ -140,5 +145,89 @@ class RecentViewModelTest {
     fun `requestDelete with nothing is a no-op`() = runTest {
         vm.requestDelete(emptyList())
         assertNull(vm.state.value.pendingDelete)
+    }
+
+    /** Minimal archive builder (same shape as ZipSupportTest's private helper). */
+    private fun makeZip(out: File, entries: Map<String, ByteArray>) {
+        ZipOutputStream(FileOutputStream(out)).use { zos ->
+            entries.forEach { (name, content) ->
+                zos.putNextEntry(ZipEntry(name))
+                zos.write(content)
+                zos.closeEntry()
+            }
+        }
+    }
+
+    @Test
+    fun `extractZip runs the real op and surfaces progress then result`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "recent-extract-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val zip = File(root, "bundle.zip")
+            makeZip(zip, mapOf("inner.txt" to "zipbody".toByteArray()))
+
+            vm.extractZip(zip)
+
+            // The op shows progress, then finishes with an honest result and the files on disk.
+            await { vm.state.value.result != null }
+            assertNull(vm.state.value.progress)
+            assertEquals("Extracting", vm.state.value.resultTitle)
+            assertEquals(1, vm.state.value.result!!.succeeded)
+            assertEquals(0, vm.state.value.result!!.failed)
+            assertEquals("zipbody", File(root, "bundle/inner.txt").readText())
+
+            vm.dismissResult()
+            assertNull(vm.state.value.result)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `extractZip refuses an existing destination folder with a toast`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "recent-extract-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val zip = File(root, "bundle.zip")
+            makeZip(zip, mapOf("inner.txt" to "zipbody".toByteArray()))
+            File(root, "bundle").mkdirs()
+
+            vm.extractZip(zip)
+
+            assertEquals(
+                "A folder named \"bundle\" already exists. Rename or move it before extracting.",
+                vm.state.value.toast,
+            )
+            assertNull(vm.state.value.result)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `cancelOp cancels the shared op job before the extract runs`() = runTest {
+        // A queued (not unconfined) dispatcher freezes the op before it starts, so the
+        // cancel below is deterministic: the helper's job is cancelled before the extract
+        // body can do any work — overlay dismissed, no result, nothing extracted.
+        val queued = StandardTestDispatcher(testScheduler)
+        val slowVm = RecentViewModel(container, ioDispatcher = queued)
+        val root = File(container.fileRepo.primaryRoot(), "recent-cancel-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            testScheduler.advanceUntilIdle() // settle init's refresh
+            val zip = File(root, "bundle.zip")
+            makeZip(zip, mapOf("inner.txt" to "zipbody".toByteArray()))
+
+            slowVm.extractZip(zip)
+            assertTrue(slowVm.state.value.progress != null) // overlay up pre-op (seed is synchronous)
+
+            slowVm.cancelOp()
+            assertNull(slowVm.state.value.progress)
+            testScheduler.advanceUntilIdle() // the cancelled job never starts the extract
+            assertNull(slowVm.state.value.result)
+            assertFalse(File(root, "bundle").exists())
+        } finally {
+            root.deleteRecursively()
+        }
     }
 }

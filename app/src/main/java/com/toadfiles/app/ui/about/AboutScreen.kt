@@ -14,8 +14,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,14 +24,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -40,16 +43,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.util.Intents
 
 /**
  * Full About page. Replaces the tiny About card in Settings: it carries everything a
  * privacy-conscious user expects from a file manager — version/build, real storage
- * numbers, per-category counts, the OSS credits, an in-app changelog, the diagnostics
- * toggle, and a "clear locally-shared copies" action.
+ * numbers, per-category counts, a user-initiated update check against GitHub Releases,
+ * the OSS credits, and an in-app changelog.
  *
  * Layout: a vertically scrolling column of cards. One concern per card so the page stays
- * navigable on small screens; the diagnostics toggle is in its own card next to the
- * privacy promise it controls.
+ * navigable on small screens. The update check is strictly opt-in (no background polling,
+ * no auto-check at startup); a downloaded update APK lands in the app-private download
+ * dir and is handed to the system installer as a DownloadManager content URI.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +64,7 @@ fun AboutScreen(
     vm: AboutViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -101,9 +107,11 @@ fun AboutScreen(
                     VersionRow("Package", BuildConfig.APPLICATION_ID)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "toadFILES has no INTERNET permission by design. It never uploads files, " +
-                            "favorites, settings or analytics. Sharing hands a copy to the app you " +
-                            "pick from Android's standard share sheet — toadFILES itself never sends anything.",
+                        "toadFILES goes online in exactly one case: when you tap \"Check for " +
+                            "updates\" below, it talks to GitHub Releases to fetch the newest " +
+                            "version — and downloads the update APK only if you ask for it. It " +
+                            "never uploads files, favorites, settings or analytics, and never " +
+                            "contacts anything else in the background.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -174,34 +182,27 @@ fun AboutScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ---- Diagnostics toggle (privacy promise) ----
+            // ---- Updates (strictly user-initiated check against GitHub Releases) ----
             Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp)) {
-                    Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
+                    Text("Updates", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Off by default. Even when on, toadFILES has no internet permission so it " +
-                            "cannot actually send anything — this toggle exists to record your " +
-                            "preference for any future diagnostic-data feature.",
+                        "toadFILES checks GitHub Releases for a newer version only when you tap " +
+                            "the button below — never in the background, and nothing about this " +
+                            "device is sent or stored.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(12.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                if (state.diagnosticsEnabled) "Allowed (no network)" else "Off",
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                        }
-                        Switch(
-                            checked = state.diagnosticsEnabled,
-                            onCheckedChange = { vm.setDiagnostics(it) },
-                        )
-                    }
+                    VersionRow("Installed", BuildConfig.VERSION_NAME)
+                    Spacer(Modifier.height(10.dp))
+                    UpdatePanel(
+                        update = state.update,
+                        onCheck = vm::checkForUpdates,
+                        onDownloadInstall = { vm.downloadAndInstall(context) },
+                        onDismiss = vm::clearUpdateState,
+                    )
                 }
             }
 
@@ -311,11 +312,140 @@ private fun ChangelogBullet(text: String) {
     }
 }
 
+private const val NOTES_PREVIEW_LINES = 4
+
+/**
+ * The update panel proper — every [UpdateState] rendered in the card's existing M3
+ * style (spinner rows like the storage card, label/body text like the version rows).
+ * All actions are explicit taps: check, download & install, open GitHub, dismiss.
+ */
+@Composable
+private fun UpdatePanel(
+    update: UpdateState,
+    onCheck: () -> Unit,
+    onDownloadInstall: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (update) {
+        is UpdateState.Idle -> {
+            Text(
+                "Checking contacts api.github.com once and shows the result here. No account, " +
+                    "no telemetry, no auto-check on startup.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            TextButton(onClick = onCheck) { Text("Check for updates") }
+        }
+
+        is UpdateState.Checking -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Checking GitHub Releases…", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        is UpdateState.UpToDate -> {
+            Text(
+                "You're up to date (${update.currentVersion}).",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Spacer(Modifier.height(10.dp))
+            TextButton(onClick = onCheck) { Text("Check again") }
+        }
+
+        is UpdateState.Available -> UpdateAvailable(
+            available = update,
+            onDownloadInstall = onDownloadInstall,
+            onDismiss = onDismiss,
+        )
+
+        is UpdateState.Error -> {
+            Text(
+                update.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(10.dp))
+            TextButton(onClick = onCheck) { Text("Retry") }
+        }
+    }
+}
+
+@Composable
+private fun UpdateAvailable(
+    available: UpdateState.Available,
+    onDownloadInstall: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var notesExpanded by rememberSaveable { mutableStateOf(false) }
+    Text(
+        "toadFILES ${available.version} is available",
+        style = MaterialTheme.typography.titleSmall,
+    )
+    Spacer(Modifier.height(8.dp))
+    VersionRow("New version", available.version)
+    VersionRow("Size", Format.size(available.sizeBytes))
+    available.notes?.let { notes ->
+        Spacer(Modifier.height(8.dp))
+        val lines = notes.split('\n')
+        val truncated = !notesExpanded && lines.size > NOTES_PREVIEW_LINES
+        Text(
+            if (truncated) lines.take(NOTES_PREVIEW_LINES).joinToString("\n") + "\n…" else notes,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (lines.size > NOTES_PREVIEW_LINES) {
+            TextButton(onClick = { notesExpanded = !notesExpanded }) {
+                Text(if (notesExpanded) "Show less" else "Show full notes")
+            }
+        }
+    }
+    if (available.needsInstallPermission) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Allow \"Install unknown apps\" for toadFILES in the Android screen that just " +
+                "opened, then tap Install again — the APK is already downloaded.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (available.downloadInProgress) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Downloading… progress is shown in the notification shade.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = onDownloadInstall, enabled = !available.downloadInProgress) {
+            Text(if (available.downloadedUri != null) "Install downloaded APK" else "Download & install")
+        }
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = { Intents.openUrl(context, available.htmlUrl) }) {
+            Text("View on GitHub")
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    TextButton(onClick = onDismiss) { Text("Dismiss") }
+}
+
 /**
  * Hand-maintained changelog. Kept inside the app (not pulled from a remote feed) so it works
- * offline and respects the no-internet promise. Append a new pair at the top when shipping.
+ * offline; network use is limited to the explicit About-page update check. Append a new
+ * pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.7.0" to listOf(
+        "Extract from ZIP archives everywhere: Browse gets \"Extract to…\" with the Replace / Keep both / Skip dialog, and Recent & Categories archive rows get \"Extract here\" — all through the hardened archive pipeline.",
+        "Check for updates right from the About page: one tap scans GitHub Releases and, when a newer signed APK exists, downloads it and offers install. It only runs when you press the button — no background traffic.",
+        "New Properties sheet for files and folders: type, location, recursive size, modified time, hidden flag.",
+        "Housekeeping: removed the never-functional Diagnostics toggle and consolidated duplicated action plumbing.",
+    ),
     "v1.5.0" to listOf(
         "Real Android share: the system share sheet hands files to the app you pick (single or batch), replacing the old local-copy share.",
         "Open files with the standard \"Just once / Always\" chooser so you can pin a default app per file type.",
@@ -333,7 +463,7 @@ private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
         "Long-press a file opens a Mi-Files-style action sheet (open, share, rename, copy, move, delete, details, zip, favorite, copy-path, open-with).",
         "Share is now local-only: copies into an app-private 'shared' folder, nothing leaves the device.",
         "Pick your accent color (toad, blue, purple, green, orange, red, pink) when dynamic color is off.",
-        "About is a real page now: storage stats, per-category counts, OSS credits, changelog, diagnostics toggle, clear-shared-copies.",
+        "About is a real page now: storage stats, per-category counts, OSS credits, changelog, clear-shared-copies.",
         "More tests across all of the above.",
     ),
     "v1.3.0" to listOf(
