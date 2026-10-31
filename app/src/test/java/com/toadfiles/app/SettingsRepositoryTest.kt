@@ -8,9 +8,13 @@ import com.toadfiles.app.data.SettingsRepository
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
+import com.toadfiles.app.domain.NavStyle
+import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.ZipOpenAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -284,6 +288,84 @@ class SettingsRepositoryTest {
             mapOf("/storage/emulated/0/ok" to 3, "/storage/emulated/0/warm" to 1),
             repo.folderUses.value,
         )
+    }
+
+    // ---- v1.7.3: archive actions, nav style, back key, delete-after, archive folder ----
+
+    @Test
+    fun `v1 7 3 defaults preserve v1 7 2 behavior`() = runTest {
+        val s = newRepo().settings.first()
+        assertEquals(ZipOpenAction.MENU, s.zipOpenAction)
+        assertEquals(SevenZipOpenAction.MENU, s.sevenZipOpenAction)
+        assertEquals(NavStyle.BOTTOM_BAR, s.navStyle)
+        assertEquals(BackKeyAction.PARENT, s.backKeyAction)
+        assertEquals(false, s.deleteAfterCompress)
+        assertEquals(false, s.deleteAfterExtract)
+        assertEquals(true, s.abortConfirm)
+        assertEquals(true, s.overwriteConfirm)
+        assertEquals("", s.archiveFolder) // blank = same folder as source
+    }
+
+    @Test
+    fun `v1 7 3 setters persist and read back`() = runTest {
+        val repo = newRepo()
+        repo.setZipOpenAction(ZipOpenAction.OPEN_WITH)
+        repo.setSevenZipOpenAction(SevenZipOpenAction.EXTRACT)
+        repo.setNavStyle(NavStyle.SIDE_MENU)
+        repo.setBackKeyAction(BackKeyAction.EXIT)
+        repo.setDeleteAfterCompress(true)
+        repo.setDeleteAfterExtract(true)
+        repo.setAbortConfirm(false)
+        repo.setOverwriteConfirm(false)
+        repo.setArchiveFolder("/storage/emulated/0/Archives")
+
+        val s = repo.settings.first()
+        assertEquals(ZipOpenAction.OPEN_WITH, s.zipOpenAction)
+        assertEquals(SevenZipOpenAction.EXTRACT, s.sevenZipOpenAction)
+        assertEquals(NavStyle.SIDE_MENU, s.navStyle)
+        assertEquals(BackKeyAction.EXIT, s.backKeyAction)
+        assertEquals(true, s.deleteAfterCompress)
+        assertEquals(true, s.deleteAfterExtract)
+        assertEquals(false, s.abortConfirm)
+        assertEquals(false, s.overwriteConfirm)
+        assertEquals("/storage/emulated/0/Archives", s.archiveFolder)
+    }
+
+    @Test
+    fun `corrupt v1 7 3 enum values fall back to defaults`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit {
+            it[stringPreferencesKey("zip_open_action")] = "NOT_AN_ACTION"
+            it[stringPreferencesKey("sevenzip_open_action")] = "NOT_AN_ACTION"
+            it[stringPreferencesKey("nav_style")] = "NOT_A_STYLE"
+            it[stringPreferencesKey("back_key_action")] = "NOT_AN_ACTION"
+        }
+        val s = repo.settings.first()
+        assertEquals(ZipOpenAction.MENU, s.zipOpenAction)
+        assertEquals(SevenZipOpenAction.MENU, s.sevenZipOpenAction)
+        assertEquals(NavStyle.BOTTOM_BAR, s.navStyle)
+        assertEquals(BackKeyAction.PARENT, s.backKeyAction)
+    }
+
+    @Test
+    fun `archive folder trims surrounding whitespace on write`() = runTest {
+        val repo = newRepo()
+        repo.setArchiveFolder("  /storage/emulated/0/Archives  ")
+        assertEquals("/storage/emulated/0/Archives", repo.settings.first().archiveFolder)
+    }
+
+    @Test
+    fun `blank archive folder round-trips as same-folder-as-source`() = runTest {
+        val repo = newRepo()
+        repo.setArchiveFolder("/storage/emulated/0/Archives")
+        assertEquals("/storage/emulated/0/Archives", repo.settings.first().archiveFolder)
+
+        // Clearing the preference restores the v1.7.2 "same folder as source" default.
+        repo.setArchiveFolder("")
+        assertEquals("", repo.settings.first().archiveFolder)
+        repo.setArchiveFolder("   ") // whitespace-only must not resurrect a path
+        assertEquals("", repo.settings.first().archiveFolder)
     }
 
     // ---- P2.7: hydration must be serialized against persistence ----
