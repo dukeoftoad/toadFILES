@@ -30,6 +30,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -87,11 +88,19 @@ fun TrashScreen(
             )
         },
     ) { padding ->
+        // Pull-to-refresh (v1.7.3): re-reads the trash folders (same reload the screen
+        // runs after restore/delete/empty). Works on the empty state too.
+        PullToRefreshBox(
+            isRefreshing = state.loading,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
         when {
             state.loading && state.entries.isEmpty() -> Row(
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
                     .padding(24.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
@@ -100,7 +109,6 @@ fun TrashScreen(
             state.entries.isEmpty() -> Column(
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
             ) {
                 EmptyState("Trash is empty")
                 Text(
@@ -114,7 +122,6 @@ fun TrashScreen(
             else -> LazyColumn(
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
             ) {
                 item {
                     Text(
@@ -131,6 +138,7 @@ fun TrashScreen(
                     TrashRow(e, onRestore = { vm.restore(e) }, onDelete = { vm.requestDeleteForever(e) })}
                 item { Spacer(Modifier.height(24.dp)) }
             }
+        }
         }
     }
 

@@ -17,6 +17,8 @@ import com.toadfiles.app.domain.PathSafety
 import com.toadfiles.app.domain.PropertiesBuilder
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
+import com.toadfiles.app.domain.SevenZipOpenAction
+import com.toadfiles.app.domain.ZipOpenAction
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.ui.components.PropertiesDetail
@@ -89,6 +91,12 @@ sealed interface ExtractEvent {
     /** A finished extraction published at least one item; the UI can navigate into it. */
     data class ExtractCompleted(val destination: File) : ExtractEvent
 }
+
+/**
+ * What a row tap on an archive does (v1.7.3): the resolved, format-agnostic form of
+ * [ZipOpenAction] / [SevenZipOpenAction] so the screen only has one enum to switch on.
+ */
+enum class ArchiveTapAction { SHOW_MENU, EXTRACT, OPEN_WITH }
 
 @OptIn(FlowPreview::class)
 class BrowseViewModel(
@@ -408,6 +416,39 @@ class BrowseViewModel(
 
     fun setSort(mode: SortMode) {
         viewModelScope.launch { settingsRepo.setSortMode(mode) }
+    }
+
+    /**
+     * Pull-to-refresh hook: re-lists the current folder through the standard [load]
+     * path (same semantics as an operation-triggered reload — clears query/selection).
+     */
+    fun refresh() {
+        _state.value.dir?.let { load(it) }
+    }
+
+    /**
+     * Resolves the v1.7.3 tap behavior for an extractable archive: .7z honors
+     * [ToadSettings.sevenZipOpenAction], everything else (i.e. .zip) honors
+     * [ToadSettings.zipOpenAction]. SHOW_MENU keeps the v1.7.1 extract-or-open dialog,
+     * EXTRACT runs the exact pipeline behind the menu's "Extract here" (including the
+     * same pre-existing-target refusal / conflict dialog via [extractZip]), OPEN_WITH
+     * is the pre-v1.7.1 ACTION_VIEW behavior.
+     */
+    fun archiveTapAction(fileName: String): ArchiveTapAction {
+        val s = _state.value.settings
+        return if (ArchiveOps.extension(fileName) == "7z") {
+            when (s.sevenZipOpenAction) {
+                SevenZipOpenAction.MENU -> ArchiveTapAction.SHOW_MENU
+                SevenZipOpenAction.EXTRACT -> ArchiveTapAction.EXTRACT
+                SevenZipOpenAction.OPEN_WITH -> ArchiveTapAction.OPEN_WITH
+            }
+        } else {
+            when (s.zipOpenAction) {
+                ZipOpenAction.MENU -> ArchiveTapAction.SHOW_MENU
+                ZipOpenAction.EXTRACT -> ArchiveTapAction.EXTRACT
+                ZipOpenAction.OPEN_WITH -> ArchiveTapAction.OPEN_WITH
+            }
+        }
     }
 
     fun setFilter(mode: FilterMode) {
