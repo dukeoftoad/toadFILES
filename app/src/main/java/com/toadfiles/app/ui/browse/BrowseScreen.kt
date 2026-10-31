@@ -571,7 +571,7 @@ fun BrowseScreen(
         ConfirmDialog(
             title = "Move ${files.size} item(s) to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
-                "You can undo right away or restore later from Settings → Trash.",
+                "You can undo right away or restore later from the Trash page in the side menu.",
             confirmLabel = "Delete",
             destructive = true,
             onConfirm = { vm.confirmDelete() },
