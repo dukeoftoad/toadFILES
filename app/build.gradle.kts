@@ -12,8 +12,8 @@ android {
         applicationId = "com.toadfiles.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.7.0"
+        versionCode = 11
+        versionName = "1.7.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -109,6 +109,10 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video) // video thumbnails for the Categories/Recent grids
     implementation(libs.kotlinx.coroutines.core)
+    // 7z read support (pure Java, minSdk-26 safe). ZIP stays on java.util.zip.
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    // XZ for Java: commons-compress needs it for LZMA-based 7z entries at runtime.
+    implementation("org.tukaani:xz:1.10")
 
     // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
     testImplementation(libs.junit)

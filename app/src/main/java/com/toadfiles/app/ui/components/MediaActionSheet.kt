@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.Format
 
 /**
@@ -111,8 +112,8 @@ fun MediaActionSheet(
             }
             MediaSheetRow(Icons.Outlined.Info, "Details", onClick = onDetails)
             // Path-dependent like the rows above: only for archives with a known on-disk
-            // path, and only for .zip (the format ZipSupport actually handles).
-            if (onExtract != null && entry.name.lowercase().endsWith(".zip")) {
+            // path, and only for formats toadFILES can actually extract (.zip, .7z).
+            if (onExtract != null && ArchiveOps.canExtract(entry.name)) {
                 MediaSheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = onExtract)
             }
 

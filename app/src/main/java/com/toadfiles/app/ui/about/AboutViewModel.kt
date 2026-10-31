@@ -9,11 +9,13 @@ import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.data.DownloadRequest
 import com.toadfiles.app.data.GithubReleaseChecker
 import com.toadfiles.app.data.SystemUpdateDownloader
+import com.toadfiles.app.data.UpdateCheckException
 import com.toadfiles.app.data.UpdateChecker
 import com.toadfiles.app.data.UpdateDownloader
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.StorageStats
 import com.toadfiles.app.domain.VersionCompare
+import com.toadfiles.app.update.StartupUpdateCheck
 import com.toadfiles.app.util.Intents
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -31,7 +33,9 @@ import java.io.IOException
  * a lot of files is bounded by repository queries, never by the ViewModel itself.
  *
  * [update] carries the self-update panel state ([UpdateState]); it is Idle until the
- * user explicitly asks for a check — never touched at construction time.
+ * user asks for a check, EXCEPT that a positive result of the v1.7.1 silent startup
+ * check (app open, once per process, see [StartupUpdateCheck]) seeds Available
+ * directly — still no network from this ViewModel.
  */
 data class AboutUiState(
     val loading: Boolean = false,
@@ -41,10 +45,12 @@ data class AboutUiState(
 )
 
 /**
- * State machine for the user-initiated OTA check (About → "Check for updates").
+ * State machine for the OTA check (About → "Check for updates").
  *
- * PRIVACY STANCE: the check runs strictly on user action — no polling, no auto-check
- * at app start, GitHub-only endpoints, nothing cached beyond this in-memory state.
+ * PRIVACY STANCE: this panel contacts GitHub only on user action; the v1.7.1 silent
+ * startup check lives in [StartupUpdateCheck] and only ever SEEDS this state with
+ * an already-fetched result. GitHub-only endpoints, nothing cached beyond this
+ * in-memory state.
  */
 sealed interface UpdateState {
     data object Idle : UpdateState
@@ -81,6 +87,7 @@ class AboutViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val updateChecker: UpdateChecker = GithubReleaseChecker(),
     private val updateDownloader: UpdateDownloader = SystemUpdateDownloader(),
+    private val startupCheck: StartupUpdateCheck = StartupUpdateCheck.instance,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AboutUiState(loading = true))
@@ -90,9 +97,28 @@ class AboutViewModel(
     private var downloadJob: Job? = null
 
     init {
+        // v1.7.1: if the silent startup check (app open) already found a newer release,
+        // arrive with the update panel populated — the banner's "Update" tap deep-links
+        // here straight into the existing "Download & install" flow.
+        seedFromStartupCheck()
         refresh()
-        // Deliberately NO update check here: contacting GitHub happens only when the
-        // user taps "Check for updates" (privacy stance — see [checkForUpdates]).
+    }
+
+    /** Populate the panel from the startup check's result, if any (Idle only, never downloads). */
+    private fun seedFromStartupCheck() {
+        val release = startupCheck.banner.value ?: return
+        if (!VersionCompare.isNewer(BuildConfig.VERSION_NAME, release.tagName)) return
+        if (release.apkUrl == null) return
+        setUpdate(
+            UpdateState.Available(
+                version = release.tagName,
+                apkUrl = release.apkUrl,
+                fileName = release.apkName ?: DEFAULT_APK_NAME,
+                sizeBytes = release.apkSizeBytes,
+                notes = release.notes,
+                htmlUrl = release.htmlUrl,
+            )
+        )
     }
 
     /** Re-fetch every figure shown on the About page. Safe to call repeatedly. */
@@ -252,8 +278,10 @@ class AboutViewModel(
         }
     }
 
-    private fun checkErrorMessage(e: Exception): String = when (e) {
-        is IOException -> "Could not reach GitHub Releases — check your connection and try again."
+    private fun checkErrorMessage(e: Exception): String = when {
+        // UpdateCheckException (rate limit, 5xx, 4xx) already carries a friendly message.
+        e is UpdateCheckException -> e.message ?: GENERIC_CHECK_FAILED
+        e is IOException -> "Couldn't reach GitHub — check your connection and try again."
         else -> "Update check failed: ${e.message?.take(120) ?: e.javaClass.simpleName}"
     }
 
@@ -265,5 +293,6 @@ class AboutViewModel(
     private companion object {
         const val DEFAULT_APK_NAME = "toadfiles-update.apk"
         const val DOWNLOAD_FAILED = "The APK download failed — you can try again."
+        const val GENERIC_CHECK_FAILED = "The update check failed — try again in a moment."
     }
 }

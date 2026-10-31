@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Refresh
@@ -76,18 +77,22 @@ import com.toadfiles.app.util.Intents
  * delete to trash, details, copy path), and long-press in selection mode builds a
  * multi-select batch. Trashed files are hidden by the repository.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RecentScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
     onShowInFolder: (String) -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
     vm: RecentViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var actionSheetFor by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
+    // Grouping is derived per state emission; grouping timestamps are only meaningful
+    // to a second, so a stable key of (filter, entries, day bucket) is not needed.
+    val grouped = remember(state.entries) { RecentGrouping.grouped(state.entries) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
@@ -134,7 +139,11 @@ fun RecentScreen(
                 TopAppBar(
                     title = { Text("Recent") },
                     navigationIcon = {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                        if (onOpenDrawer != null) {
+                            IconButton(onClick = onOpenDrawer) { Icon(Icons.Outlined.Menu, "Open navigation menu") }
+                        } else {
+                            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                        }
                     },
                     actions = {
                         IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
@@ -190,7 +199,19 @@ fun RecentScreen(
                 )
 
                 else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
+                    grouped.forEach { (group, groupEntries) ->
+                        stickyHeader(key = "header#${group.name}") {
+                            Text(
+                                group.label,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                        items(groupEntries, key = { "${it.category.name}#${it.id}" }) { e ->
                         RecentRow(
                             e = e,
                             selected = e.uri.toString() in state.selection,
@@ -206,6 +227,7 @@ fun RecentScreen(
                             onLongClick = { vm.toggleSelection(e) },
                             onMore = { actionSheetFor = e },
                         )
+                        }
                     }
                     if (state.entries.size >= RecentViewModel.QUERY_LIMIT) {
                         item {
@@ -244,7 +266,7 @@ fun RecentScreen(
             title = { Text("Move ${entries.size} item(s) to trash?") },
             text = {
                 Text("Items are moved to the toadFILES trash and kept for 30 days. " +
-                    "You can restore them from Settings → Trash.")
+                    "You can restore them from the Trash page in the side menu.")
             },
             confirmButton = {
                 TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }

@@ -10,7 +10,7 @@ import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
-import com.toadfiles.app.domain.ZipSupport
+import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.ui.components.OpRunner
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -160,9 +160,10 @@ class CategoriesViewModel(
     // ---------- zip extract ----------
 
     /**
-     * Extracts an archive row into a sibling folder named after it — the same
-     * ZipSupport op (with progress + result) Browse runs, surfaced where the user
-     * found the file. Only offered for .zip entries with an on-disk path.
+     * Extracts an archive row (.zip or .7z) into a sibling folder named after it — the
+     * same hardened ArchiveOps pipeline (with progress + result) Browse runs, surfaced
+     * where the user found the file. Offered for extractable archives with an on-disk
+     * path; 7z is extract-only.
      */
     fun extractZip(file: File) {
         val dir = file.parentFile ?: run {
@@ -174,9 +175,9 @@ class CategoriesViewModel(
             requestToast("A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
             return
         }
-        _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
+        _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
-            op = { onP -> ZipSupport.extract(file, target, false, onProgress = onP) },
+            op = { onP -> ArchiveOps.extract(file, target, false, onProgress = onP) },
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }

@@ -4,6 +4,44 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.7.1] — 2026-10-31
+
+UX and reliability release driven by user feedback: archive handling
+fixes, 7z support, progress bars, a startup update check, a Google
+Files-style side menu, and Recent improvements.
+
+### Added
+- **7z archive support**: `.7z` files extract through the hardened
+  archive pipeline (entry-count and byte caps, path-traversal defence,
+  staged atomic publish) via Apache Commons Compress. Extract-only;
+  password-protected archives are detected and declined with a friendly
+  message.
+- **Progress bars for ZIP and 7z**: zip extraction prescans the central
+  directory, zip creation pre-walks sources, and 7z totals come from the
+  header — a determinate `LinearProgressIndicator` with indeterminate
+  fallback, cancellable, all work off the main thread.
+- **Silent auto update check on app open**: once per process, no
+  periodic polling, never auto-downloads; a dismissible banner appears
+  when a newer version is available and deep-links into the existing
+  Download & install flow.
+- **Side navigation drawer** (Browse / Recent / Trash / Settings /
+  About) in the Google Files style; Trash is reached from the drawer as
+  its own page.
+- **Recent grouping**: entries grouped under Today / Yesterday / This
+  week / Older headers.
+- **Missing changelog entries** for v1.6.0–v1.6.2 added to the in-app
+  What's New list.
+
+### Fixed
+- **Archive tap no longer triggers "open with"**: tapping a `.zip`/`.7z`
+  in Browse opens the extract actions instead of firing an ACTION_VIEW
+  intent.
+- **After extraction the app now navigates into the extracted folder**
+  (both "Extract here" and "Extract to…" paths).
+- **GitHub update-check connection hardening**: redirects are followed,
+  one retry on transient IOException/5xx, a distinct friendly message on
+  rate-limit (403), and human-readable connection errors.
+
 ## [1.7.0] — 2026-10-31
 
 Feature and cleanup release: archive extraction everywhere, an in-app

@@ -2,9 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Local filesystem first. INTERNET exists solely for the user-initiated
-         "Check for updates" flow (GitHub releases check + APK download) — no
-         background network, analytics or telemetry. -->
+    <!-- Local filesystem first. INTERNET exists solely for update checks
+         (a silent once-per-launch GitHub releases check + the user-initiated
+         "Check for updates" flow and its APK download) — no periodic network,
+         analytics or telemetry. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
