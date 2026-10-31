@@ -32,6 +32,8 @@ data class StorageUiState(
     /** Items currently held in the toadFILES trash across volumes. */
     val trashCount: Int = 0,
     val trashBytes: Long = 0L,
+    /** True while a pull-to-refresh (or init) reload is in flight. */
+    val refreshing: Boolean = false,
 )
 
 /** Storage overview: real volumes, media-by-type breakdown, trash usage, on-demand analysis. */
@@ -55,6 +57,7 @@ class StorageViewModel(
 
     fun refresh() {
         val token = ++refreshSeq
+        _state.update { it.copy(refreshing = true) }
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch(ioDispatcher) {
             val roots = container.fileRepo.roots()
@@ -68,6 +71,7 @@ class StorageViewModel(
                     mediaLoading = false,
                     trashCount = trashEntries.size,
                     trashBytes = trashEntries.sumOf { e -> FileOps.sizeOf(e.file) },
+                    refreshing = false,
                 )
             }
         }

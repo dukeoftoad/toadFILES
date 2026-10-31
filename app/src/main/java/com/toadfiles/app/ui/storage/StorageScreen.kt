@@ -22,7 +22,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.PieChart
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -75,16 +75,21 @@ fun StorageScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
                 },
-                actions = {
-                    IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
-                },
             )
         },
     ) { padding ->
+        // Pull-to-refresh (v1.7.5): the toolbar Refresh button is gone — reload the
+        // volume list, media breakdown and trash usage with a pull, like Trash/Recent.
+        PullToRefreshBox(
+            isRefreshing = state.refreshing,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
         LazyColumn(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(horizontal = 16.dp),
         ) {
             if (state.roots.isEmpty()) {
@@ -306,6 +311,7 @@ fun StorageScreen(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
         }
     }
 }
