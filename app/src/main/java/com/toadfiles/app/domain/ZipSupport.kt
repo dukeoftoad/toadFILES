@@ -256,9 +256,21 @@ object ZipSupport {
         OpResult(counts.moved, skip + counts.skipped, fail + counts.failed, cancelled, failures)
     }
 
+    /**
+     * Zips [sources] into [outFile] (v1.7.3: at the chosen [level]).
+     *
+     * Creation protections: the archive is written to a temporary sibling and renamed
+     * into place only on success (REPLACE_EXISTING — an existing [outFile] is replaced); a
+     * failing source aborts and deletes the incomplete archive instead of publishing it;
+     * cancellation checkpoints run per buffer, per directory and per published item.
+     * Symbolic links are never followed (audit P1.2): links to plain files are stored by
+     * content, links to folders and dangling links are skipped with a recorded reason, and
+     * a canonical visited-set makes link cycles impossible to recurse into.
+     */
     suspend fun zip(
         sources: List<File>,
         outFile: File,
+        level: CompressLevel = CompressLevel.NORMAL,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = withContext(Dispatchers.IO) {
         PathSafety.rejectSelfTarget(sources, outFile.parentFile ?: File("."))
@@ -274,7 +286,7 @@ object ZipSupport {
         // pre-walk with the same no-follow link policy as addToZip), and every completed
         // file entry ticks the counter — folders and skipped links just don't count.
         var filesDone = 0
-        val totalFiles = sources.sumOf { countZipFiles(it) }
+        val totalFiles = sources.sumOf { countFileEntries(it) }
         onProgress(OpProgress(0, totalFiles, ""))
         val usedEntryNames = mutableSetOf<String>()
         val visited = mutableSetOf<String>()
@@ -283,6 +295,7 @@ object ZipSupport {
         var completed = false
         try {
             ZipOutputStream(FileOutputStream(tmp).buffered(BUFFER_SIZE)).use { zos ->
+                zos.setLevel(deflaterLevel(level))
                 for (src in sources) {
                     try {
                         currentCoroutineContext().ensureActive()
@@ -343,6 +356,17 @@ object ZipSupport {
     // ---------- internal helpers ----------
 
     private const val BUFFER_SIZE = 64 * 1024
+
+    /**
+     * [CompressLevel] → `java.util.zip.Deflater` constant (v1.7.3). STORE keeps every
+     * byte verbatim (deflated "stored" blocks), the others trade speed for size.
+     */
+    internal fun deflaterLevel(level: CompressLevel): Int = when (level) {
+        CompressLevel.STORE -> java.util.zip.Deflater.NO_COMPRESSION
+        CompressLevel.FAST -> java.util.zip.Deflater.BEST_SPEED
+        CompressLevel.NORMAL -> java.util.zip.Deflater.DEFAULT_COMPRESSION
+        CompressLevel.MAXIMUM -> java.util.zip.Deflater.BEST_COMPRESSION
+    }
 
     /** Shown for encrypted zip/7z archives instead of a raw codec error (v1.7.1). */
     internal const val PASSWORD_UNSUPPORTED = "Password-protected archives aren't supported yet"
@@ -544,8 +568,9 @@ object ZipSupport {
             "$removed published item(s) removed, $restored replaced item(s) restored"
     }
 
-    /** Same "(1)"-style suffixing as [PathSafety.uniqueName], but purely name-based for entry names. */
-    private fun uniqueEntryName(used: MutableSet<String>, name: String): String {
+    /** Same "(1)"-style suffixing as [PathSafety.uniqueName], but purely name-based for
+     *  entry names. Shared by the zip and 7z creation pipelines. */
+    internal fun uniqueEntryName(used: MutableSet<String>, name: String): String {
         if (used.add(name)) return name
         val dot = name.lastIndexOf('.')
         val base = if (dot > 0) name.substring(0, dot) else name
@@ -599,22 +624,23 @@ object ZipSupport {
         onFileDone()
     }
 
-    /** File-entry count of what addToZip would add for [file]: plain files (and links to
-     *  files) count 1, folders count their contents; unfollowable links count 0. Mirrors
-     *  the add policy so the zip progress total is honest. */
-    private fun countZipFiles(file: File): Int {
+    /** File-entry count of what the creation walk stores for [file]: plain files (and
+     *  links to files) count 1, folders count their contents; unfollowable links count 0.
+     *  Mirrors the add policy so zip AND 7z creation progress totals stay honest. */
+    internal fun countFileEntries(file: File): Int {
         if (unfollowableLinkReason(file) != null) return 0
         if (file.isFile) return 1
         if (!file.isDirectory) return 0
         val children = file.listFiles() ?: return 0
         var n = 0
-        for (c in children) n += countZipFiles(c) // folder links are skipped above: no cycles
+        for (c in children) n += countFileEntries(c) // folder links are skipped above: no cycles
         return n
     }
 
     /** Non-null when [file] is a symbolic link this policy refuses to follow: a link to
-     *  a folder, or a dangling link. Links to plain files return null (stored by content). */
-    private fun unfollowableLinkReason(file: File): String? {
+     *  a folder, or a dangling link. Links to plain files return null (stored by content).
+     *  Shared by the zip and 7z creation pipelines (audit P1.2). */
+    internal fun unfollowableLinkReason(file: File): String? {
         if (!java.nio.file.Files.isSymbolicLink(file.toPath())) return null
         val target = try {
             java.nio.file.Files.readAttributes(

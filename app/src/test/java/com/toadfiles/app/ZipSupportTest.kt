@@ -1,8 +1,10 @@
 package com.toadfiles.app
 
+import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.ZipSupport
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -12,7 +14,9 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.util.zip.Deflater
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
@@ -110,6 +114,54 @@ class ZipSupportTest {
             assertTrue(names.any { it.endsWith("root.txt") })
             assertTrue(names.any { it.endsWith("nested/deep.txt") })
         }
+    }
+
+    // ---------- v1.7.3 compress levels ----------
+
+    @Test
+    fun `compress levels map to deflater constants`() {
+        assertEquals(Deflater.NO_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.STORE))
+        assertEquals(Deflater.BEST_SPEED, ZipSupport.deflaterLevel(CompressLevel.FAST))
+        assertEquals(Deflater.DEFAULT_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.NORMAL))
+        assertEquals(Deflater.BEST_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.MAXIMUM))
+    }
+
+    @Test
+    fun `STORE level creates stored entries and round-trips`() = runBlocking {
+        val dir = tmp.newFolder("lv1")
+        val payload = ByteArray(50_000) { (it % 251).toByte() } // incompressible
+        val src = File(dir, "blob.bin").apply { writeBytes(payload) }
+        val out = File(dir, "stored.zip")
+
+        val r = ZipSupport.zip(listOf(src), out, CompressLevel.STORE)
+
+        assertEquals(1, r.succeeded)
+        ZipFile(out).use { zf ->
+            val e = zf.getEntry("blob.bin")
+            // NO_COMPRESSION deflates without shrinking: at most tiny block overhead.
+            assertTrue(
+                "stored entry must not shrink (${e.compressedSize} vs ${e.size})",
+                e.compressedSize >= e.size,
+            )
+        }
+        val target = File(dir, "out")
+        assertEquals(1, ZipSupport.extract(out, target, replace = false).succeeded)
+        assertArrayEquals(payload, File(target, "blob.bin").readBytes())
+    }
+
+    @Test
+    fun `MAXIMUM level zips and round-trips`() = runBlocking {
+        val dir = tmp.newFolder("lv2")
+        val src = File(dir, "data.txt").apply { writeText("toad ".repeat(5000)) }
+        val out = File(dir, "max.zip")
+
+        val r = ZipSupport.zip(listOf(src), out, CompressLevel.MAXIMUM)
+
+        assertEquals(1, r.succeeded)
+        val target = File(dir, "out")
+        assertEquals(1, ZipSupport.extract(out, target, replace = false).succeeded)
+        assertEquals("toad ".repeat(5000), File(target, "data.txt").readText())
+        assertTrue("BEST_COMPRESSION must shrink repetitive text", out.length() < src.length())
     }
 
     // ---------- hardening (audit P1.2 / P2.11 / P2.10 / P3.1) ----------
