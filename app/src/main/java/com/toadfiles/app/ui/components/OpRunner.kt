@@ -3,6 +3,7 @@ package com.toadfiles.app.ui.components
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.data.toFileItem
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.util.Intents
@@ -13,7 +14,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Shared plumbing for the media screens' zip-extract op (Recent + Categories) — audit 7.3:
+ * Shared plumbing for the media screens' file ops (Recent + Categories) — audit 7.3:
  * both ViewModels used to carry byte-identical launch/progress/result/cancel blocks, and
  * both screens byte-identical sheet + overlay wiring. This file is that one copy; it is
  * deliberately NOT a new op framework:
@@ -21,8 +22,9 @@ import java.io.File
  *    applies updates through callbacks, so the progress/result model stays the one it
  *    already shares with Browse.
  *  - [MediaOpOverlays] and [MediaEntryActionSheet] are thin wiring over the existing
- *    [ProgressOverlay]/[ResultDialog]/[MediaActionSheet] components with the exact same
- *    strings, guards and callback order the screens had before.
+ *    [ProgressOverlay]/[ResultDialog] components — since v1.7.3 the per-entry sheet is
+ *    the SAME [FileActionSheet] Browse renders, fed through [toFileItem], so Browse and
+ *    the media screens offer one action sheet, not two diverging ones.
  * Browse (filesystem flows) keeps its fuller op engine (conflict handling, paste batch
  * clearing, …) — consolidating against it is out of scope here.
  */
@@ -100,17 +102,26 @@ fun MediaOpOverlays(
 }
 
 /**
- * [MediaActionSheet] with the standard per-entry wiring shared by Recent and the
- * Categories drill-in: every action first closes the sheet (via [onDismiss], which the
- * caller also binds to [MediaActionSheet.onDismiss]), then performs it, toasting on
- * failure exactly as before. Path-dependent actions (show in folder, copy path, delete,
- * extract) stay offered only when [MediaRepository.MediaEntry.data] carries a real path.
+ * [FileActionSheet] with the standard per-entry wiring shared by Recent and the
+ * Categories drill-in: every action first closes the sheet (via [onDismiss]), then
+ * performs it, toasting on failure exactly as before. Since v1.7.3 the sheet is the very
+ * same component Browse renders (see [FileActionSheet]) — the entry is bridged with
+ * [toFileItem] — which is what brings Categories to Browse-level per-file parity
+ * (rename, zip, extract to…, properties) without a second sheet implementation.
+ *
+ * Path-dependent actions (show in folder, copy path, delete, extract, rename, zip) stay
+ * offered only when [MediaRepository.MediaEntry.data] carries a real path; clipboard
+ * copy/move and favorites are Browse-only (no paste target / favorites store here), so
+ * their callbacks are simply not wired and the rows stay hidden.
  *
  * @param open attempts to open the entry; returns false when no app handled it.
  * @param toast surfaces failures/info through the screen's snackbar channel.
  * @param requestDelete starts the trash flow for this single entry.
- * @param onDetails opens the entry's details dialog.
- * @param onExtract runs the zip extract op for this entry's on-disk path.
+ * @param onDetails opens the entry's properties/details view.
+ * @param onExtract runs the zip extract op for this entry's on-disk path ("Extract here").
+ * @param onRename opens the rename flow for this entry (Categories only).
+ * @param onZip opens the zip flow for this entry's file (Categories only).
+ * @param onExtractTo opens the named-destination extract flow (Categories only).
  */
 @Composable
 fun MediaEntryActionSheet(
@@ -122,11 +133,14 @@ fun MediaEntryActionSheet(
     requestDelete: (MediaRepository.MediaEntry) -> Unit,
     onDetails: (MediaRepository.MediaEntry) -> Unit,
     onExtract: (File) -> Unit,
+    onRename: ((MediaRepository.MediaEntry) -> Unit)? = null,
+    onZip: ((File) -> Unit)? = null,
+    onExtractTo: ((File) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     entry?.let { e ->
-        MediaActionSheet(
-            entry = e,
+        FileActionSheet(
+            item = e.toFileItem(),
             onOpen = {
                 onDismiss()
                 if (!open(e)) toast("No app can open this file")
@@ -170,14 +184,23 @@ fun MediaEntryActionSheet(
                     }
                 }
             },
-            // The sheet itself only renders this for .zip entries; here we just need a
-            // real on-disk path for the ZipSupport op.
+            // The sheet itself only renders these for extractable archives; here we just
+            // need a real on-disk path for the ZipSupport/ArchiveOps op.
             onExtract = e.data?.let { path ->
                 {
                     onDismiss()
                     onExtract(File(path))
                 }
             },
+            onExtractTo = if (onExtractTo != null) {
+                e.data?.let { path -> { onDismiss(); onExtractTo(File(path)) } }
+            } else null,
+            onRename = if (onRename != null) {
+                e.data?.let { { onDismiss(); onRename(e) } }
+            } else null,
+            onZip = if (onZip != null) {
+                e.data?.let { path -> { onDismiss(); onZip(File(path)) } }
+            } else null,
             onDismiss = onDismiss,
         )
     }

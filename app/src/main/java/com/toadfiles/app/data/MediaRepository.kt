@@ -347,10 +347,21 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
         }
     }
 
-    /** Bridge so MediaStore entries can be reused with the shared [FileItem] row UI. */
-    fun toItem(e: MediaEntry): FileItem =
-        FileItem(file = File(e.name), name = e.name, isDir = false, size = e.size, lastModified = e.dateModified)
 }
+
+/**
+ * Bridge so MediaStore entries can reuse the shared [FileItem] row/sheet/grid UI Browse
+ * renders (v1.7.3: the Categories drill-in and the media action sheet are the exact same
+ * components). Uses the on-disk DATA path when the index reveals it (real thumbnails,
+ * path-dependent actions); without one, a name-only File keeps the icon fallback honest.
+ */
+fun MediaRepository.MediaEntry.toFileItem(): FileItem = FileItem(
+    file = data?.let(::File) ?: File(name),
+    name = name,
+    isDir = false,
+    size = size,
+    lastModified = dateModified,
+)
 
 /**
  * Builds the content URI handed out for a MediaStore row. Per-collection categories
