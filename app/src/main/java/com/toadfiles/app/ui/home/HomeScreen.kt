@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Settings
@@ -91,6 +92,7 @@ fun HomeScreen(
     onOpenRecent: () -> Unit,
     onOpenTrash: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDrawer: (() -> Unit)? = null,
     vm: HomeViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -123,6 +125,9 @@ fun HomeScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                IconButton(onClick = { onOpenDrawer?.invoke() }) {
+                    Icon(Icons.Outlined.Menu, "Open navigation menu")
                 }
                 IconButton(onClick = onOpenTrash) { Icon(Icons.Outlined.Delete, "Trash") }
                 IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, "Settings") }
