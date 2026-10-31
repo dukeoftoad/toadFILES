@@ -4,6 +4,25 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased] — v1.7.3 (in development)
+
+### Added
+- **7z archive creation** (Browse): "Compress" now offers ZIP *and* 7z. The 7z
+  pipeline mirrors the hardened zip one — staged temp file with atomic rename,
+  no-follow symlink walk, per-file determinate progress, cancellation checkpoints,
+  duplicate-name and entry-count caps. STORE uses the uncompressed COPY codec;
+  Fast/Normal/Maximum map to LZMA2 presets 1/6/9 (xz defaults).
+- **Compression level chooser** for both formats: Store / Fast / Normal / Maximum
+  (zip → Deflater levels, 7z → LZMA2 presets) in the new compress dialog, which
+  also shows the destination folder (the archive-folder setting when set).
+- **Archive folder setting honored**: new archives and "Extract to…" default to
+  the user's archive folder; blank keeps the v1.7.2 same-folder behavior.
+- **Overwrite confirmation** when the target archive already exists (honors the
+  overwriteConfirm setting; decline returns to the dialog for a new name).
+- **Delete after compress / delete after extract**: successful operations move the
+  sources to the toadFILES trash (30-day retention, undoable) — the app's delete
+  convention, never a silent permanent erase.
+
 ## [1.7.2] — 2026-10-31
 
 ### Fixed
