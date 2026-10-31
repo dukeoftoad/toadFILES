@@ -390,7 +390,7 @@ class CategoriesViewModel(
     private fun zipTo(files: List<File>, out: File, format: ArchiveFormat, level: CompressLevel) {
         _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.compress(files, out, format, level, onP) },
+            op = { onP -> ArchiveOps.compress(files, out, format, level, onProgress = onP) },
             onProgress = { p -> _state.update { it.copy(progress = "Zipping" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }

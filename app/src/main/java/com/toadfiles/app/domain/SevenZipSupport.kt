@@ -15,8 +15,11 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.channels.FileChannel
+import java.nio.channels.SeekableByteChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 
 /**
  * Safe 7z extraction (v1.7.1) — the 7z twin of [ZipSupport.extract], reusing the exact
@@ -47,6 +50,12 @@ import java.nio.file.StandardCopyOption
  * [ZipSupport.Limits] entry cap so a runaway tree can't balloon the header.
  * commons-compress is pure Java and minSdk-26 safe (no native codecs are used — only the
  * LZMA/LZMA2/BCJ Java codecs from commons-compress + XZ for Java).
+ *
+ * v1.8.0 volumes: extraction is channel-based ([extract] over a SeekableByteChannel)
+ * so the same hardened pipeline opens both a plain file and a multi-volume set via
+ * [VolumeSupport.seekableChannel]. The old File-based entry point stays as a thin
+ * wrapper that opens a read-only FileChannel and delegates — the pipeline body and
+ * its protections are unchanged.
  */
 object SevenZipSupport {
 
@@ -56,8 +65,44 @@ object SevenZipSupport {
     /** v1.8.0 friendly copy accompanying [OpResult.passwordRequired] results. */
     internal const val PASSWORD_REQUIRED = "Password required"
 
+    /**
+     * File-based entry point (v1.7.1). Opens a read-only [FileChannel] over the
+     * archive and delegates to the channel-based [extract]; the channel is closed
+     * by the wrapper whichever way the run ends. An unreadable file reports an
+     * honest failed [OpResult] instead of throwing.
+     *
+     * v1.8.0: [password] is carried through to SevenZFile (null keeps the exact
+     * v1.7.1 password-less behaviour).
+     */
     suspend fun extract(
         sevenZFile: File,
+        targetDir: File,
+        replace: Boolean,
+        limits: ZipSupport.Limits = ZipSupport.Limits(),
+        password: CharArray? = null,
+        onProgress: (OpProgress) -> Unit = {},
+    ): OpResult {
+        val channel = try {
+            FileChannel.open(sevenZFile.toPath(), StandardOpenOption.READ)
+        } catch (e: Exception) {
+            return OpResult(0, 0, 1, false, listOf("${sevenZFile.name}: ${ZipSupport.friendlyArchiveError(e)}"))
+        }
+        return channel.use { ch ->
+            extract(ch, sevenZFile.length(), targetDir, replace, limits, password, onProgress)
+        }
+    }
+
+    /**
+     * Channel-based pipeline (v1.8.0) — the v1.7.1 body verbatim, opening
+     * [SevenZFile] over [channel] with [password] instead of over a File. The caller
+     * owns [channel]; commons-compress's SevenZFile.close() also closes it, and a
+     * FileChannel close is idempotent either way. [channelSizeHint] is informational
+     * (the caller may only know the set's total size, e.g. a volume set) — SevenZFile
+     * derives everything it needs from the channel itself.
+     */
+    suspend fun extract(
+        channel: SeekableByteChannel,
+        channelSizeHint: Long,
         targetDir: File,
         replace: Boolean,
         limits: ZipSupport.Limits = ZipSupport.Limits(),
@@ -88,13 +133,7 @@ object SevenZipSupport {
 
         try {
             val seven = try {
-                // The null/isEmpty check is spelled out so `password` smart-casts to
-                // CharArray for the commons-compress constructor.
-                if (password != null && password.isNotEmpty()) {
-                    SevenZFile(sevenZFile, password)
-                } else {
-                    SevenZFile(sevenZFile)
-                }
+                SevenZFile(channel, password)
             } catch (e: PasswordRequiredException) {
                 // The archive needs a password even to be opened (e.g. encrypted headers)
                 // and none was supplied: ask for one instead of failing blindly.
@@ -112,7 +151,7 @@ object SevenZipSupport {
                 failures += if (hasPassword) {
                     WRONG_PASSWORD
                 } else {
-                    "${sevenZFile.name}: ${ZipSupport.friendlyArchiveError(e)}"
+                    "7z archive: ${ZipSupport.friendlyArchiveError(e)}"
                 }
                 null
             }
@@ -237,7 +276,7 @@ object SevenZipSupport {
             failures += if (hasPassword) {
                 WRONG_PASSWORD
             } else {
-                "${sevenZFile.name}: ${ZipSupport.friendlyArchiveError(e)}"
+                "7z archive: ${ZipSupport.friendlyArchiveError(e)}"
             }
         }
 
@@ -375,7 +414,7 @@ object SevenZipSupport {
         var completed = false
         try {
             // Spelled out so `password` smart-casts to CharArray for the encrypted
-            // constructor (a null or empty password must NOT encrypt anything).
+            // constructor (a null or EMPTY password must NOT encrypt anything).
             val out = if (password != null && password.isNotEmpty()) SevenZOutputFile(tmp, password)
             else SevenZOutputFile(tmp)
             out.use { sz ->
