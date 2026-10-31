@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Info
@@ -95,6 +96,7 @@ import com.toadfiles.app.ui.components.FileGridCell
 import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.NameInputDialog
 import com.toadfiles.app.ui.components.ProgressOverlay
+import com.toadfiles.app.ui.components.PropertiesSheet
 import com.toadfiles.app.ui.components.ResultDialog
 import com.toadfiles.app.ui.components.SortMenu
 import com.toadfiles.app.util.Intents
@@ -126,6 +128,8 @@ fun BrowseScreen(
     var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
     /** A zip the user tapped: offer extract-or-open instead of guessing. */
     var pendingZipTap by remember { mutableStateOf<File?>(null) }
+    /** A zip the user picked "Extract to…" for: ask for the destination folder name. */
+    var pendingExtractTo by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
@@ -224,6 +228,14 @@ fun BrowseScreen(
                                         vm.extractZip(single)
                                     },
                                     leadingIcon = { Icon(Icons.Outlined.FolderZip, null) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Extract to…") },
+                                    onClick = {
+                                        moreMenuOpen = false
+                                        pendingExtractTo = single
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) },
                                 )
                             }
                             DropdownMenuItem(
@@ -514,6 +526,20 @@ fun BrowseScreen(
             dismissButton = { TextButton(onClick = { pendingZipTap = null }) { Text("Cancel") } },
         )
     }
+    // "Extract to…": the user names the destination folder under the current directory,
+    // the same ask-for-a-name pattern as the Zip dialog above.
+    pendingExtractTo?.let { zip ->
+        NameInputDialog(
+            title = "Extract to…",
+            initialValue = zip.nameWithoutExtension,
+            confirmLabel = "Extract",
+            onConfirm = {
+                pendingExtractTo = null
+                vm.extractZip(zip, targetName = it)
+            },
+            onDismiss = { pendingExtractTo = null },
+        )
+    }
     pendingInstallApk?.let { apk ->
         ConfirmDialog(
             title = "Install \"${apk.name}\"?",
@@ -574,12 +600,10 @@ fun BrowseScreen(
             onDismiss = { vm.dismissResult() },
         )
     }
-    state.properties?.let { file ->
-        PropertiesDialog(
+    state.pendingProperties?.let { file ->
+        PropertiesSheet(
             file = file,
             detail = state.propertiesDetail,
-            favorite = file.path in state.favoritePaths,
-            onToggleFavorite = { vm.toggleFavorite(file.path) },
             onDismiss = { vm.dismissProperties() },
         )
     }
@@ -644,6 +668,12 @@ fun BrowseScreen(
                 {
                     pendingActionSheet = null
                     vm.extractZip(item.file)
+                }
+            } else null,
+            onExtractTo = if (item.name.lowercase().endsWith(".zip")) {
+                {
+                    pendingActionSheet = null
+                    pendingExtractTo = item.file
                 }
             } else null,
             onToggleFavorite = {
@@ -755,46 +785,4 @@ private fun PasteBar(
             }
         }
     }
-}
-
-@Composable
-private fun PropertiesDialog(
-    file: File,
-    detail: PropertiesDetail?,
-    favorite: Boolean,
-    onToggleFavorite: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(file.name, maxLines = 2) },
-        text = {
-            Column {
-                Text("Path: ${file.path}", style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(6.dp))
-                Text("Type: ${if (file.isDirectory) "Folder" else "File"}")
-                if (detail != null) {
-                    Text("Size: ${detail.sizeText}")
-                    detail.children?.let { Text("Items: $it") }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Computing size…", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-                Text("Modified: ${Format.dateTime(file.lastModified())}")
-                Text(
-                    "Readable: ${if (file.canRead()) "yes" else "no"} · " +
-                        "Writable: ${if (file.canWrite()) "yes" else "no"}"
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onToggleFavorite) {
-                Text(if (favorite) "★ Remove favorite" else "☆ Add favorite")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
 }

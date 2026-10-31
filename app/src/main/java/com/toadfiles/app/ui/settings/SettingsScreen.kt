@@ -250,28 +250,6 @@ fun SettingsScreen(
                 }
             }
 
-            Text("Privacy", style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp))
-
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Diagnostics (planned)", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Reserved for a future local diagnostics feature. Nothing is collected or transmitted today — the switch only stores a preference.",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = settings.diagnosticsEnabled,
-                            onCheckedChange = { vm.setDiagnostics(it) },
-                        )
-                    }
-                }
-            }
-
             Text("Trash", style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp))
 

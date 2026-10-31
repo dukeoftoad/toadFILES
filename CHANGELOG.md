@@ -4,6 +4,44 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.7.0] — 2026-10-31
+
+Feature and cleanup release: archive extraction everywhere, an in-app
+update check, a properties sheet, and removal of dead controls and
+duplicated plumbing.
+
+### Added
+- **Check for updates (OTA)** on the About page: a user-initiated check
+  against GitHub Releases with semantic version compare. When a newer
+  signed APK is published, it is downloaded via the system
+  DownloadManager and handed to the existing install flow. The new
+  `INTERNET` permission exists for this one purpose (commented as such in
+  the manifest): nothing runs in the background, there is no telemetry,
+  and the onboarding copy states the updated contract.
+- **Unzip surfaced everywhere**: Browse gains "Extract to…" with the
+  existing conflict dialog (Replace / Keep both / Skip), and Recent and
+  Categories archive rows get "Extract here" — all through the hardened
+  archive pipeline (size/entry quotas, path-traversal rejection, staged
+  atomic publish) with shared progress, cancel and result reporting.
+- **File/folder Properties sheet** in Browse: type, location, recursive
+  size and contents count, modified time, hidden flag — computed on IO
+  and cancellable on dismiss.
+
+### Fixed
+- P2 reliability pass (PR #4): hardened recursive search, transactional
+  ZIP replace with per-entry backup and rollback, cancellation checkpoints
+  that clean partial output, crash-safe trash metadata handling, stale
+  browse listings, and honest cross-volume move errors; the flaky CI unit
+  test that intermittently failed main was fixed.
+
+### Removed
+- Non-working "Diagnostics (planned)" toggle (About card, Settings
+  plumbing, DataStore key, tests) — the app collects no diagnostics.
+- ~180 lines of duplicated Recent/Categories action and sheet plumbing
+  consolidated behind a shared OpRunner.
+- CI no longer builds or uploads an unsigned release APK on pushes and
+  PRs; signed APKs come exclusively from tag-triggered release builds.
+
 ## [1.6.1] — 2026-10-30
 
 Reliability and security pass driven by the full codebase audit

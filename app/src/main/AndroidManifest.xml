@@ -2,7 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Local filesystem only: no INTERNET permission by design. -->
+    <!-- Local filesystem first. INTERNET exists solely for the user-initiated
+         "Check for updates" flow (GitHub releases check + APK download) — no
+         background network, analytics or telemetry. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -16,6 +19,10 @@
          Android still asks the user to allow installs from this app first. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- requestLegacyExternalStorage is honored only on Android 10 (API 29) devices, where
+         MANAGE_EXTERNAL_STORAGE does not exist yet — the flag is what gives
+         WRITE_EXTERNAL_STORAGE full-filesystem access there. Android 11+ ignores it, and
+         with minSdk 26 the pre-R range must keep working: remove only with a minSdk raise. -->
     <application
         android:name=".ToadApp"
         android:allowBackup="false"

@@ -11,9 +11,11 @@ import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.FileOps
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.PathSafety
+import com.toadfiles.app.domain.PropertiesBuilder
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
 import com.toadfiles.app.domain.ZipSupport
@@ -67,7 +69,9 @@ data class BrowseUiState(
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
     val resultTitle: String = "",
-    val properties: File? = null,
+    /** Item whose read-only properties sheet is open; null when closed. */
+    val pendingProperties: File? = null,
+    /** Computed size/contents for the properties sheet; null while the walk is running. */
     val propertiesDetail: PropertiesDetail? = null,
     val toast: String? = null,
     val lastTrashed: List<File>? = null,
@@ -77,7 +81,18 @@ data class PendingConflict(val op: OpKind, val targetDir: File, val sources: Lis
 
 enum class OpKind { COPY, MOVE, ZIP_EXTRACT }
 
-data class PropertiesDetail(val sizeText: String, val children: Int?)
+/**
+ * Computed detail behind the Browse properties sheet. Folder sizes/counts arrive
+ * asynchronously (recursive walk on IO); [error] carries the app's standard error copy
+ * when a folder could not be read at all. Files use [fileCount]/[dirCount] = 0.
+ */
+data class PropertiesDetail(
+    val sizeText: String,
+    val sizeBytes: Long,
+    val fileCount: Int,
+    val dirCount: Int,
+    val error: String? = null,
+)
 
 @OptIn(FlowPreview::class)
 class BrowseViewModel(
@@ -85,6 +100,8 @@ class BrowseViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /** Injectable for tests; production uses the container's real-file-system repository. */
     private val fileRepo: FileRepository = container.fileRepo,
+    /** Injectable for tests; production walks the real file system for contents counts. */
+    private val propertiesBuilder: PropertiesBuilder = PropertiesBuilder(),
 ) : ViewModel() {
 
     private val settingsRepo = container.settingsRepo
@@ -96,6 +113,9 @@ class BrowseViewModel(
 
     /** Current folder-listing job; cancelled and superseded by the next load (P2.8). */
     private var loadJob: Job? = null
+
+    /** Properties computation for the open sheet; cancelled on dismiss (see requestProperties). */
+    private var propertiesJob: Job? = null
 
     /**
      * Monotonically increasing load request id; only the newest load may apply its
@@ -401,7 +421,9 @@ class BrowseViewModel(
     /**
      * Real Android share: the screen hands the given files to the system share sheet via
      * ACTION_SEND / ACTION_SEND_MULTIPLE (FileProvider URIs, see [com.toadfiles.app.util.Intents]).
-     * The user picks the target app; toadFILES itself uploads nothing (no INTERNET permission).
+     * The user picks the target app; toadFILES itself uploads nothing. The manifest's
+     * INTERNET permission exists solely for the user-initiated "Check for updates" flow
+     * (GitHub releases check + APK download) — no background network, analytics or telemetry.
      */
     fun shareFiles(files: List<File>) {
         if (files.none { it.isFile }) {
@@ -600,12 +622,22 @@ class BrowseViewModel(
             when (kind) {
                 OpKind.COPY -> FileOps.copy(sources, target, strategy, onP)
                 OpKind.MOVE -> FileOps.move(sources, target, strategy, onP)
-                OpKind.ZIP_EXTRACT -> ZipSupport.extract(sources.first(), target, strategy == ConflictStrategy.REPLACE, onProgress = onP)
+                OpKind.ZIP_EXTRACT -> {
+                    // "Keep both" for extraction means a fresh sibling destination
+                    // ("unpacked (1)", …); SKIP merges into the existing folder and only
+                    // skips colliding entries; REPLACE overwrites them.
+                    val dest = if (strategy == ConflictStrategy.RENAME) {
+                        val parent = target.parentFile ?: target
+                        File(parent, PathSafety.uniqueName(parent, target.name))
+                    } else target
+                    ZipSupport.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, onProgress = onP)
+                }
             }
         }) { r ->
             if (kind == OpKind.MOVE && r.succeeded > 0) remapMovedFavorites(sources, target)
         }
-        container.clipboard.clear()
+        // Extraction doesn't touch the clipboard — don't drop a pending paste batch.
+        if (kind != OpKind.ZIP_EXTRACT) container.clipboard.clear()
     }
 
     private fun label(kind: OpKind) = when (kind) {
@@ -686,42 +718,101 @@ class BrowseViewModel(
         }
     }
 
-    fun extractZip(file: File) {
-        val dir = file.parentFile ?: return
-        val targetName = file.nameWithoutExtension
-        val target = File(dir, targetName)
-        if (target.exists()) {
-            _state.update {
-                it.copy(toast = "A folder named \"$targetName\" already exists. Rename or move it before extracting.")
+    /**
+     * Extracts [file] into a folder named after the archive next to it — or, when
+     * [targetName] is set ("Extract to…"), into a folder with that name under the current
+     * directory. The default flow refuses an existing destination (as before); the named
+     * flow asks via the shared conflict dialog: Replace overwrites colliding entries,
+     * Keep both extracts into a uniquely named sibling, Skip merges without overwriting.
+     */
+    fun extractZip(file: File, targetName: String? = null) {
+        if (targetName == null) {
+            val dir = file.parentFile ?: return
+            val target = File(dir, file.nameWithoutExtension)
+            if (target.exists()) {
+                _state.update {
+                    it.copy(toast = "A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
+                }
+                return
             }
-            return
+            startExtract(file, target)
+        } else {
+            val dir = _state.value.dir ?: return
+            val clean = targetName.trim()
+            if (clean.isEmpty() || clean.contains('/') || clean.contains('\\')) {
+                _state.update { it.copy(toast = "Enter a valid folder name") }
+                return
+            }
+            val target = File(dir, clean)
+            if (target.exists()) {
+                // Same collision flow as paste: the user picks the strategy.
+                _state.update {
+                    it.copy(pendingConflict = PendingConflict(OpKind.ZIP_EXTRACT, target, listOf(file), listOf(clean)))
+                }
+            } else {
+                startExtract(file, target)
+            }
         }
+    }
+
+    /** Runs the ZipSupport extract with Browse's standard progress/result plumbing. */
+    private fun startExtract(file: File, target: File) {
         _state.update { it.copy(progress = "Extracting" to OpProgress(0, 1, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
             val r = ZipSupport.extract(file, target, false) { p ->
                 _state.update { it.copy(progress = "Extracting" to p) }
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
-            load(dir)
+            load(target.parentFile ?: return@launch)
         }
     }
 
     // ---------- properties ----------
 
+    /**
+     * Opens the read-only properties sheet for [file] and starts the computation on the IO
+     * dispatcher: size via [FileOps.sizeOf] (the app's single size engine) and, for folders,
+     * content counts via [PropertiesBuilder]. Dismissing cancels the in-flight computation;
+     * a late result for a superseded request is dropped — only the item the sheet currently
+     * shows may apply its detail.
+     */
     fun requestProperties(file: File) {
-        _state.update { it.copy(properties = file, propertiesDetail = null) }
-        viewModelScope.launch(ioDispatcher) {
-            val size = FileOps.sizeOf(file)
-            val children = if (file.isDirectory) fileRepo.childCount(file) else null
+        _state.update { it.copy(pendingProperties = file, propertiesDetail = null) }
+        propertiesJob?.cancel()
+        propertiesJob = viewModelScope.launch(ioDispatcher) {
+            val detail = computePropertiesDetail(file)
+            coroutineContext.ensureActive() // dismissed/superseded mid-walk: drop the result
             _state.update {
-                if (it.properties?.path == file.path) {
-                    it.copy(propertiesDetail = PropertiesDetail(com.toadfiles.app.domain.Format.size(size), children))
+                if (it.pendingProperties?.path == file.path) {
+                    it.copy(propertiesDetail = detail)
                 } else it
             }
         }
     }
 
-    fun dismissProperties() = _state.update { it.copy(properties = null, propertiesDetail = null) }
+    fun dismissProperties() {
+        propertiesJob?.cancel()
+        _state.update { it.copy(pendingProperties = null, propertiesDetail = null) }
+    }
+
+    /** Blocking FS walks (size, counts) run inside the IO-dispatched properties job. */
+    private suspend fun computePropertiesDetail(file: File): PropertiesDetail {
+        if (file.isDirectory && !file.canRead()) {
+            return PropertiesDetail(
+                sizeText = "—", sizeBytes = 0L, fileCount = 0, dirCount = 0,
+                error = "Folder is not readable",
+            )
+        }
+        val sizeBytes = FileOps.sizeOf(file)
+        coroutineContext.ensureActive()
+        val counts = if (file.isDirectory) propertiesBuilder.countEntries(file) else null
+        return PropertiesDetail(
+            sizeText = Format.size(sizeBytes),
+            sizeBytes = sizeBytes,
+            fileCount = counts?.files ?: 0,
+            dirCount = counts?.dirs ?: 0,
+        )
+    }
 
     // ---------- misc ----------
 
@@ -735,6 +826,7 @@ class BrowseViewModel(
     override fun onCleared() {
         searchJob?.cancel()
         opJob?.cancel()
+        propertiesJob?.cancel()
         super.onCleared()
     }
 }

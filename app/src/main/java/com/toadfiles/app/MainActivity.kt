@@ -104,30 +104,44 @@ class MainActivity : ComponentActivity() {
 
     private val container get() = (application as ToadApp).container
 
+    /**
+     * Re-reads the storage permission gate. Two regimes, split at Android 11 (R):
+     *  - API 30+: "All files access" ([Environment.isExternalStorageManager] backed by
+     *    MANAGE_EXTERNAL_STORAGE), granted from the system settings screen.
+     *  - API 26-29 (pre-R): the classic runtime permission WRITE_EXTERNAL_STORAGE from
+     *    the system dialog — the "All files access" screen does not exist below R
+     *    (requestLegacyExternalStorage in the manifest restores full-FS behavior there).
+     * Called in onCreate and onResume, so granting from Settings unlocks the app
+     * without a restart.
+     */
     private fun refreshPermissionState() {
-        hasAllFilesAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Some ROMs/test environments can throw from this check; failing closed
             // (showing onboarding) is always safe.
-            try {
+            hasAllFilesAccess = try {
                 Environment.isExternalStorageManager()
             } catch (_: Exception) {
                 false
             }
         } else {
-            false
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            // Pre-R (API 26-29): hasAllFilesAccess is never read below R — hasFileAccess()
+            // consults legacyGranted there — so leaving it false is the correct resting state.
+            hasAllFilesAccess = false
             legacyGranted = checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         }
     }
 
+    /** Whole-UI gate: "All files access" on R+, the classic WRITE permission below R. */
     private fun hasFileAccess(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) hasAllFilesAccess
         else legacyGranted
 
     private fun requestFileAccess() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Deep-link to this app's own "All files access" toggle. The per-package intent
+            // is not handled by every ROM, so fall back to the generic all-files screen,
+            // then to the app details page as a last resort.
             try {
                 val intent = Intent(
                     Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
@@ -142,6 +156,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         } else {
+            // Pre-R (API 26-29): plain runtime dialog for WRITE_EXTERNAL_STORAGE — there is
+            // no special "all files" screen below Android 11, so this IS the required flow.
             legacyPermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
@@ -180,7 +196,9 @@ private fun OnboardingScreen(onGrant: () -> Unit, onOpenSettings: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             Text(
                 "toadFILES manages the files on this device locally. " +
-                    "It has no internet permission and never uploads anything.\n\n" +
+                    "It never uploads anything, and nothing runs in the background.\n\n" +
+                    "Its only network use is the optional \"Check for updates\" button " +
+                    "on the About page, which talks to GitHub Releases.\n\n" +
                     "To browse and organise your files, grant \"All files access\" " +
                     "in the next screen. Android requires this special permission for " +
                     "file managers to work on modern versions.",

@@ -58,21 +58,9 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Assemble release APK (unsigned)
-        # Keeps the release build path honest on every push. Signed releases
-        # come from release.yml on tag push.
-        run: ./gradlew :app:assembleRelease --stacktrace
-
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: toadFILES-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload (unsigned) release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: toadFILES-release-unsigned-apk
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-        if: always()
 
