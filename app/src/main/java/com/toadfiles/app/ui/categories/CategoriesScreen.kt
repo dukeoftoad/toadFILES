@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -163,6 +164,9 @@ fun CategoriesScreen(
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
+        // Inset source of truth is the outer shell Scaffold in ToadNavHost; zeroing
+        // these avoids a double status-bar pad (the v1.7.3 top "dead band").
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
             if (inDrillIn && inSelection) {

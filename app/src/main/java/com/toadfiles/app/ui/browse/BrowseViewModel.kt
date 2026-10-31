@@ -701,7 +701,11 @@ class BrowseViewModel(
                 extractDest?.let { d -> _events.tryEmit(ExtractEvent.ExtractCompleted(d)) }
                 // v1.7.3 delete-after-extract (conflict-dialog path); the media
                 // flows (Recent/Categories) mirror this via trashArchiveAfterExtract.
-                if (_state.value.settings.deleteAfterExtract) trashSourcesAfterArchiveOp(sources)
+                // [OpResult.fullySucceeded] gates the trash: a partially failed or
+                // aborted extraction keeps the archive — the extraction is incomplete.
+                if (r.fullySucceeded && _state.value.settings.deleteAfterExtract) {
+                    trashSourcesAfterArchiveOp(sources)
+                }
             }
         }
         // Extraction doesn't touch the clipboard — don't drop a pending paste batch.
@@ -849,7 +853,9 @@ class BrowseViewModel(
                 _state.update { it.copy(progress = title to p) }
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = title) }
-            if (r.succeeded > 0 && _state.value.settings.deleteAfterCompress) {
+            // Creation is all-or-nothing, but gate on [OpResult.fullySucceeded] anyway:
+            // a cancelled or failed run must never delete the sources.
+            if (r.fullySucceeded && _state.value.settings.deleteAfterCompress) {
                 trashSourcesAfterArchiveOp(files)
             }
             load(dir)
@@ -933,8 +939,12 @@ class BrowseViewModel(
             if (r.succeeded > 0) {
                 _events.tryEmit(ExtractEvent.ExtractCompleted(target))
                 // The media flows (Recent/Categories) honor this too via
-                // trashArchiveAfterExtract — same trash-based convention.
-                if (_state.value.settings.deleteAfterExtract) trashSourcesAfterArchiveOp(listOf(file))
+                // trashArchiveAfterExtract — same trash-based convention. Only a
+                // fully successful extraction trashes the archive (partial failures
+                // and aborts keep it: the extraction is incomplete).
+                if (r.fullySucceeded && _state.value.settings.deleteAfterExtract) {
+                    trashSourcesAfterArchiveOp(listOf(file))
+                }
             }
             load(target.parentFile ?: return@launch)
         }

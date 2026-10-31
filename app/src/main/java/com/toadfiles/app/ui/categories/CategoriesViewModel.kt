@@ -317,19 +317,31 @@ class CategoriesViewModel(
         else -> "archive.zip"
     }
 
-    /** Zips [files] under the user-typed name into the first file's folder (".zip"
-     *  appended when missing, collisions deduped) — the same dialog flow as Browse. */
+    /** Zips [files] under the user-typed name — into the archive-folder setting's
+     *  folder when one is set (v1.7.3 default destination, same as Browse's compress
+     *  dialog), else the first file's folder (".zip" appended when missing, collisions
+     *  deduped) — the same dialog flow as Browse. */
     fun confirmZip(name: String) {
         val files = _state.value.pendingZipFiles ?: return
-        val dir = files.first().parentFile ?: return
+        val fallbackDir = files.first().parentFile ?: return
         val clean = name.trim()
         if (clean.isEmpty() || clean.contains('/') || clean.contains('\\')) {
             _state.update { it.copy(toast = "Enter a valid archive name") }
             return
         }
         _state.update { it.copy(pendingZipFiles = null, pendingZipName = "") }
-        val base = if (clean.lowercase().endsWith(".zip")) clean else "$clean.zip"
-        zipTo(files, File(dir, PathSafety.uniqueName(dir, base)))
+        viewModelScope.launch {
+            val dir = archiveFolderOr(fallbackDir)
+            val base = if (clean.lowercase().endsWith(".zip")) clean else "$clean.zip"
+            zipTo(files, File(dir, PathSafety.uniqueName(dir, base)))
+        }
+    }
+
+    /** Default archive destination (v1.7.3): the user's archive folder when set, else
+     *  [fallback] (the source's own folder). Mirrors BrowseViewModel.archiveFolderOr. */
+    private suspend fun archiveFolderOr(fallback: File): File {
+        val folder = container.settingsRepo.settings.first().archiveFolder.trim()
+        return if (folder.isNotEmpty()) File(folder) else fallback
     }
 
     private fun zipTo(files: List<File>, out: File) {
@@ -339,6 +351,9 @@ class CategoriesViewModel(
             onProgress = { p -> _state.update { it.copy(progress = "Zipping" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }
+                // v1.7.3 delete-after-compress, same trash convention as Browse:
+                // only a fully successful run moves the sources to the trash.
+                if (r.fullySucceeded) trashSourcesAfterCompress(files)
                 // The new archive lands outside the media index until the next scan; a
                 // refresh keeps the grid honest either way.
                 _state.value.selected?.let { open(it) }
@@ -370,7 +385,9 @@ class CategoriesViewModel(
             }
             startExtract(file, target)
         } else {
-            val dir = file.parentFile ?: run {
+            // "Extract to…" defaults to the archive-folder setting when one is set,
+            // else the archive's own folder — same as Browse's "Extract to…" (v1.7.3).
+            val fallbackDir = file.parentFile ?: run {
                 requestToast("Could not extract this archive")
                 return
             }
@@ -379,12 +396,15 @@ class CategoriesViewModel(
                 requestToast("Enter a valid folder name")
                 return
             }
-            val target = File(dir, clean)
-            if (target.exists()) {
-                // Same collision flow as Browse's "Extract to…": the user picks the strategy.
-                _state.update { it.copy(pendingExtractConflict = PendingExtractConflict(file, target)) }
-            } else {
-                startExtract(file, target)
+            viewModelScope.launch {
+                val dir = archiveFolderOr(fallbackDir)
+                val target = File(dir, clean)
+                if (target.exists()) {
+                    // Same collision flow as Browse's "Extract to…": the user picks the strategy.
+                    _state.update { it.copy(pendingExtractConflict = PendingExtractConflict(file, target)) }
+                } else {
+                    startExtract(file, target)
+                }
             }
         }
     }
@@ -413,7 +433,7 @@ class CategoriesViewModel(
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
-                if (r.succeeded > 0) trashArchiveAfterExtract(file)
+                if (r.fullySucceeded) trashArchiveAfterExtract(file)
                 // Re-list the open category + summaries, like confirmDelete does, so any
                 // newly scanned files show up where the user is looking.
                 _state.value.selected?.let { open(it) }
@@ -423,9 +443,27 @@ class CategoriesViewModel(
     }
 
     /**
-     * v1.7.3 delete-after-extract (media flows): after a successful extraction, honor
-     * the setting by moving the archive to the toadFILES trash (undoable) — the same
-     * convention BrowseViewModel.trashSourcesAfterArchiveOp follows.
+     * v1.7.3 delete-after-compress (Categories): after a fully successful compression,
+     * honor the setting by moving the sources to the toadFILES trash (undoable) — the
+     * same convention BrowseViewModel.trashSourcesAfterArchiveOp follows.
+     */
+    private fun trashSourcesAfterCompress(files: List<File>) {
+        viewModelScope.launch {
+            if (!container.settingsRepo.settings.first().deleteAfterCompress) return@launch
+            val live = files.filter { it.exists() }
+            if (live.isEmpty()) return@launch
+            val roots = container.fileRepo.roots().map { it.dir }
+            val result = Trash.trash(live, roots)
+            if (result.failureCount > 0) {
+                requestToast("Could not delete ${result.failureCount} source item(s)")
+            }
+        }
+    }
+
+    /**
+     * v1.7.3 delete-after-extract (media flows): after a fully successful extraction,
+     * honor the setting by moving the archive to the toadFILES trash (undoable) — the
+     * same convention BrowseViewModel.trashSourcesAfterArchiveOp follows.
      */
     private fun trashArchiveAfterExtract(file: File) {
         viewModelScope.launch {

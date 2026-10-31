@@ -225,8 +225,9 @@ class TabScreenshotsTest {
     @Test
     fun `01 home tab`() {
         startApp()
+        // v1.7.4: branding header removed; "Quick access" is the first content marker.
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
         }
         settle()
         shot("01-home.png")

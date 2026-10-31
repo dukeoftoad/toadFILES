@@ -172,7 +172,7 @@ class RecentViewModel(
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
-                if (r.succeeded > 0) trashArchiveAfterExtract(file)
+                if (r.fullySucceeded) trashArchiveAfterExtract(file)
                 refresh()
             },
         )
