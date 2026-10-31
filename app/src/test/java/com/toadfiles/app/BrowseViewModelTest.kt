@@ -5,10 +5,16 @@ import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.domain.ConflictStrategy
+import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.PropertiesBuilder
+import com.toadfiles.app.domain.SevenZipOpenAction
+import com.toadfiles.app.domain.SortMode
+import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.ZipOpenAction
+import com.toadfiles.app.ui.browse.ArchiveTapAction
 import com.toadfiles.app.ui.browse.BrowseViewModel
 import com.toadfiles.app.ui.browse.OpKind
 import kotlinx.coroutines.CancellableContinuation
@@ -643,6 +649,88 @@ class BrowseViewModelTest {
         container.settingsRepo.setSortMode(com.toadfiles.app.domain.SortMode.SIZE)
         vm.openDir(dir)
         await { vm.state.value.settings.sortMode == com.toadfiles.app.domain.SortMode.SIZE }
+    }
+
+    // -------------------------------------------------------------------------
+    // v1.7.3: archive tap dispatch (Settings → Archive actions), pull-to-refresh
+    // and sort/layout persistence.
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `archive tap action defaults to the v1.7.1 menu for both formats`() = runTest {
+        assertEquals(ArchiveTapAction.SHOW_MENU, vm.archiveTapAction("photos.zip"))
+        assertEquals(ArchiveTapAction.SHOW_MENU, vm.archiveTapAction("backup.7z"))
+    }
+
+    @Test
+    fun `archive tap action follows the zip and 7z settings separately`() = runTest {
+        container.settingsRepo.setZipOpenAction(ZipOpenAction.EXTRACT)
+        container.settingsRepo.setSevenZipOpenAction(SevenZipOpenAction.OPEN_WITH)
+        await {
+            vm.state.value.settings.zipOpenAction == ZipOpenAction.EXTRACT &&
+                vm.state.value.settings.sevenZipOpenAction == SevenZipOpenAction.OPEN_WITH
+        }
+
+        assertEquals(ArchiveTapAction.EXTRACT, vm.archiveTapAction("photos.zip"))
+        assertEquals(ArchiveTapAction.OPEN_WITH, vm.archiveTapAction("backup.7z"))
+        // Extension matching is case-insensitive (ArchiveOps lowercases it).
+        assertEquals(ArchiveTapAction.EXTRACT, vm.archiveTapAction("Photos.ZIP"))
+    }
+
+    @Test
+    fun `archive tap action EXTRACT runs the standard extract pipeline`() = runTest {
+        // Build a real one-entry zip so the extract can actually run.
+        val zip = File(dir, "tap.zip")
+        ZipOutputStream(FileOutputStream(zip)).use { zos ->
+            zos.putNextEntry(ZipEntry("hello.txt"))
+            zos.write("x".toByteArray())
+            zos.closeEntry()
+        }
+        vm.openDir(dir)
+        container.settingsRepo.setZipOpenAction(ZipOpenAction.EXTRACT)
+        await { vm.state.value.settings.zipOpenAction == ZipOpenAction.EXTRACT }
+
+        // The screen calls archiveTapAction() and, for EXTRACT, vm.extractZip() —
+        // the exact path the archive menu's "Extract here" uses.
+        assertEquals(ArchiveTapAction.EXTRACT, vm.archiveTapAction(zip.name))
+        vm.extractZip(zip)
+        await { File(dir, "tap").isDirectory && File(dir, "tap/hello.txt").isFile }
+    }
+
+    @Test
+    fun `refresh reloads the current folder listing`() = runTest {
+        vm.openDir(dir)
+        await { !vm.state.value.loading }
+        File(dir, "late.txt").writeText("x")
+
+        vm.refresh()
+
+        await { vm.state.value.items.any { it.name == "late.txt" } }
+    }
+
+    @Test
+    fun `setSort and setSortOrder persist through the settings repository`() = runTest {
+        vm.setSort(SortMode.DATE)
+        vm.setSortOrder(SortOrder.DESC)
+
+        await {
+            vm.state.value.settings.sortMode == SortMode.DATE &&
+                vm.state.value.settings.sortOrder == SortOrder.DESC
+        }
+        val persisted = container.settingsRepo.settings.first()
+        assertEquals(SortMode.DATE, persisted.sortMode)
+        assertEquals(SortOrder.DESC, persisted.sortOrder)
+    }
+
+    @Test
+    fun `toggleLayout flips and persists the browse layout`() = runTest {
+        vm.toggleLayout()
+        await { vm.state.value.settings.browseLayout == BrowseLayout.GRID }
+        assertEquals(BrowseLayout.GRID, container.settingsRepo.settings.first().browseLayout)
+
+        vm.toggleLayout()
+        await { vm.state.value.settings.browseLayout == BrowseLayout.LIST }
+        assertEquals(BrowseLayout.LIST, container.settingsRepo.settings.first().browseLayout)
     }
 
     @Test
