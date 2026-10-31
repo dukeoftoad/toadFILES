@@ -436,9 +436,16 @@ private fun UpdateAvailable(
 
 /**
  * Hand-maintained changelog. Kept inside the app (not pulled from a remote feed) so it works
- * offline and respects the no-internet promise. Append a new pair at the top when shipping.
+ * offline; network use is limited to the explicit About-page update check. Append a new
+ * pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.7.0" to listOf(
+        "Extract from ZIP archives everywhere: Browse gets \"Extract to…\" with the Replace / Keep both / Skip dialog, and Recent & Categories archive rows get \"Extract here\" — all through the hardened archive pipeline.",
+        "Check for updates right from the About page: one tap scans GitHub Releases and, when a newer signed APK exists, downloads it and offers install. It only runs when you press the button — no background traffic.",
+        "New Properties sheet for files and folders: type, location, recursive size, modified time, hidden flag.",
+        "Housekeeping: removed the never-functional Diagnostics toggle and consolidated duplicated action plumbing.",
+    ),
     "v1.5.0" to listOf(
         "Real Android share: the system share sheet hands files to the app you pick (single or batch), replacing the old local-copy share.",
         "Open files with the standard \"Just once / Always\" chooser so you can pin a default app per file type.",
