@@ -4,6 +4,27 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.7.3] — Unreleased
+
+### Added
+- **Browse-level file actions in Categories**: every category drill-in row
+  now opens the exact same action sheet Browse uses — Extract here / Extract
+  to… for `.zip`/`.7z` (with the shared conflict dialog on a name clash),
+  Rename, Zip, Properties (the full properties sheet, not a summary dialog),
+  Share, Delete-to-trash with Undo, Copy path, Open with… and Show in folder.
+- **Sort and layout controls in Categories**: the drill-in top bar gained
+  Browse's sort menu (name/size/date/type, ascending/descending) and
+  list/grid toggle; visual categories still default to the thumbnail grid.
+- **Batch operations in Categories' multi-select**: Zip the selection,
+  Extract a single selected archive, Properties and Rename via the overflow
+  menu, next to the existing Share and Delete.
+
+### Changed
+- **One action sheet implementation**: Categories and Recent now render the
+  shared `FileActionSheet` (and the shared `FileRow`/`FileGridCell` rows)
+  that Browse uses, instead of a trimmed-down media variant; the Recent
+  sheet's "Details" row is now labeled "Properties".
+
 ## [1.7.2] — 2026-10-31
 
 ### Fixed
