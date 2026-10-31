@@ -86,6 +86,7 @@ import java.io.File
 @Composable
 fun HomeScreen(
     bottomPadding: Dp,
+    topPadding: Dp = 0.dp,
     onOpenFolder: (String) -> Unit,
     onOpenStorage: () -> Unit,
     onOpenRecent: () -> Unit,
@@ -106,31 +107,26 @@ fun HomeScreen(
     LazyColumn(
         Modifier
             .fillMaxSize()
-            .padding(bottom = bottomPadding),
+            .padding(top = topPadding, bottom = bottomPadding),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
     ) {
-        // ---- Compact action row ----
-        // v1.7.4: the old branding header ("toadFILES" headline + tagline) was removed —
-        // it carried no information and wasted the top of the screen. What remains is a
-        // single slim icon row with exactly one entry per concern:
-        //   SIDE_MENU mode: hamburger (drawer is the primary nav; Trash lives inside it).
-        //   BOTTOM_BAR mode: a Trash shortcut (the only destination with no bottom tab).
-        // The redundant Settings gear is gone — Settings is always one tap away.
-        item {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (onOpenDrawer != null) {
+        // ---- Compact action row (drawer mode only) ----
+        // v1.8.1: the top-right Trash shortcut is GONE — Trash is now a permanent tile
+        // in Quick access below (one tap, same as every other destination). What
+        // remains of this row is the hamburger, and only in SIDE_MENU mode where the
+        // drawer is the primary nav. Bottom-bar mode has no action row at all, so the
+        // storage card starts right under the status bar.
+        if (onOpenDrawer != null) {
+            item {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Outlined.Menu, "Open navigation menu")
                     }
-                }
-                Spacer(Modifier.weight(1f))
-                if (onOpenDrawer == null) {
-                    IconButton(onClick = onOpenTrash) { Icon(Icons.Outlined.Delete, "Trash") }
                 }
             }
         }
@@ -141,9 +137,9 @@ fun HomeScreen(
             Card(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
                     .clickable { onOpenStorage() },
-                shape = RoundedCornerShape(26.dp),
+                shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                 ),
@@ -160,7 +156,7 @@ fun HomeScreen(
                             )
                         ),
                 ) {
-                    Column(Modifier.padding(20.dp)) {
+                    Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 Icons.Outlined.Storage,
@@ -180,7 +176,7 @@ fun HomeScreen(
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                         }
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(10.dp))
                         if (stats == null) {
                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         } else {
@@ -189,7 +185,7 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.headlineSmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(Modifier.height(8.dp))
                             LinearProgressIndicator(
                                 progress = { stats.usedFraction },
                                 modifier = Modifier
@@ -213,7 +209,7 @@ fun HomeScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 6.dp),
+                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -228,20 +224,34 @@ fun HomeScreen(
                 }
             }
         }
-        if (state.quickAccess.isEmpty()) {
-            item { EmptyState("No quick folders yet — tap Edit to pin some") }
-        } else {
-            item {
+        // The grid always renders: the permanent Trash tile leads it even when the user
+        // has no quick folders pinned yet.
+        item {
+            // +1 for the permanent Trash tile that always leads the grid.
+            val tileCount = state.quickAccess.size + 1
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(((state.quickAccess.size + 2) / 3 * 104).dp),
+                        .height(((tileCount + 2) / 3 * 100).dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     userScrollEnabled = false,
                 ) {
+                    // v1.8.1: Trash leads Quick access — a first-class destination tile
+                    // instead of the old top-right toolbar icon (which crowded the
+                    // status bar / storage card on some devices).
+                    item(key = "trash-tile", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(1) }) {
+                        QuickTile(
+                            name = "Trash",
+                            icon = Icons.Outlined.Delete,
+                            pinned = false,
+                            mostUsed = false,
+                            onClick = onOpenTrash,
+                            onLongClick = onOpenTrash,
+                        )
+                    }
                     gridItems(state.quickAccess, key = { it.dir.path }) { q ->
                         QuickTile(
                             name = q.label,
@@ -253,7 +263,6 @@ fun HomeScreen(
                         )
                     }
                 }
-            }
         }
 
         // ---- Favorites ----
@@ -261,7 +270,7 @@ fun HomeScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
+                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Outlined.Star, null, tint = MaterialTheme.colorScheme.tertiary)
@@ -298,7 +307,7 @@ fun HomeScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
+                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Outlined.History, null, tint = MaterialTheme.colorScheme.primary)

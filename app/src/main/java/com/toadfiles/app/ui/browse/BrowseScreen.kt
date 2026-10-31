@@ -206,6 +206,7 @@ fun BrowseScreen(
         topBar = {
             if (selectionMode) {
                 TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text("${state.selection.size} selected") },
                     navigationIcon = {
                         IconButton(onClick = { vm.clearSelection() }) {
@@ -319,6 +320,7 @@ fun BrowseScreen(
                 )
             } else {
                 TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text(state.dir?.name ?: "Browse", maxLines = 1) },
                     navigationIcon = {
                         IconButton(onClick = onNavigateUp) {

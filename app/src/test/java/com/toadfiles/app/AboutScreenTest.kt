@@ -21,7 +21,9 @@ import org.robolectric.annotation.Config
  *
  * Coverage:
  *  - the screen renders with the app name and version label
- *  - the storage, category-count, updates, changelog and credits sections appear
+ *  - the updates, changelog and credits sections appear
+ *  - the storage / files-on-device data cards are GONE (v1.8.1: they live on Home
+ *    and the Storage page instead) and the changelog is cut to the last 2 updates
  *  - the update panel shows its "Check for updates" action in the Idle state
  *  - the changelog "What's new" heading renders
  *  - the OSS credits "Open-source credits" heading renders
@@ -51,21 +53,26 @@ class AboutScreenTest {
     }
 
     @Test
-    fun `About shows the storage and files-on-this-device sections`() {
+    fun `About hides the removed storage and files data cards`() {
         render()
         // The "Version" row is always rendered.
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Version").fetchSemanticsNodes().isNotEmpty()
         }
-        // Use onAllNodes + fetchSemanticsNodes().isNotEmpty rather than onNodeWithText(...).assertExists
-        // because assertExists isn't available in the compose-ui-test version this project pins.
-        // The "isNotEmpty" check on the semantics-node list is the equivalent assertion.
+        // v1.8.1: the storage / per-category data cards were removed from About.
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Storage on this device").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Updates").fetchSemanticsNodes().isNotEmpty()
         }
+        assert(compose.onAllNodesWithText("Storage on this device").fetchSemanticsNodes().isEmpty())
+        assert(compose.onAllNodesWithText("Files on this device").fetchSemanticsNodes().isEmpty())
+        // The changelog shows the latest TWO updates only (v1.8.1, v1.8.0), not the
+        // full history.
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Files on this device").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("v1.8.1").fetchSemanticsNodes().isNotEmpty()
         }
+        assert(compose.onAllNodesWithText("v1.8.0").fetchSemanticsNodes().isNotEmpty())
+        assert(compose.onAllNodesWithText("v1.7.5").fetchSemanticsNodes().isEmpty())
+        assert(compose.onAllNodesWithText("v1.6.0").fetchSemanticsNodes().isEmpty())
     }
 
     @Test

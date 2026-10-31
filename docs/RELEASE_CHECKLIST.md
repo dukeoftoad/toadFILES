@@ -33,7 +33,8 @@ release. Every item exists because the static audit flagged it as a real-world r
       counts are true totals (COUNT/SUM aggregates), not capped at 2000.
 
 ## 4. Storage and volumes
-- [ ] API 26–29 device: removable SD card appears in storage roots. If the hidden
+- [ ] (v1.8.1: minSdk raised to API 34 — the old API 26–29 legacy-permission range is
+      gone.) API 34+ device: removable SD card appears in storage roots. If the hidden
       `StorageVolume.getPath()` getter fails on an OEM ROM, the volume is omitted and
       primary storage still works — record the device result here.
 - [ ] API 30+: `StorageVolume.directory` path works; SD-card browsing, copy/move across

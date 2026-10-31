@@ -10,10 +10,11 @@ android {
 
     defaultConfig {
         applicationId = "com.toadfiles.app"
-        minSdk = 26
+        // v1.8.1: minimum raised from Android 8.0 (API 26) to Android 14 (API 34).
+        minSdk = 34
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.8.0"
+        versionCode = 17
+        versionName = "1.8.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -109,7 +110,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video) // video thumbnails for the Categories/Recent grids
     implementation(libs.kotlinx.coroutines.core)
-    // 7z read support (pure Java, minSdk-26 safe). ZIP stays on java.util.zip.
+    // 7z read support (pure Java). ZIP stays on java.util.zip.
     implementation("org.apache.commons:commons-compress:1.27.1")
     // XZ for Java: commons-compress needs it for LZMA-based 7z entries at runtime.
     implementation("org.tukaani:xz:1.10")
