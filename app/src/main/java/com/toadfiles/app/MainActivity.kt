@@ -1,18 +1,13 @@
 package com.toadfiles.app
 
-import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,12 +51,6 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private var hasAllFilesAccess by mutableStateOf(false)
-    private var legacyGranted by mutableStateOf(false)
-
-    private val legacyPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            legacyGranted = granted
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -135,60 +124,41 @@ class MainActivity : ComponentActivity() {
     private val container get() = (application as ToadApp).container
 
     /**
-     * Re-reads the storage permission gate. Two regimes, split at Android 11 (R):
-     *  - API 30+: "All files access" ([Environment.isExternalStorageManager] backed by
-     *    MANAGE_EXTERNAL_STORAGE), granted from the system settings screen.
-     *  - API 26-29 (pre-R): the classic runtime permission WRITE_EXTERNAL_STORAGE from
-     *    the system dialog — the "All files access" screen does not exist below R
-     *    (requestLegacyExternalStorage in the manifest restores full-FS behavior there).
-     * Called in onCreate and onResume, so granting from Settings unlocks the app
-     * without a restart.
+     * Re-reads the storage permission gate. Since v1.8.1 the app requires Android 14
+     * (API 34+), so the only regime is "All files access"
+     * ([Environment.isExternalStorageManager] backed by MANAGE_EXTERNAL_STORAGE),
+     * granted from the system settings screen. Called in onCreate and onResume, so
+     * granting from Settings unlocks the app without a restart.
      */
     private fun refreshPermissionState() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Some ROMs/test environments can throw from this check; failing closed
-            // (showing onboarding) is always safe.
-            hasAllFilesAccess = try {
-                Environment.isExternalStorageManager()
-            } catch (_: Exception) {
-                false
-            }
-        } else {
-            // Pre-R (API 26-29): hasAllFilesAccess is never read below R — hasFileAccess()
-            // consults legacyGranted there — so leaving it false is the correct resting state.
-            hasAllFilesAccess = false
-            legacyGranted = checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
+        // Some ROMs/test environments can throw from this check; failing closed
+        // (showing onboarding) is always safe.
+        hasAllFilesAccess = try {
+            Environment.isExternalStorageManager()
+        } catch (_: Exception) {
+            false
         }
     }
 
-    /** Whole-UI gate: "All files access" on R+, the classic WRITE permission below R. */
-    private fun hasFileAccess(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) hasAllFilesAccess
-        else legacyGranted
+    /** Whole-UI gate: "All files access". */
+    private fun hasFileAccess(): Boolean = hasAllFilesAccess
 
     private fun requestFileAccess() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Deep-link to this app's own "All files access" toggle. The per-package intent
-            // is not handled by every ROM, so fall back to the generic all-files screen,
-            // then to the app details page as a last resort.
+        // Deep-link to this app's own "All files access" toggle. The per-package intent
+        // is not handled by every ROM, so fall back to the generic all-files screen,
+        // then to the app details page as a last resort.
+        try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:$packageName"),
+            )
+            startActivity(intent)
+        } catch (_: Exception) {
             try {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:$packageName"),
-                )
-                startActivity(intent)
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
             } catch (_: Exception) {
-                try {
-                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                } catch (_: Exception) {
-                    openAppSettings()
-                }
+                openAppSettings()
             }
-        } else {
-            // Pre-R (API 26-29): plain runtime dialog for WRITE_EXTERNAL_STORAGE — there is
-            // no special "all files" screen below Android 11, so this IS the required flow.
-            legacyPermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 

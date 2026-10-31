@@ -41,7 +41,7 @@ Encrypted vault (Keystore plus biometrics) is on the list. It'll show up once I'
 
 ## Install
 
-Grab the APK from the [Releases](https://github.com/dukeoftoad/toadFILES/releases) page. Android 8.0 or newer is required. On Android 11+ the app asks for "All files access", which is the standard permission for a file manager.
+Grab the APK from the [Releases](https://github.com/dukeoftoad/toadFILES/releases) page. Android 14 or newer is required (as of v1.8.1 the minimum is API 34). The app asks for "All files access", which is the standard permission for a file manager.
 
 ## Building from source
 
