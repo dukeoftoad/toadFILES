@@ -23,7 +23,10 @@ import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.ui.components.PendingPasswordRetry
 import com.toadfiles.app.ui.components.PropertiesDetail
+import com.toadfiles.app.ui.components.VolumeChoice
+import com.toadfiles.app.ui.components.customVolumeTextToBytes
 import com.toadfiles.app.ui.components.computeFilePropertiesDetail
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +83,24 @@ data class BrowseUiState(
     val pendingZipDestination: File? = null,
     /** Existing archive target awaiting the overwrite confirmation. */
     val pendingZipOverwrite: File? = null,
+    /** 7z data encryption (AES-256) — 7z only; ZIP creation cannot be encrypted. */
+    val pendingZipEncrypted: Boolean = false,
+    /** Typed password pair for the encrypted-7z flow; blanked whenever encryption turns off. */
+    val pendingZipPassword: String = "",
+    val pendingZipPasswordConfirm: String = "",
+    /** Split-into-volumes size in bytes; null = no split (see [setZipVolume]). */
+    val pendingZipVolumeBytes: Long? = null,
+    /** True while the Custom… volume option is selected; [pendingZipVolumeCustomText] then holds the megabytes. */
+    val pendingZipVolumeCustom: Boolean = false,
+    val pendingZipVolumeCustomText: String = "",
+    /** Per-run override of delete-after-compress (initialized from the persisted setting). */
+    val pendingZipDeleteSources: Boolean = false,
+    /** One archive per source instead of a single batch archive; offered for count > 1. */
+    val pendingZipSeparate: Boolean = false,
+    /** Encrypted archive whose extraction is waiting for a password (drives PasswordPromptDialog). */
+    val pendingPasswordFor: File? = null,
+    /** Retry context for [pendingPasswordFor]: same target dir / replace semantics as the original call. */
+    val pendingPasswordRetry: PendingPasswordRetry? = null,
     val pendingConflict: PendingConflict? = null,
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
@@ -446,7 +467,13 @@ class BrowseViewModel(
      */
     fun archiveTapAction(fileName: String): ArchiveTapAction {
         val s = _state.value.settings
-        return if (ArchiveOps.extension(fileName) == "7z") {
+        // 7z archives AND 7z volume sets (.7z.001) honor the 7z tap setting; everything
+        // else extractable (.zip, .zip.001 volume starts) honors the zip setting.
+        // A volume's later parts (.002, …) are not extractable entry points and never
+        // reach here ([ArchiveOps.canExtract] is the gate in the screens).
+        val is7z = ArchiveOps.extension(fileName) == "7z" ||
+            fileName.lowercase().endsWith(".7z.001")
+        return if (is7z) {
             when (s.sevenZipOpenAction) {
                 SevenZipOpenAction.MENU -> ArchiveTapAction.SHOW_MENU
                 SevenZipOpenAction.EXTRACT -> ArchiveTapAction.EXTRACT
@@ -691,20 +718,36 @@ class BrowseViewModel(
                         File(parent, PathSafety.uniqueName(parent, target.name))
                     } else target
                     extractDest = dest
-                    ArchiveOps.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, onProgress = onP)
+                    ArchiveOps.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, password = null, onProgress = onP)
                 }
             }
         }) { r ->
             if (kind == OpKind.MOVE && r.succeeded > 0) remapMovedFavorites(sources, target)
             // Post-extract redirect (v1.7.1): navigate into the extracted folder.
-            if (kind == OpKind.ZIP_EXTRACT && r.succeeded > 0) {
-                extractDest?.let { d -> _events.tryEmit(ExtractEvent.ExtractCompleted(d)) }
-                // v1.7.3 delete-after-extract (conflict-dialog path); the media
-                // flows (Recent/Categories) mirror this via trashArchiveAfterExtract.
-                // [OpResult.fullySucceeded] gates the trash: a partially failed or
-                // aborted extraction keeps the archive — the extraction is incomplete.
-                if (r.fullySucceeded && _state.value.settings.deleteAfterExtract) {
-                    trashSourcesAfterArchiveOp(sources)
+            if (kind == OpKind.ZIP_EXTRACT) {
+                if (r.passwordRequired) {
+                    // Encrypted archive: ask for the password instead of reporting a
+                    // failure. Retry keeps this run's own target dir / replace choice.
+                    _state.update {
+                        it.copy(
+                            result = null,
+                            pendingPasswordFor = sources.first(),
+                            pendingPasswordRetry = PendingPasswordRetry(
+                                sources.first(),
+                                extractDest ?: target,
+                                strategy == ConflictStrategy.REPLACE,
+                            ),
+                        )
+                    }
+                } else if (r.succeeded > 0) {
+                    extractDest?.let { d -> _events.tryEmit(ExtractEvent.ExtractCompleted(d)) }
+                    // v1.7.3 delete-after-extract (conflict-dialog path); the media
+                    // flows (Recent/Categories) mirror this via trashArchiveAfterExtract.
+                    // [OpResult.fullySucceeded] gates the trash: a partially failed or
+                    // aborted extraction keeps the archive — the extraction is incomplete.
+                    if (r.fullySucceeded && _state.value.settings.deleteAfterExtract) {
+                        trashSourcesAfterArchiveOp(sources)
+                    }
                 }
             }
         }
@@ -752,7 +795,9 @@ class BrowseViewModel(
         return if (folder.isNotEmpty()) File(folder) else fallback
     }
 
-    /** Opens the compress dialog for a batch (UI flow). */
+    /** Opens the compress dialog for a batch (UI flow). The delete-sources checkbox
+     *  starts as the persisted deleteAfterCompress setting — a per-run override from
+     *  there on, not a second read at confirm time. */
     fun requestZip(files: List<File>) {
         _state.update {
             it.copy(
@@ -761,18 +806,71 @@ class BrowseViewModel(
                 pendingZipFormat = ArchiveFormat.ZIP,
                 pendingZipLevel = CompressLevel.NORMAL,
                 pendingZipDestination = archiveFolderOr(it.dir),
+                pendingZipEncrypted = false,
+                pendingZipPassword = "",
+                pendingZipPasswordConfirm = "",
+                pendingZipVolumeBytes = null,
+                pendingZipVolumeCustom = false,
+                pendingZipVolumeCustomText = "",
+                pendingZipDeleteSources = it.settings.deleteAfterCompress,
+                pendingZipSeparate = false,
             )
         }
     }
 
     fun dismissZipDialog() = _state.update {
-        it.copy(pendingZipFiles = null, pendingZipName = "", pendingZipOverwrite = null)
+        it.copy(
+            pendingZipFiles = null, pendingZipName = "", pendingZipOverwrite = null,
+            pendingZipEncrypted = false, pendingZipPassword = "", pendingZipPasswordConfirm = "",
+            pendingZipVolumeBytes = null, pendingZipVolumeCustom = false, pendingZipVolumeCustomText = "",
+            pendingZipDeleteSources = false, pendingZipSeparate = false,
+        )
     }
 
     /** Compress-dialog state setters (the dialog's fields are backed by the VM). */
     fun setZipName(name: String) = _state.update { it.copy(pendingZipName = name) }
-    fun setZipFormat(format: ArchiveFormat) = _state.update { it.copy(pendingZipFormat = format) }
+
+    /** commons-compress cannot create encrypted zip: switching the format to ZIP also
+     *  drops the encryption choice and both password fields. */
+    fun setZipFormat(format: ArchiveFormat) = _state.update {
+        if (format == ArchiveFormat.ZIP &&
+            (it.pendingZipEncrypted || it.pendingZipPassword.isNotEmpty() || it.pendingZipPasswordConfirm.isNotEmpty())
+        ) {
+            it.copy(
+                pendingZipFormat = format,
+                pendingZipEncrypted = false,
+                pendingZipPassword = "",
+                pendingZipPasswordConfirm = "",
+            )
+        } else it.copy(pendingZipFormat = format)
+    }
+
     fun setZipLevel(level: CompressLevel) = _state.update { it.copy(pendingZipLevel = level) }
+    fun setZipEncrypted(on: Boolean) = _state.update { it.copy(pendingZipEncrypted = on) }
+    fun setZipPassword(pw: String) = _state.update { it.copy(pendingZipPassword = pw) }
+    fun setZipPasswordConfirm(pw: String) = _state.update { it.copy(pendingZipPasswordConfirm = pw) }
+
+    /** Applies a "Split into volumes" pick: presets map straight to bytes, Custom…
+     *  keeps the draft text field as the source of truth (see [resolveVolumeBytes]). */
+    fun setZipVolume(choice: VolumeChoice) = _state.update {
+        it.copy(
+            pendingZipVolumeBytes = choice.bytes,
+            pendingZipVolumeCustom = choice == VolumeChoice.CUSTOM,
+            pendingZipVolumeCustomText = if (choice == VolumeChoice.CUSTOM) it.pendingZipVolumeCustomText else "",
+        )
+    }
+
+    fun setZipVolumeCustomText(text: String) = _state.update { it.copy(pendingZipVolumeCustomText = text) }
+    fun setZipDeleteSources(on: Boolean) = _state.update { it.copy(pendingZipDeleteSources = on) }
+    fun setZipSeparate(on: Boolean) = _state.update { it.copy(pendingZipSeparate = on) }
+
+    /** Effective volume size: the picked preset, or Custom… parsed from its megabytes
+     *  text (blank/invalid/non-positive ⇒ no split). */
+    fun resolveVolumeBytes(): Long? {
+        val st = _state.value
+        return if (st.pendingZipVolumeCustom) customVolumeTextToBytes(st.pendingZipVolumeCustomText)
+        else st.pendingZipVolumeBytes
+    }
 
     /** Suggested archive name: the single item's name, or "archive.zip" for batches. */
     fun suggestedZipName(files: List<File>): String = when (files.size) {
@@ -796,9 +894,12 @@ class BrowseViewModel(
     }
 
     /**
-     * Compresses [name] under the dialog's format/level/destination. When the target
-     * already exists, the overwriteConfirm setting decides: ask first (Cancel returns
-     * to the dialog for a new name) or replace silently.
+     * Compresses [name] under the dialog's format/level/destination. Validations as
+     * before (non-blank name, no path separators) plus the password rules when data
+     * encryption is on. When a target already exists — the archive itself, or with
+     * volumes on the first volume of an existing set ("<name>.<ext>.001") — the
+     * overwriteConfirm setting decides: ask first (Cancel returns to the dialog) or
+     * replace silently.
      */
     fun confirmZip(name: String) {
         val st = _state.value
@@ -809,28 +910,84 @@ class BrowseViewModel(
             _state.update { it.copy(toast = "Enter a valid archive name") }
             return
         }
-        val target = File(dest, normalizeArchiveName(clean, st.pendingZipFormat))
-        if (target.exists() && st.settings.overwriteConfirm) {
-            _state.update { it.copy(pendingZipOverwrite = target) }
+        val encrypted = st.pendingZipEncrypted && st.pendingZipFormat == ArchiveFormat.SEVEN_Z
+        if (encrypted) {
+            if (st.pendingZipPassword.isBlank()) {
+                _state.update { it.copy(toast = "Enter a password") }
+                return
+            }
+            if (st.pendingZipPassword != st.pendingZipPasswordConfirm) {
+                _state.update { it.copy(toast = "Passwords do not match") }
+                return
+            }
+        }
+        // The typed name is what the run uses; sync it so an overwrite confirm can
+        // recompute the exact same plan without carrying a second copy of the name.
+        _state.update { it.copy(pendingZipName = clean) }
+        val hit = plannedTargets().firstOrNull(::collidesWith)
+        if (hit != null && st.settings.overwriteConfirm) {
+            _state.update { it.copy(pendingZipOverwrite = hit) }
             return
         }
-        startCompress(files, target, st.pendingZipFormat, st.pendingZipLevel)
+        runConfirmedZip()
     }
 
-    /** Overwrite confirmed: publish over the existing target after all. */
-    fun confirmZipOverwrite() {
+    /** One planned output file per run: the single batch archive, or — when "separate
+     *  archive for each item" is on — one per source, named after the source. Reads the
+     *  LIVE state: callers run it after the typed name has been synced into
+     *  pendingZipName, so the single-mode target is exactly what the user typed. */
+    private fun plannedTargets(): List<File> {
         val st = _state.value
-        val target = st.pendingZipOverwrite ?: return
-        val files = st.pendingZipFiles ?: return
-        startCompress(files, target, st.pendingZipFormat, st.pendingZipLevel)
+        val files = st.pendingZipFiles ?: return emptyList()
+        val dest = st.pendingZipDestination ?: st.dir ?: return emptyList()
+        val separate = st.pendingZipSeparate && files.size > 1
+        return if (separate) {
+            files.map { src -> File(dest, normalizeArchiveName(src.nameWithoutExtension, st.pendingZipFormat)) }
+        } else {
+            listOf(File(dest, normalizeArchiveName(st.pendingZipName.trim(), st.pendingZipFormat)))
+        }
+    }
+
+    /** A target collides when it exists — or, with volumes on, when the first volume
+     *  of an existing set ("<name>.<ext>.001") does. */
+    private fun collidesWith(target: File): Boolean {
+        if (target.exists()) return true
+        return resolveVolumeBytes() != null &&
+            File(target.parentFile ?: target, "${target.name}.001").exists()
+    }
+
+    /** Overwrite confirmed: publish over the colliding target(s) after all. */
+    fun confirmZipOverwrite() {
+        if (_state.value.pendingZipOverwrite == null) return
+        runConfirmedZip()
     }
 
     /** Overwrite declined: back to the compress dialog so the user can pick a new name. */
     fun dismissZipOverwrite() = _state.update { it.copy(pendingZipOverwrite = null) }
 
-    private fun startCompress(files: List<File>, target: File, format: ArchiveFormat, level: CompressLevel) {
-        _state.update { it.copy(pendingZipFiles = null, pendingZipName = "", pendingZipOverwrite = null) }
-        zipTo(files, target, format, level)
+    /**
+     * Runs the confirmed plan: one archive (or one per source), with the dialog's
+     * encryption, volume size and delete-sources choice. Clears the dialog state —
+     * passwords included, they are never left in state — before the op starts.
+     */
+    private fun runConfirmedZip() {
+        val st = _state.value
+        val files = st.pendingZipFiles ?: return
+        val dest = st.pendingZipDestination ?: st.dir ?: return
+        val targets = plannedTargets()
+        val encrypted = st.pendingZipEncrypted && st.pendingZipFormat == ArchiveFormat.SEVEN_Z
+        val password: CharArray? = if (encrypted) st.pendingZipPassword.toCharArray() else null
+        val volumeBytes = resolveVolumeBytes()
+        val deleteSources = st.pendingZipDeleteSources
+        _state.update {
+            it.copy(
+                pendingZipFiles = null, pendingZipName = "", pendingZipOverwrite = null,
+                pendingZipEncrypted = false, pendingZipPassword = "", pendingZipPasswordConfirm = "",
+                pendingZipVolumeBytes = null, pendingZipVolumeCustom = false, pendingZipVolumeCustomText = "",
+                pendingZipDeleteSources = false, pendingZipSeparate = false,
+            )
+        }
+        zipAll(files, targets, st.pendingZipFormat, st.pendingZipLevel, password, volumeBytes, deleteSources)
     }
 
     /** Quick zip with the classic auto name (tests; UI goes through the compress dialog). */
@@ -844,21 +1001,66 @@ class BrowseViewModel(
         out: File,
         format: ArchiveFormat = ArchiveFormat.ZIP,
         level: CompressLevel = CompressLevel.NORMAL,
+        password: CharArray? = null,
+        volumeBytes: Long? = null,
+        deleteSources: Boolean = _state.value.settings.deleteAfterCompress,
     ) {
-        val dir = _state.value.dir ?: return
+        zipAll(files, listOf(out), format, level, password, volumeBytes, deleteSources)
+    }
+
+    /**
+     * The one compress engine (v1.8.0): runs [targets] sequentially — a single archive,
+     * or one per source for "separate archive for each item" — with the same format,
+     * level, password and volume size for each, and aggregates the per-archive results
+     * into one combined [OpResult] (summed counts; cancelled if any run was cancelled;
+     * failures concatenated). Progress ticks across archives stay monotonic: the running
+     * base of finished archives is added to each tick.
+     */
+    private fun zipAll(
+        files: List<File>,
+        targets: List<File>,
+        format: ArchiveFormat,
+        level: CompressLevel,
+        password: CharArray?,
+        volumeBytes: Long?,
+        deleteSources: Boolean,
+    ) {
+        val dir = _state.value.dir
+        val separate = targets.size > 1
         val title = if (format == ArchiveFormat.SEVEN_Z) "Compressing" else "Zipping"
         _state.update { it.copy(progress = title to OpProgress(0, files.size, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ArchiveOps.compress(files, out, format, level) { p ->
-                _state.update { it.copy(progress = title to p) }
+            var succeeded = 0
+            var skipped = 0
+            var failed = 0
+            var cancelled = false
+            val failures = mutableListOf<String>()
+            var base = 0
+            for (i in targets.indices) {
+                val srcs = if (separate) listOf(files[i]) else files
+                val r = ArchiveOps.compress(srcs, targets[i], format, level, password = password, volumeBytes = volumeBytes) { p ->
+                    _state.update { it.copy(progress = title to OpProgress(base + p.done, files.size, p.currentItem)) }
+                }
+                succeeded += r.succeeded
+                skipped += r.skipped
+                failed += r.failed
+                if (r.cancelled) cancelled = true
+                failures += r.failures
+                base += r.succeeded
+                // Delete-after-compress honors the dialog checkbox (initialized from the
+                // persisted setting): per archive, only a fully successful run trashes
+                // that archive's own source — a failed sibling never deletes another's.
+                if (deleteSources && r.fullySucceeded) trashSourcesAfterArchiveOp(srcs)
             }
-            _state.update { it.copy(progress = null, result = r, resultTitle = title) }
-            // Creation is all-or-nothing, but gate on [OpResult.fullySucceeded] anyway:
-            // a cancelled or failed run must never delete the sources.
-            if (r.fullySucceeded && _state.value.settings.deleteAfterCompress) {
-                trashSourcesAfterArchiveOp(files)
-            }
-            load(dir)
+            val combined = OpResult(
+                succeeded = succeeded,
+                skipped = skipped,
+                failed = failed,
+                cancelled = cancelled,
+                failures = failures.distinct(),
+            )
+            _state.update { it.copy(progress = null, result = combined, resultTitle = title) }
+            dir?.let { load(it) }
         }
     }
 
@@ -926,14 +1128,28 @@ class BrowseViewModel(
     /** Runs the ArchiveOps extract with Browse's standard progress/result plumbing and
      *  emits an [ExtractEvent.ExtractCompleted] one-shot so the screen can navigate into
      *  the extracted folder (v1.7.1 post-extract redirect). v1.7.3: a successful
-     *  extraction honors deleteAfterExtract (app delete convention: trash, undoable). */
-    private fun startExtract(file: File, target: File) {
+     *  extraction honors deleteAfterExtract (app delete convention: trash, undoable).
+     *  v1.8.0: [password] retries an encrypted archive; an encrypted archive without a
+     *  password comes back [OpResult.passwordRequired] and opens the password prompt
+     *  instead of reporting a failure. */
+    private fun startExtract(file: File, target: File, replace: Boolean = false, password: CharArray? = null) {
         _state.update {
             it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, ""))
         }
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = ArchiveOps.extract(file, target, false) { p ->
+            val r = ArchiveOps.extract(file, target, replace, password = password) { p ->
                 _state.update { it.copy(progress = "Extracting" to p) }
+            }
+            if (r.passwordRequired) {
+                // Encrypted archive: ask for the password, don't report a failure.
+                _state.update {
+                    it.copy(
+                        progress = null, result = null,
+                        pendingPasswordFor = file,
+                        pendingPasswordRetry = PendingPasswordRetry(file, target, replace),
+                    )
+                }
+                return@launch
             }
             _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
             if (r.succeeded > 0) {
@@ -948,6 +1164,23 @@ class BrowseViewModel(
             }
             load(target.parentFile ?: return@launch)
         }
+    }
+
+    /** Retry hook for [PasswordPromptDialog]: re-runs the stored extract with the typed
+     *  password, keeping the original target dir / replace semantics. A wrong password
+     *  comes back as a normal failure result through the existing result dialog. */
+    fun retryExtractWithPassword(password: String) {
+        val ctx = _state.value.pendingPasswordRetry ?: return
+        dismissPasswordPrompt()
+        if (password.isBlank()) {
+            _state.update { it.copy(toast = "Enter a password") }
+            return
+        }
+        startExtract(ctx.archive, ctx.target, ctx.replace, password.toCharArray())
+    }
+
+    fun dismissPasswordPrompt() = _state.update {
+        it.copy(pendingPasswordFor = null, pendingPasswordRetry = null)
     }
 
     // ---------- properties ----------

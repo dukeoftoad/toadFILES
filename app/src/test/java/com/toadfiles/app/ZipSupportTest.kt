@@ -119,21 +119,29 @@ class ZipSupportTest {
     // ---------- v1.7.3 compress levels ----------
 
     @Test
-    fun `compress levels map to deflater constants`() {
-        assertEquals(Deflater.NO_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.STORE))
-        assertEquals(Deflater.BEST_SPEED, ZipSupport.deflaterLevel(CompressLevel.FAST))
+    fun `compress levels map to deflater levels`() {
+        assertEquals(Deflater.NO_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.NONE))
+        assertEquals(Deflater.BEST_SPEED, ZipSupport.deflaterLevel(CompressLevel.FASTEST))
+        assertEquals(3, ZipSupport.deflaterLevel(CompressLevel.FAST))
         assertEquals(Deflater.DEFAULT_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.NORMAL))
         assertEquals(Deflater.BEST_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.MAXIMUM))
+        // Deflate caps at 9: there is nothing above BEST_COMPRESSION, so zip's ULTRA
+        // equals MAXIMUM (7z is where ULTRA actually differs, via its 128 MiB dict).
+        assertEquals(Deflater.BEST_COMPRESSION, ZipSupport.deflaterLevel(CompressLevel.ULTRA))
+        assertEquals(
+            ZipSupport.deflaterLevel(CompressLevel.MAXIMUM),
+            ZipSupport.deflaterLevel(CompressLevel.ULTRA),
+        )
     }
 
     @Test
-    fun `STORE level creates stored entries and round-trips`() = runBlocking {
+    fun `NONE level creates stored entries and round-trips`() = runBlocking {
         val dir = tmp.newFolder("lv1")
         val payload = ByteArray(50_000) { (it % 251).toByte() } // incompressible
         val src = File(dir, "blob.bin").apply { writeBytes(payload) }
         val out = File(dir, "stored.zip")
 
-        val r = ZipSupport.zip(listOf(src), out, CompressLevel.STORE)
+        val r = ZipSupport.zip(listOf(src), out, CompressLevel.NONE)
 
         assertEquals(1, r.succeeded)
         ZipFile(out).use { zf ->

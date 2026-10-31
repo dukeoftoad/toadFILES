@@ -23,8 +23,11 @@ import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.domain.Sorting
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.ui.components.OpRunner
+import com.toadfiles.app.ui.components.PendingPasswordRetry
 import com.toadfiles.app.ui.components.PropertiesDetail
+import com.toadfiles.app.ui.components.VolumeChoice
 import com.toadfiles.app.ui.components.computeFilePropertiesDetail
+import com.toadfiles.app.ui.components.customVolumeTextToBytes
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +70,24 @@ data class CategoriesUiState(
     val pendingZipDestination: File? = null,
     /** "Extract to…" collision waiting for a strategy. */
     val pendingExtractConflict: PendingExtractConflict? = null,
+    /** 7z data encryption (AES-256) — 7z only; ZIP creation cannot be encrypted. */
+    val pendingZipEncrypted: Boolean = false,
+    /** Typed password pair for the encrypted-7z flow; blanked whenever encryption turns off. */
+    val pendingZipPassword: String = "",
+    val pendingZipPasswordConfirm: String = "",
+    /** Split-into-volumes size in bytes; null = no split (see [setZipVolume]). */
+    val pendingZipVolumeBytes: Long? = null,
+    /** True while the Custom… volume option is selected; [pendingZipVolumeCustomText] then holds the megabytes. */
+    val pendingZipVolumeCustom: Boolean = false,
+    val pendingZipVolumeCustomText: String = "",
+    /** Per-run override of delete-after-compress (initialized from the persisted setting). */
+    val pendingZipDeleteSources: Boolean = false,
+    /** One archive per source instead of a single batch archive; offered for count > 1. */
+    val pendingZipSeparate: Boolean = false,
+    /** Encrypted archive whose extraction is waiting for a password (drives PasswordPromptDialog). */
+    val pendingPasswordFor: File? = null,
+    /** Retry context for [pendingPasswordFor]: same target dir / replace semantics as the original call. */
+    val pendingPasswordRetry: PendingPasswordRetry? = null,
     /** Item whose read-only properties sheet is open; null when closed. */
     val pendingProperties: File? = null,
     /** Computed size/contents for the properties sheet; null while the walk is running. */
@@ -307,7 +328,12 @@ class CategoriesViewModel(
 
     // ---------- zip (Browse parity) ----------
 
-    /** Opens the archive-name dialog for a batch (UI flow). */
+    /**
+     * Opens the compress dialog for a batch (UI flow). The delete-sources checkbox
+     * starts as the persisted deleteAfterCompress setting (a per-run override from
+     * there on); like the destination it is resolved asynchronously — DataStore reads
+     * can't happen on the caller's thread — and only while the dialog is still open.
+     */
     fun requestZip(files: List<File>) {
         if (files.isEmpty()) return
         _state.update {
@@ -316,14 +342,27 @@ class CategoriesViewModel(
                 pendingZipName = suggestedZipName(files),
                 pendingZipFormat = ArchiveFormat.ZIP,
                 pendingZipLevel = CompressLevel.NORMAL,
+                pendingZipEncrypted = false,
+                pendingZipPassword = "",
+                pendingZipPasswordConfirm = "",
+                pendingZipVolumeBytes = null,
+                pendingZipVolumeCustom = false,
+                pendingZipVolumeCustomText = "",
+                pendingZipDeleteSources = false, // resolved below from the persisted setting
+                pendingZipSeparate = false,
             )
         }
-        // Destination preview: archive-folder setting when set, else the source's own
-        // folder (resolved on IO — same semantics Browse shows in its dialog).
-        val fallbackDir = files.first().parentFile
+        // Destination preview + delete-sources default: archive-folder setting when set,
+        // else the source's own folder (resolved on IO — same semantics Browse shows).
+        val fallbackDir = files.first().parentFile ?: return
         viewModelScope.launch {
-            val dest = archiveFolderOr(fallbackDir ?: return@launch)
-            _state.update { if (it.pendingZipFiles != null) it.copy(pendingZipDestination = dest) else it }
+            val s = container.settingsRepo.settings.first()
+            val dest = archiveFolderOr(fallbackDir)
+            _state.update {
+                if (it.pendingZipFiles != null) {
+                    it.copy(pendingZipDestination = dest, pendingZipDeleteSources = s.deleteAfterCompress)
+                } else it
+            }
         }
     }
 
@@ -334,11 +373,53 @@ class CategoriesViewModel(
             pendingZipFiles = null, pendingZipName = "",
             pendingZipFormat = ArchiveFormat.ZIP, pendingZipLevel = CompressLevel.NORMAL,
             pendingZipDestination = null,
+            pendingZipEncrypted = false, pendingZipPassword = "", pendingZipPasswordConfirm = "",
+            pendingZipVolumeBytes = null, pendingZipVolumeCustom = false, pendingZipVolumeCustomText = "",
+            pendingZipDeleteSources = false, pendingZipSeparate = false,
         )
     }
 
-    fun setZipFormat(f: ArchiveFormat) = _state.update { it.copy(pendingZipFormat = f) }
+    /** commons-compress cannot create encrypted zip: switching the format to ZIP also
+     *  drops the encryption choice and both password fields. */
+    fun setZipFormat(f: ArchiveFormat) = _state.update {
+        if (f == ArchiveFormat.ZIP &&
+            (it.pendingZipEncrypted || it.pendingZipPassword.isNotEmpty() || it.pendingZipPasswordConfirm.isNotEmpty())
+        ) {
+            it.copy(
+                pendingZipFormat = f,
+                pendingZipEncrypted = false,
+                pendingZipPassword = "",
+                pendingZipPasswordConfirm = "",
+            )
+        } else it.copy(pendingZipFormat = f)
+    }
+
     fun setZipLevel(l: CompressLevel) = _state.update { it.copy(pendingZipLevel = l) }
+    fun setZipEncrypted(on: Boolean) = _state.update { it.copy(pendingZipEncrypted = on) }
+    fun setZipPassword(pw: String) = _state.update { it.copy(pendingZipPassword = pw) }
+    fun setZipPasswordConfirm(pw: String) = _state.update { it.copy(pendingZipPasswordConfirm = pw) }
+
+    /** Applies a "Split into volumes" pick: presets map straight to bytes, Custom…
+     *  keeps the draft text field as the source of truth (see [resolveVolumeBytes]). */
+    fun setZipVolume(choice: VolumeChoice) = _state.update {
+        it.copy(
+            pendingZipVolumeBytes = choice.bytes,
+            pendingZipVolumeCustom = choice == VolumeChoice.CUSTOM,
+            pendingZipVolumeCustomText = if (choice == VolumeChoice.CUSTOM) it.pendingZipVolumeCustomText else "",
+        )
+    }
+
+    fun setZipVolumeCustomText(text: String) = _state.update { it.copy(pendingZipVolumeCustomText = text) }
+    fun setZipDeleteSources(on: Boolean) = _state.update { it.copy(pendingZipDeleteSources = on) }
+    fun setZipSeparate(on: Boolean) = _state.update { it.copy(pendingZipSeparate = on) }
+
+    /** Effective volume size: the picked preset, or Custom… parsed from its megabytes
+     *  text (blank/invalid/non-positive ⇒ no split). */
+    fun resolveVolumeBytes(): Long? {
+        val st = _state.value
+        return if (st.pendingZipVolumeCustom) customVolumeTextToBytes(st.pendingZipVolumeCustomText)
+        else st.pendingZipVolumeBytes
+    }
 
     /** Suggested archive name: the single item's name, or "archive.zip" for batches. */
     fun suggestedZipName(files: List<File>): String = when (files.size) {
@@ -351,8 +432,10 @@ class CategoriesViewModel(
 
     /** Zips [files] under the user-typed name — into the archive-folder setting's
      *  folder when one is set (v1.7.3 default destination, same as Browse's compress
-     *  dialog), else the first file's folder (".zip" appended when missing, collisions
-     *  deduped) — the same dialog flow as Browse. */
+     *  dialog), else the first file's folder (the chosen format's extension appended
+     *  when missing, collisions deduped) — the same dialog flow as Browse. v1.8.0 adds
+     *  the dialog's encryption (7z), volume size and delete-sources choice, plus the
+     *  "separate archive for each item" mode. */
     fun confirmZip(name: String) {
         val st = _state.value
         val files = st.pendingZipFiles ?: return
@@ -364,19 +447,50 @@ class CategoriesViewModel(
             _state.update { it.copy(toast = "Enter a valid archive name") }
             return
         }
+        val encrypted = st.pendingZipEncrypted && format == ArchiveFormat.SEVEN_Z
+        if (encrypted) {
+            if (st.pendingZipPassword.isBlank()) {
+                _state.update { it.copy(toast = "Enter a password") }
+                return
+            }
+            if (st.pendingZipPassword != st.pendingZipPasswordConfirm) {
+                _state.update { it.copy(toast = "Passwords do not match") }
+                return
+            }
+        }
+        // Resolve everything the run needs before the dialog state is cleared —
+        // passwords are never left in state.
+        val password: CharArray? = if (encrypted) st.pendingZipPassword.toCharArray() else null
+        val volumeBytes = resolveVolumeBytes()
+        val deleteSources = st.pendingZipDeleteSources
+        val separate = st.pendingZipSeparate && files.size > 1
         _state.update {
             it.copy(
                 pendingZipFiles = null, pendingZipName = "",
                 pendingZipFormat = ArchiveFormat.ZIP, pendingZipLevel = CompressLevel.NORMAL,
                 pendingZipDestination = null,
+                pendingZipEncrypted = false, pendingZipPassword = "", pendingZipPasswordConfirm = "",
+                pendingZipVolumeBytes = null, pendingZipVolumeCustom = false, pendingZipVolumeCustomText = "",
+                pendingZipDeleteSources = false, pendingZipSeparate = false,
             )
         }
         viewModelScope.launch {
             val dir = archiveFolderOr(fallbackDir)
-            // Extension follows the chosen format (ZIP → .zip, 7z → .7z).
-            val base = if (clean.lowercase().endsWith("." + format.extension)) clean
-            else "$clean.${format.extension}"
-            zipTo(files, File(dir, PathSafety.uniqueName(dir, base)), format, level)
+            if (separate) {
+                // One archive per source, named after the source; same settings for each.
+                val targets = files.map { src ->
+                    File(dir, PathSafety.uniqueName(dir, "${src.nameWithoutExtension}.${format.extension}"))
+                }
+                zipAll(files, targets, format, level, password, volumeBytes, deleteSources)
+            } else {
+                // Extension follows the chosen format (ZIP → .zip, 7z → .7z).
+                val base = if (clean.lowercase().endsWith("." + format.extension)) clean
+                else "$clean.${format.extension}"
+                zipAll(
+                    files, listOf(File(dir, PathSafety.uniqueName(dir, base))),
+                    format, level, password, volumeBytes, deleteSources,
+                )
+            }
         }
     }
 
@@ -387,17 +501,62 @@ class CategoriesViewModel(
         return if (folder.isNotEmpty()) File(folder) else fallback
     }
 
-    private fun zipTo(files: List<File>, out: File, format: ArchiveFormat, level: CompressLevel) {
-        _state.update { it.copy(progress = "Zipping" to OpProgress(0, files.size, "")) }
+    /**
+     * The one compress engine (v1.8.0): runs [targets] sequentially — a single archive,
+     * or one per source for "separate archive for each item" — with the same format,
+     * level, password and volume size for each, and aggregates the per-archive results
+     * into one combined [OpResult] (summed counts; cancelled if any run was cancelled;
+     * failures concatenated). Progress ticks across archives stay monotonic: the
+     * running base of finished archives is added to each tick.
+     */
+    private fun zipAll(
+        files: List<File>,
+        targets: List<File>,
+        format: ArchiveFormat,
+        level: CompressLevel,
+        password: CharArray?,
+        volumeBytes: Long?,
+        deleteSources: Boolean,
+    ) {
+        val separate = targets.size > 1
+        val title = if (format == ArchiveFormat.SEVEN_Z) "Compressing" else "Zipping"
+        _state.update { it.copy(progress = title to OpProgress(0, files.size, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.compress(files, out, format, level, onP) },
-            onProgress = { p -> _state.update { it.copy(progress = "Zipping" to p) } },
+            op = { onP ->
+                var succeeded = 0
+                var skipped = 0
+                var failed = 0
+                var cancelled = false
+                val failures = mutableListOf<String>()
+                var base = 0
+                for (i in targets.indices) {
+                    val srcs = if (separate) listOf(files[i]) else files
+                    val r = ArchiveOps.compress(srcs, targets[i], format, level, password = password, volumeBytes = volumeBytes) { p ->
+                        onP(OpProgress(base + p.done, files.size, p.currentItem))
+                    }
+                    succeeded += r.succeeded
+                    skipped += r.skipped
+                    failed += r.failed
+                    if (r.cancelled) cancelled = true
+                    failures += r.failures
+                    base += r.succeeded
+                    // Delete-after-compress honors the dialog checkbox (initialized from
+                    // the persisted setting): per archive, only a fully successful run
+                    // trashes that archive's own source.
+                    if (deleteSources && r.fullySucceeded) trashSourcesAfterCompress(srcs)
+                }
+                OpResult(
+                    succeeded = succeeded,
+                    skipped = skipped,
+                    failed = failed,
+                    cancelled = cancelled,
+                    failures = failures.distinct(),
+                )
+            },
+            onProgress = { p -> _state.update { it.copy(progress = title to p) } },
             onDone = { r ->
-                _state.update { it.copy(progress = null, result = r, resultTitle = "Zipping") }
-                // v1.7.3 delete-after-compress, same trash convention as Browse:
-                // only a fully successful run moves the sources to the trash.
-                if (r.fullySucceeded) trashSourcesAfterCompress(files)
-                // The new archive lands outside the media index until the next scan; a
+                _state.update { it.copy(progress = null, result = r, resultTitle = title) }
+                // The new archives land outside the media index until the next scan; a
                 // refresh keeps the grid honest either way.
                 _state.value.selected?.let { open(it) }
                 refresh()
@@ -469,12 +628,24 @@ class CategoriesViewModel(
 
     fun dismissExtractConflict() = _state.update { it.copy(pendingExtractConflict = null) }
 
-    private fun startExtract(file: File, target: File, overwrite: Boolean = false) {
+    private fun startExtract(file: File, target: File, overwrite: Boolean = false, password: CharArray? = null) {
         _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.extract(file, target, overwrite, onProgress = onP) },
+            op = { onP -> ArchiveOps.extract(file, target, overwrite, password = password, onProgress = onP) },
             onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
             onDone = { r ->
+                if (r.passwordRequired) {
+                    // Encrypted archive: ask for the password, don't report a failure.
+                    // Nothing was extracted, so no refresh is needed either.
+                    _state.update {
+                        it.copy(
+                            progress = null, result = null,
+                            pendingPasswordFor = file,
+                            pendingPasswordRetry = PendingPasswordRetry(file, target, overwrite),
+                        )
+                    }
+                    return@run
+                }
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
                 if (r.fullySucceeded) trashArchiveAfterExtract(file)
                 // Re-list the open category + summaries, like confirmDelete does, so any
@@ -485,14 +656,33 @@ class CategoriesViewModel(
         )
     }
 
+    /** Retry hook for [PasswordPromptDialog]: re-runs the stored extract with the typed
+     *  password, keeping the original target dir / overwrite semantics. A wrong
+     *  password comes back as a normal failure result through the existing result
+     *  dialog, and the user can try again from the archive. */
+    fun retryExtractWithPassword(password: String) {
+        val ctx = _state.value.pendingPasswordRetry ?: return
+        dismissPasswordPrompt()
+        if (password.isBlank()) {
+            requestToast("Enter a password")
+            return
+        }
+        startExtract(ctx.archive, ctx.target, ctx.replace, password.toCharArray())
+    }
+
+    fun dismissPasswordPrompt() = _state.update {
+        it.copy(pendingPasswordFor = null, pendingPasswordRetry = null)
+    }
+
     /**
      * v1.7.3 delete-after-compress (Categories): after a fully successful compression,
-     * honor the setting by moving the sources to the toadFILES trash (undoable) — the
-     * same convention BrowseViewModel.trashSourcesAfterArchiveOp follows.
+     * moves the given sources into the toadFILES trash (undoable) — the same
+     * convention BrowseViewModel.trashSourcesAfterArchiveOp follows. v1.8.0: the
+     * caller decides (the dialog checkbox, initialized from the persisted setting)
+     * — this only trashes.
      */
     private fun trashSourcesAfterCompress(files: List<File>) {
         viewModelScope.launch {
-            if (!container.settingsRepo.settings.first().deleteAfterCompress) return@launch
             val live = files.filter { it.exists() }
             if (live.isEmpty()) return@launch
             val roots = container.fileRepo.roots().map { it.dir }

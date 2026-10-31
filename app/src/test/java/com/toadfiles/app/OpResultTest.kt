@@ -57,4 +57,21 @@ class OpResultTest {
         // Skipped collisions are expected outcomes (replace off), not errors.
         assertTrue(OpResult(succeeded = 2, skipped = 1, failed = 0).fullySucceeded)
     }
+
+    // ---------- passwordRequired (v1.8.0 password prompt gate) ----------
+
+    @Test
+    fun `passwordRequired defaults to false`() {
+        // Every pre-v1.8.0 constructor call site stays valid and unchanged.
+        assertFalse(OpResult(succeeded = 1, skipped = 0, failed = 0).passwordRequired)
+        assertFalse(OpResult(succeeded = 0, skipped = 0, failed = 1, failures = listOf("x")).passwordRequired)
+    }
+
+    @Test
+    fun `passwordRequired is carried when set and does not affect the summary`() {
+        val r = OpResult(succeeded = 0, skipped = 0, failed = 1, failures = listOf("Password required"), passwordRequired = true)
+        assertTrue(r.passwordRequired)
+        assertEquals("0 done, 1 failed", r.summary)
+        assertFalse(r.fullySucceeded)
+    }
 }

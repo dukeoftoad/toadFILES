@@ -15,8 +15,11 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.channels.FileChannel
+import java.nio.channels.SeekableByteChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 
 /**
  * Safe 7z extraction (v1.7.1) — the 7z twin of [ZipSupport.extract], reusing the exact
@@ -31,8 +34,14 @@ import java.nio.file.StandardCopyOption
  *    zip-only protection — the byte cap still bounds the damage.)
  *  - Staged extraction + atomic publish/rollback: shared verbatim with zip via
  *    [ZipSupport.publishStaging] and [ZipSupport.Counts].
- *  - Encrypted archives: 7z with a password (header- or content-encrypted) fails with the
- *    app-wide friendly copy [ZipSupport.PASSWORD_UNSUPPORTED] instead of a codec crash.
+ *  - Encrypted archives (v1.8.0): 7z created with a password uses commons-compress
+ *    AES-256 data-only encryption (headers stay readable, like ZArchiver's "Data
+ *    (AES-256)" option). Extraction accepts a password; a missing one is reported as
+ *    [OpResult.passwordRequired] (the UI prompts and retries), a wrong one as the
+ *    friendly failure [WRONG_PASSWORD]. Encrypted headers (7z "header encryption",
+ *    which commons-compress cannot create) also surface as passwordRequired when
+ *    opened without a password. Encrypted ZIP stays declined with
+ *    [ZipSupport.PASSWORD_UNSUPPORTED] — java.util.zip cannot decrypt.
  *  - Cancellation checkpoints per entry and per buffer; everything runs on Dispatchers.IO.
  *
  * Creation (v1.7.3, [create7z]) reuses the zip pipeline's shape: staged temp file +
@@ -41,14 +50,63 @@ import java.nio.file.StandardCopyOption
  * [ZipSupport.Limits] entry cap so a runaway tree can't balloon the header.
  * commons-compress is pure Java and minSdk-26 safe (no native codecs are used — only the
  * LZMA/LZMA2/BCJ Java codecs from commons-compress + XZ for Java).
+ *
+ * v1.8.0 volumes: extraction is channel-based ([extract] over a SeekableByteChannel)
+ * so the same hardened pipeline opens both a plain file and a multi-volume set via
+ * [VolumeSupport.seekableChannel]. The old File-based entry point stays as a thin
+ * wrapper that opens a read-only FileChannel and delegates — the pipeline body and
+ * its protections are unchanged.
  */
 object SevenZipSupport {
 
+    /** v1.8.0 friendly copy when the supplied password doesn't decrypt the archive. */
+    internal const val WRONG_PASSWORD = "Wrong password"
+
+    /** v1.8.0 friendly copy accompanying [OpResult.passwordRequired] results. */
+    internal const val PASSWORD_REQUIRED = "Password required"
+
+    /**
+     * File-based entry point (v1.7.1). Opens a read-only [FileChannel] over the
+     * archive and delegates to the channel-based [extract]; the channel is closed
+     * by the wrapper whichever way the run ends. An unreadable file reports an
+     * honest failed [OpResult] instead of throwing.
+     *
+     * v1.8.0: [password] is carried through to SevenZFile (null keeps the exact
+     * v1.7.1 password-less behaviour).
+     */
     suspend fun extract(
         sevenZFile: File,
         targetDir: File,
         replace: Boolean,
         limits: ZipSupport.Limits = ZipSupport.Limits(),
+        password: CharArray? = null,
+        onProgress: (OpProgress) -> Unit = {},
+    ): OpResult {
+        val channel = try {
+            FileChannel.open(sevenZFile.toPath(), StandardOpenOption.READ)
+        } catch (e: Exception) {
+            return OpResult(0, 0, 1, false, listOf("${sevenZFile.name}: ${ZipSupport.friendlyArchiveError(e)}"))
+        }
+        return channel.use { ch ->
+            extract(ch, sevenZFile.length(), targetDir, replace, limits, password, onProgress)
+        }
+    }
+
+    /**
+     * Channel-based pipeline (v1.8.0) — the v1.7.1 body verbatim, opening
+     * [SevenZFile] over [channel] with [password] instead of over a File. The caller
+     * owns [channel]; commons-compress's SevenZFile.close() also closes it, and a
+     * FileChannel close is idempotent either way. [channelSizeHint] is informational
+     * (the caller may only know the set's total size, e.g. a volume set) — SevenZFile
+     * derives everything it needs from the channel itself.
+     */
+    suspend fun extract(
+        channel: SeekableByteChannel,
+        channelSizeHint: Long,
+        targetDir: File,
+        replace: Boolean,
+        limits: ZipSupport.Limits = ZipSupport.Limits(),
+        password: CharArray? = null,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = withContext(Dispatchers.IO) {
         val parent = targetDir.parentFile ?: File(".")
@@ -67,17 +125,34 @@ object SevenZipSupport {
         var abort = false
         var entries = 0
         var totalBytes = 0L
+        var passwordRequired = false
         val counts = ZipSupport.Counts()
         // The 7z header carries the full entry list, so progress is always determinate.
         var total = -1
+        val hasPassword = password != null && password.isNotEmpty()
 
         try {
             val seven = try {
-                SevenZFile(sevenZFile)
+                SevenZFile(channel, password)
             } catch (e: PasswordRequiredException) {
+                // The archive needs a password even to be opened (e.g. encrypted headers)
+                // and none was supplied: ask for one instead of failing blindly.
+                passwordRequired = true
                 abort = true
                 fail++
-                failures += ZipSupport.PASSWORD_UNSUPPORTED
+                failures += PASSWORD_REQUIRED
+                null
+            } catch (e: Exception) {
+                // With a password supplied, an open failure is a wrong password in the
+                // overwhelming majority of cases (AES auth at open time); without one it
+                // is an honest open error. Either way nothing may be published.
+                abort = true
+                fail++
+                failures += if (hasPassword) {
+                    WRONG_PASSWORD
+                } else {
+                    "7z archive: ${ZipSupport.friendlyArchiveError(e)}"
+                }
                 null
             }
             if (seven != null) {
@@ -159,9 +234,27 @@ object SevenZipSupport {
                             failures += ab.message ?: "aborted"
                             break
                         } catch (e: PasswordRequiredException) {
+                            // This entry's data needs a password and none was supplied.
+                            // One prompt covers the whole archive: stop, publish nothing.
+                            passwordRequired = true
+                            abort = true
                             fail++
-                            failures += ZipSupport.PASSWORD_UNSUPPORTED
+                            failures += PASSWORD_REQUIRED
+                            break
                         } catch (e: Exception) {
+                            if (hasPassword) {
+                                // A password was supplied and a read failed: commons-compress
+                                // surfaces an AES authentication failure as a general
+                                // IOException/CRC error (no dedicated type), so any read
+                                // failure here is treated as a wrong password. A genuinely
+                                // corrupt archive would report the same friendly message —
+                                // acceptable, and retrying with the right password is the
+                                // only useful next step either way.
+                                abort = true
+                                fail++
+                                failures += WRONG_PASSWORD
+                                break
+                            }
                             fail++
                             failures += "$name: ${ZipSupport.friendlyArchiveError(e)}"
                         } finally {
@@ -171,15 +264,20 @@ object SevenZipSupport {
                 }
             }
         } catch (e: PasswordRequiredException) {
+            passwordRequired = true
             abort = true
             fail++
-            failures += ZipSupport.PASSWORD_UNSUPPORTED
+            failures += PASSWORD_REQUIRED
         } catch (e: Exception) {
             // Stream-level death (truncated/corrupt archive): nothing after this point
             // can be trusted, so nothing gets published.
             abort = true
             fail++
-            failures += "${sevenZFile.name}: ${ZipSupport.friendlyArchiveError(e)}"
+            failures += if (hasPassword) {
+                WRONG_PASSWORD
+            } else {
+                "7z archive: ${ZipSupport.friendlyArchiveError(e)}"
+            }
         }
 
         if (!cancelled && !abort) {
@@ -200,7 +298,10 @@ object SevenZipSupport {
         // Published files were moved out; anything left (aborts, cancels, conflicts) is junk.
         FileOps.deleteRecursively(staging)
 
-        OpResult(counts.moved, skip + counts.skipped, fail + counts.failed, cancelled, failures)
+        OpResult(
+            counts.moved, skip + counts.skipped, fail + counts.failed, cancelled, failures,
+            passwordRequired,
+        )
     }
 
     /** Entry count from the 7z header, for determinate progress before the op starts;
@@ -213,34 +314,45 @@ object SevenZipSupport {
 
     // ---------- creation (v1.7.3) ----------
 
+    /** ULTRA dictionary size for 7z: 128 MiB ≈ ZArchiver's ultra — preset 9 with the
+     *  dictionary pushed past xz's default 64 MiB. */
+    internal const val ULTRA_DICT_BYTES = 128 * 1024 * 1024
+
     /**
      * [CompressLevel] → xz LZMA2 preset (dictionary + match-finder settings), mirroring
-     * the xz CLI presets. STORE is handled separately via the COPY codec and never maps
-     * to a preset.
+     * the xz CLI presets. NONE is handled separately via the COPY codec and never maps
+     * to a preset. ULTRA is preset 9 like MAXIMUM — the difference is made in
+     * [contentMethodsFor], which swaps in the 128 MiB ULTRA dictionary.
      *
      * Encoder memory is roughly 10.5× the dictionary size (xz for Java's own formula):
-     * FAST ≈ 11 MB, NORMAL ≈ 88 MB, MAXIMUM ≈ 700 MB. MAXIMUM is offered for desktop-grade
-     * content; [create7z] converts an encoder OOM into an honest failure instead of a crash.
+     * FASTEST ≈ 11 MB, FAST ≈ 44 MB, NORMAL ≈ 88 MB, MAXIMUM ≈ 700 MB, ULTRA ≈ 1.3 GB.
+     * MAXIMUM/ULTRA are offered for desktop-grade content; [create7z] converts an
+     * encoder OOM into an honest failure instead of a crash.
      */
     internal fun lzma2Preset(level: CompressLevel): Int = when (level) {
-        CompressLevel.FAST -> 1      // 1 MiB dictionary
-        CompressLevel.NORMAL -> 6    // 8 MiB dictionary (the xz default)
-        CompressLevel.MAXIMUM -> 9   // 64 MiB dictionary
-        CompressLevel.STORE -> throw IllegalArgumentException("STORE uses the COPY codec, not LZMA2")
+        CompressLevel.FASTEST -> 1  // 1 MiB dictionary
+        CompressLevel.FAST -> 3    // 4 MiB dictionary
+        CompressLevel.NORMAL -> 6  // 8 MiB dictionary (the xz default)
+        CompressLevel.MAXIMUM -> 9 // 64 MiB dictionary
+        CompressLevel.ULTRA -> 9   // + the 128 MiB dictionary from [contentMethodsFor]
+        CompressLevel.NONE -> throw IllegalArgumentException("NONE uses the COPY codec, not LZMA2")
     }
 
     /**
      * The commons-compress content-method configuration for [level]:
-     *  - STORE → [SevenZMethod.COPY]: every byte lands in the archive verbatim;
-     *  - FAST/NORMAL/MAXIMUM → LZMA2 at the xz preset from [lzma2Preset]
-     *    (passed as a full [LZMA2Options], which commons-compress accepts natively).
+     *  - NONE → [SevenZMethod.COPY]: every byte lands in the archive verbatim;
+     *  - the compressing levels → LZMA2 at the xz preset from [lzma2Preset]
+     *    (passed as a full [LZMA2Options], which commons-compress accepts natively);
+     *  - ULTRA → LZMA2 at preset 9 but with the 128 MiB dictionary [ULTRA_DICT_BYTES]
+     *    (≈ ZArchiver ultra), NOT the plain preset-9 64 MiB dictionary.
      */
     internal fun contentMethodsFor(level: CompressLevel): List<SevenZMethodConfiguration> =
-        if (level == CompressLevel.STORE) {
+        if (level == CompressLevel.NONE) {
             listOf(SevenZMethodConfiguration(SevenZMethod.COPY))
         } else {
             val options = LZMA2Options()
             options.setPreset(lzma2Preset(level))
+            if (level == CompressLevel.ULTRA) options.setDictSize(ULTRA_DICT_BYTES)
             listOf(SevenZMethodConfiguration(SevenZMethod.LZMA2, options))
         }
 
@@ -259,6 +371,11 @@ object SevenZipSupport {
     /**
      * Creates a solid 7z archive from [sources] at [target] (v1.7.3).
      *
+     * v1.8.0: a non-null, non-empty [password] turns on commons-compress AES-256
+     * data-only encryption — the entry list and sizes stay readable (ZArchiver's
+     * "Data (AES-256)" equivalent); only the entry streams are encrypted. A null or
+     * empty password creates a plain archive.
+     *
      * Mirrors [ZipSupport.zip] protection-for-protection: the archive is assembled in a
      * hidden temp sibling and atomically renamed onto [target] only on success (an
      * existing target is replaced); a failing source aborts the whole run so no broken
@@ -274,6 +391,7 @@ object SevenZipSupport {
         target: File,
         level: CompressLevel = CompressLevel.NORMAL,
         limits: ZipSupport.Limits = ZipSupport.Limits(),
+        password: CharArray? = null,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = withContext(Dispatchers.IO) {
         PathSafety.rejectSelfTarget(sources, target.parentFile ?: File("."))
@@ -295,7 +413,11 @@ object SevenZipSupport {
         val budget = EntryBudget(limits.maxEntries)
         var completed = false
         try {
-            SevenZOutputFile(tmp).use { sz ->
+            // Spelled out so `password` smart-casts to CharArray for the encrypted
+            // constructor (a null or EMPTY password must NOT encrypt anything).
+            val out = if (password != null && password.isNotEmpty()) SevenZOutputFile(tmp, password)
+            else SevenZOutputFile(tmp)
+            out.use { sz ->
                 sz.setContentMethods(contentMethodsFor(level))
                 for (src in sources) {
                     try {
@@ -337,8 +459,9 @@ object SevenZipSupport {
         } catch (ce: kotlinx.coroutines.CancellationException) {
             cancelled = true
         } catch (oom: OutOfMemoryError) {
-            // The LZMA2 encoder needs ~10.5× the dictionary; a too-big dictionary on a
-            // heap-limited device must degrade to an honest failure, not a crash.
+            // The LZMA2 encoder needs ~10.5× the dictionary (up to ≈1.3 GB at ULTRA's
+            // 128 MiB dictionary); a too-big dictionary on a heap-limited device must
+            // degrade to an honest failure, not a crash.
             fail++
             failures += "${target.name}: not enough memory for the ${level.name.lowercase()} " +
                 "compression level — try a lower one"
