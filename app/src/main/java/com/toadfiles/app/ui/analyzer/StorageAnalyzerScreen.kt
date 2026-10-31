@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,11 +61,8 @@ import java.io.File
  * MI Files / Google Files style storage analyzer: category breakdown, biggest files and
  * largest folders for one volume, from a single on-demand recursive walk.
  *
- * TODO(integration): register the route in ToadNavHost (Routes + composable), e.g.
+ * Route Routes.STORAGE_ANALYZER is registered in ToadNavHost (v1.7.3 integration):
  * ```
- * const val STORAGE_ANALYZER = "storage_analyzer?root={root}"
- * fun storageAnalyzer(root: String = "") = "storage_analyzer?root=${Uri.encode(root)}"
- *
  * composable(
  *     route = Routes.STORAGE_ANALYZER,
  *     arguments = listOf(navArgument("root") { type = NavType.StringType; defaultValue = "" }),
@@ -102,6 +100,9 @@ fun StorageAnalyzerScreen(
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
+        // Inset source of truth is the outer shell Scaffold in ToadNavHost; zeroing
+        // these avoids a double status-bar pad (the v1.7.3 top "dead band").
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Analyze storage") },

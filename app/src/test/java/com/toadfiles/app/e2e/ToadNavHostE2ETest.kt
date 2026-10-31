@@ -9,13 +9,19 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.ToadApp
 import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.ToadNavHost
 import com.toadfiles.app.ui.theme.ToadTheme
+import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -40,12 +46,20 @@ class ToadNavHostE2ETest {
         ToadViewModelFactory.init(ApplicationProvider.getApplicationContext())
     }
 
+    /** Restores the shipped default so the persisted navStyle never leaks across tests. */
+    @After
+    fun tearDown() {
+        setNavStyleBlocking(NavStyle.BOTTOM_BAR)
+    }
+
     @Test
     fun `home screen renders the app shell`() {
         compose.setContent { ToadTheme { ToadNavHost() } }
         compose.onNodeWithTag("tab_Home").assertIsSelected()
+        // v1.7.4: the Home branding header was removed (dead space); "Quick access"
+        // is the stable first content marker for Home now.
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -71,7 +85,7 @@ class ToadNavHostE2ETest {
         // Back to Home
         compose.onNodeWithTag("tab_Home").performClick()
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("tab_Home").assertIsSelected()
     }
@@ -134,7 +148,7 @@ class ToadNavHostE2ETest {
     fun `home storage card opens the storage screen and back returns home`() {
         compose.setContent { ToadTheme { ToadNavHost() } }
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
         }
         // Home's storage card opens the Storage screen.
         compose.onNodeWithText("Internal storage").performClick()
@@ -144,7 +158,64 @@ class ToadNavHostE2ETest {
         }
         compose.onNodeWithContentDescription("Back").performClick()
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("toadFILES").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    // ---------- v1.7.4: navigation styles are mutually exclusive ----------
+
+    /**
+     * Flips the persisted Navigation style setting and waits until the change is
+     * observable through the SettingsViewModel flow that ToadNavHost reads.
+     */
+    private fun setNavStyleBlocking(style: NavStyle) {
+        val app = ApplicationProvider.getApplicationContext<ToadApp>()
+        runBlocking { app.container.settingsRepo.setNavStyle(style) }
+    }
+
+    @Test
+    fun `bottom bar mode has no drawer and no hamburger`() {
+        setNavStyleBlocking(NavStyle.BOTTOM_BAR)
+        compose.setContent { ToadTheme { ToadNavHost() } }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
+        }
+        // Bottom bar present…
+        compose.onNodeWithTag("tab_Home").assertExists()
+        // …drawer items and hamburger absent everywhere.
+        compose.onNodeWithTag("drawer_Home").assertDoesNotExist()
+        compose.onNodeWithTag("drawer_Settings").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Open navigation menu").assertDoesNotExist()
+        // On sub-screens the drawer fallback is a Back arrow, not a hamburger.
+        // ("See all" sits below the fold in Home's LazyColumn — scroll it into view first.)
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("See all"))
+        compose.onNodeWithText("See all").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Recent").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Open navigation menu").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Back").assertExists()
+    }
+
+    @Test
+    fun `side menu mode has no bottom bar and carries every destination`() {
+        setNavStyleBlocking(NavStyle.SIDE_MENU)
+        compose.setContent { ToadTheme { ToadNavHost() } }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("Open navigation menu")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // No bottom bar at all.
+        compose.onNodeWithTag("tab_Home").assertDoesNotExist()
+        compose.onNodeWithTag("tab_Settings").assertDoesNotExist()
+        // The drawer carries ALL primary destinations (Home and Categories were
+        // missing in v1.7.3).
+        listOf("Home", "Browse", "Categories", "Recent", "Trash", "Settings", "About")
+            .forEach { label -> compose.onNodeWithTag("drawer_$label").assertExists() }
+        // And it navigates: drawer Home -> the dashboard.
+        compose.onNodeWithTag("drawer_Home").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
         }
     }
 }

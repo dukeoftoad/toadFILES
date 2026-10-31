@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -106,6 +107,9 @@ fun RecentScreen(
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
+        // Inset source of truth is the outer shell Scaffold in ToadNavHost; zeroing
+        // these avoids a double status-bar pad (the v1.7.3 top "dead band").
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
             if (inSelection) {
@@ -274,7 +278,7 @@ fun RecentScreen(
             title = { Text("Move ${entries.size} item(s) to trash?") },
             text = {
                 Text("Items are moved to the toadFILES trash and kept for 30 days. " +
-                    "You can restore them from the Trash page in the side menu.")
+                    "You can restore them from the Trash page.")
             },
             confirmButton = {
                 TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }

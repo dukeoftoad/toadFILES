@@ -73,7 +73,7 @@ object Routes {
 
 private data class BottomDestination(val route: String, val label: String, val icon: @Composable () -> Unit)
 
-/** Side-drawer entry — Google Files style navigation in addition to the bottom bar. */
+/** Side-drawer entry — the primary navigation in SIDE_MENU mode (no bottom bar). */
 private data class DrawerDestination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 /**
@@ -87,11 +87,15 @@ private fun NavHostController.navigateSingleTop(route: String) {
 
 @Composable
 fun ToadNavHost(navController: NavHostController = rememberNavController()) {
-    // v1.7.3: the two shipped navigation styles ("UX designs"). BOTTOM_BAR keeps the
-    // classic bottom bar + drawer combo; SIDE_MENU is drawer-only (Google Files style).
+    // v1.7.4: the two navigation styles are now truly mutually exclusive.
+    //  - BOTTOM_BAR: bottom bar only. No drawer, no hamburger anywhere; screens
+    //    that would show one (Recent/Settings/Trash/Appearance) fall back to a Back arrow.
+    //  - SIDE_MENU: ModalNavigationDrawer only, no bottom bar. The drawer carries
+    //    ALL primary destinations (Home, Browse, Categories, Recent, Trash, Settings, About).
     val settingsVm: SettingsViewModel = viewModel(factory = ToadViewModelFactory)
     val navSettings by settingsVm.settings.collectAsStateWithLifecycle()
     val navStyle = navSettings.navStyle
+    val useDrawer = navStyle == NavStyle.SIDE_MENU
     val destinations = listOf(
         BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) },
         BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) },
@@ -99,17 +103,21 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
         BottomDestination(Routes.SETTINGS, "Settings") { Icon(Icons.Outlined.Settings, null) },
     )
 
-    // Side navigation menu. Reachable via the hamburger on the top-level screens
-    // (Home, Recent, Trash, Settings) — Google Files-style.
+    // Full destination set for the side drawer. Home and Categories were missing in
+    // v1.7.3, making them unreachable in SIDE_MENU mode; About sits below a divider.
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val drawerDestinations = listOf(
+        DrawerDestination(Routes.HOME, "Home", Icons.Outlined.Home),
         DrawerDestination(Routes.BROWSE, "Browse", Icons.Outlined.Folder),
+        DrawerDestination(Routes.CATEGORIES, "Categories", Icons.Outlined.Category),
         DrawerDestination(Routes.RECENT, "Recent", Icons.Outlined.History),
         DrawerDestination(Routes.TRASH, "Trash", Icons.Outlined.Delete),
+        // ---- secondary group ----
         DrawerDestination(Routes.SETTINGS, "Settings", Icons.Outlined.Settings),
         DrawerDestination(Routes.ABOUT, "About", Icons.Outlined.Info),
     )
+    val drawerDividerAfter = Routes.TRASH
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentBase = backStackEntry?.destination?.route?.substringBefore('?')
     val openFromDrawer: (String) -> Unit = { route ->
@@ -121,47 +129,19 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             restoreState = true
         }
     }
+    // Hamburger affordance — passed to top-level screens ONLY in SIDE_MENU mode.
+    val openDrawer: (() -> Unit)? = if (useDrawer) {
+        { scope.launch { drawerState.open() } }
+    } else null
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet {
-                Text(
-                    "toadFILES",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(
-                        start = 28.dp, top = 20.dp, bottom = 4.dp,
-                    ),
-                )
-                Text(
-                    "Lightweight · Fast · Private",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 28.dp, bottom = 12.dp),
-                )
-                HorizontalDivider()
-                drawerDestinations.forEach { dest ->
-                    val base = dest.route.substringBefore('?')
-                    NavigationDrawerItem(
-                        label = { Text(dest.label) },
-                        icon = { Icon(dest.icon, null) },
-                        selected = currentBase == base,
-                        onClick = { openFromDrawer(base) },
-                        // Distinct from the bottom-bar items: a closed drawer still
-                        // composes its content, so plain-text lookups would be ambiguous.
-                        modifier = Modifier
-                            .testTag("drawer_${dest.label}")
-                            .padding(NavigationDrawerItemDefaults.ItemPadding),
-                    )
-                }
-            }
-        },
-    ) {
+    val appScaffold: @Composable () -> Unit = {
     Scaffold(
+        // Single source of truth for window insets: this outer Scaffold applies the
+        // status-bar (and navigation-bar) insets exactly once. Every inner screen
+        // Scaffold sets contentWindowInsets = WindowInsets(0, 0, 0, 0) so the status
+        // bar is never padded twice — the v1.7.3 "dead band" at the top.
         bottomBar = {
-            // SIDE_MENU = drawer-only navigation (the "two UX designs" switch);
-            // the classic bottom bar is hidden and the drawer becomes the primary nav.
-            if (navStyle == NavStyle.BOTTOM_BAR) {
+            if (!useDrawer) {
             val backStack by navController.currentBackStackEntryAsState()
             val currentRoute = backStack?.destination?.route
             NavigationBar {
@@ -183,13 +163,12 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         },
                         icon = dest.icon,
                         label = { Text(dest.label) },
-                        // Distinct from the (always-composed, closed) drawer items.
                         modifier = Modifier.testTag("tab_${dest.label}"),
                     )
                 }
             }
             }
-        }
+        },
     ) { padding ->
         NavHost(
             navController = navController,
@@ -203,7 +182,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },
                     onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
                     onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onOpenDrawer = openDrawer,
                 )
             }
             composable(
@@ -221,7 +200,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
                     onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onOpenDrawer = openDrawer,
                 )
             }
             composable(Routes.CATEGORIES) {
@@ -237,7 +216,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onBack = { navController.popBackStack() },
                     onOpenAbout = { navController.navigateSingleTop(Routes.ABOUT) },
                     onOpenAppearance = { navController.navigateSingleTop(Routes.APPEARANCE) },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onOpenDrawer = openDrawer,
                 )
             }
 
@@ -259,7 +238,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 TrashScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onOpenDrawer = openDrawer,
                 )
             }
             composable(Routes.STORAGE) {
@@ -284,5 +263,48 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             }
         }
     }
+    }
+
+    // The shell: the drawer exists ONLY in SIDE_MENU mode. In BOTTOM_BAR mode the
+    // app is the plain Scaffold above — no drawer, no hamburger anywhere.
+    if (useDrawer) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                ModalDrawerSheet {
+                    Text(
+                        "toadFILES",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(
+                            start = 28.dp, top = 20.dp, bottom = 4.dp,
+                        ),
+                    )
+                    Text(
+                        "Lightweight · Fast · Private",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 28.dp, bottom = 12.dp),
+                    )
+                    HorizontalDivider()
+                    drawerDestinations.forEach { dest ->
+                        val base = dest.route.substringBefore('?')
+                        if (dest.route == drawerDividerAfter) {
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        }
+                        NavigationDrawerItem(
+                            label = { Text(dest.label) },
+                            icon = { Icon(dest.icon, null) },
+                            selected = currentBase == base,
+                            onClick = { openFromDrawer(base) },
+                            modifier = Modifier
+                                .testTag("drawer_${dest.label}")
+                                .padding(NavigationDrawerItemDefaults.ItemPadding),
+                        )
+                    }
+                }
+            },
+        ) { appScaffold() }
+    } else {
+        appScaffold()
     }
 }

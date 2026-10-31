@@ -4,6 +4,34 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.7.4] — 2026-10-31
+
+Audit release: the navigation-style switch from v1.7.3 now works as designed,
+and a full UX + logic audit fixed the flaws it uncovered.
+
+### Fixed
+- **The two navigation styles are actually separate now.** Bottom-bar mode no
+  longer wraps the app in a side drawer (no hamburger icons, no duplicate
+  Settings entry), and side-menu mode drops the bottom bar entirely. The side
+  menu now lists every destination: Home, Browse, Categories, Recent, Trash,
+  Settings and About (Home and Categories were unreachable in drawer mode).
+- **Removed the dead band at the top of the app**: the branding header on Home
+  is gone and the status-bar inset is applied once by the shell instead of being
+  doubled by every screen, so content starts directly under the status bar.
+- **Removed duplicate navigation icons** (hamburger on top-level screens in
+  bottom-bar mode, the extra settings/menu buttons on Home).
+- **Delete-after-extract never fires on a partial failure or abort**: the archive is
+  only moved to the trash when the extraction completed with zero failures and no
+  cancellation (all surfaces: Browse, Categories, Recent). Previously an archive
+  with one corrupt entry was trashed even though the extraction was incomplete.
+- **Categories now honors delete-after-compression**: successful compressions from
+  the Categories drill-in move the sources to the trash when the setting is on,
+  matching Browse.
+- **Categories "Extract to…" and Compress now default to the archive-folder
+  setting** (when set), matching Browse's destinations.
+- The Recent delete dialog no longer claims the Trash lives "in the side menu"
+  when the bottom-bar navigation style is active.
+
 ## [1.7.3] — 2026-10-31
 
 Big UX release: 7z creation, a redesigned Settings with Appearance page and
