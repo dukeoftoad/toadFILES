@@ -11,9 +11,13 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
+import com.toadfiles.app.domain.NavStyle
+import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.ZipOpenAction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +48,26 @@ data class ToadSettings(
     val quickPins: Set<String> = emptySet(),
     /** Folders the user removed from Quick access (defaults or auto "most used" entries). */
     val quickHidden: Set<String> = emptySet(),
+    // ---- v1.7.3 contract (defaults = exact v1.7.2 behavior) ----
+    /** What a tap on a .zip does. MENU = archive actions sheet (v1.7.1 behavior). */
+    val zipOpenAction: ZipOpenAction = ZipOpenAction.MENU,
+    /** What a tap on a .7z does. MENU = archive actions sheet (v1.7.1 behavior). */
+    val sevenZipOpenAction: SevenZipOpenAction = SevenZipOpenAction.MENU,
+    /** Which navigation UX is active: bottom bar (v1.7.2 default) or side menu only. */
+    val navStyle: NavStyle = NavStyle.BOTTOM_BAR,
+    /** Back key inside Browse: go to parent folder (default) or exit the app. */
+    val backKeyAction: BackKeyAction = BackKeyAction.PARENT,
+    /** Delete source files after a successful compression. */
+    val deleteAfterCompress: Boolean = false,
+    /** Delete the archive after a successful extraction. */
+    val deleteAfterExtract: Boolean = false,
+    /** Confirmation dialog before aborting a running archive operation. */
+    val abortConfirm: Boolean = true,
+    /** Confirmation dialog when extraction would overwrite existing files. */
+    val overwriteConfirm: Boolean = true,
+    /** Default folder for archives (compression output AND extraction destination).
+     *  Blank string = "same folder as the source" (v1.7.2 behavior). */
+    val archiveFolder: String = "",
 ) {
     companion object {
         const val SEARCH_LIMIT_MIN = 10
@@ -80,6 +104,15 @@ class SettingsRepository(
         val QUICK_PINS = stringSetPreferencesKey("quick_pins")
         val QUICK_HIDDEN = stringSetPreferencesKey("quick_hidden")
         val FOLDER_USES = stringSetPreferencesKey("folder_uses")
+        val ZIP_OPEN = stringPreferencesKey("zip_open_action")
+        val SEVENZIP_OPEN = stringPreferencesKey("sevenzip_open_action")
+        val NAV_STYLE = stringPreferencesKey("nav_style")
+        val BACK_KEY = stringPreferencesKey("back_key_action")
+        val DELETE_AFTER_COMPRESS = booleanPreferencesKey("delete_after_compress")
+        val DELETE_AFTER_EXTRACT = booleanPreferencesKey("delete_after_extract")
+        val ABORT_CONFIRM = booleanPreferencesKey("abort_confirm")
+        val OVERWRITE_CONFIRM = booleanPreferencesKey("overwrite_confirm")
+        val ARCHIVE_FOLDER = stringPreferencesKey("archive_folder")
     }
 
     val settings: Flow<ToadSettings> = store.data.map { p ->
@@ -104,6 +137,19 @@ class SettingsRepository(
             contentSearch = p[Keys.CONTENT_SEARCH] ?: false,
             quickPins = p[Keys.QUICK_PINS] ?: emptySet(),
             quickHidden = p[Keys.QUICK_HIDDEN] ?: emptySet(),
+            zipOpenAction = p[Keys.ZIP_OPEN]?.let { runCatching { ZipOpenAction.valueOf(it) }.getOrNull() }
+                ?: ZipOpenAction.MENU,
+            sevenZipOpenAction = p[Keys.SEVENZIP_OPEN]?.let { runCatching { SevenZipOpenAction.valueOf(it) }.getOrNull() }
+                ?: SevenZipOpenAction.MENU,
+            navStyle = p[Keys.NAV_STYLE]?.let { runCatching { NavStyle.valueOf(it) }.getOrNull() }
+                ?: NavStyle.BOTTOM_BAR,
+            backKeyAction = p[Keys.BACK_KEY]?.let { runCatching { BackKeyAction.valueOf(it) }.getOrNull() }
+                ?: BackKeyAction.PARENT,
+            deleteAfterCompress = p[Keys.DELETE_AFTER_COMPRESS] ?: false,
+            deleteAfterExtract = p[Keys.DELETE_AFTER_EXTRACT] ?: false,
+            abortConfirm = p[Keys.ABORT_CONFIRM] ?: true,
+            overwriteConfirm = p[Keys.OVERWRITE_CONFIRM] ?: true,
+            archiveFolder = p[Keys.ARCHIVE_FOLDER] ?: "",
         )
     }
 
@@ -118,6 +164,15 @@ class SettingsRepository(
         it[Keys.SEARCH_LIMIT] = limit.coerceIn(ToadSettings.SEARCH_LIMIT_MIN, ToadSettings.SEARCH_LIMIT_MAX)
     }
     suspend fun setContentSearch(enabled: Boolean) = store.edit { it[Keys.CONTENT_SEARCH] = enabled }
+    suspend fun setZipOpenAction(action: ZipOpenAction) = store.edit { it[Keys.ZIP_OPEN] = action.name }
+    suspend fun setSevenZipOpenAction(action: SevenZipOpenAction) = store.edit { it[Keys.SEVENZIP_OPEN] = action.name }
+    suspend fun setNavStyle(style: NavStyle) = store.edit { it[Keys.NAV_STYLE] = style.name }
+    suspend fun setBackKeyAction(action: BackKeyAction) = store.edit { it[Keys.BACK_KEY] = action.name }
+    suspend fun setDeleteAfterCompress(enabled: Boolean) = store.edit { it[Keys.DELETE_AFTER_COMPRESS] = enabled }
+    suspend fun setDeleteAfterExtract(enabled: Boolean) = store.edit { it[Keys.DELETE_AFTER_EXTRACT] = enabled }
+    suspend fun setAbortConfirm(enabled: Boolean) = store.edit { it[Keys.ABORT_CONFIRM] = enabled }
+    suspend fun setOverwriteConfirm(enabled: Boolean) = store.edit { it[Keys.OVERWRITE_CONFIRM] = enabled }
+    suspend fun setArchiveFolder(path: String) = store.edit { it[Keys.ARCHIVE_FOLDER] = path.trim() }
 
     // ---------- Quick access (Home) ----------
 
