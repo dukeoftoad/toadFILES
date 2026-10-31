@@ -6,6 +6,7 @@ import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.FileCategory
+import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
@@ -25,6 +26,8 @@ import java.io.File
 data class RecentUiState(
     /** Active type filter; null = All. */
     val filter: FileCategory? = null,
+    /** v1.8.1: list or grid, persisted via settings (recentLayout). */
+    val layout: BrowseLayout = BrowseLayout.LIST,
     val entries: List<MediaRepository.MediaEntry> = emptyList(),
     val loading: Boolean = false,
     /** Multi-select, keyed by content-uri string. */
@@ -66,6 +69,19 @@ class RecentViewModel(
 
     init {
         refresh()
+        // v1.8.1: the list/grid choice persists across launches like Browse's does.
+        viewModelScope.launch {
+            container.settingsRepo.settings.collect { s ->
+                _state.update { it.copy(layout = s.recentLayout) }
+            }
+        }
+    }
+
+    /** v1.8.1: flip the Recent layout (list ⇄ grid) and persist it. */
+    fun toggleLayout() {
+        val next = if (_state.value.layout == BrowseLayout.GRID) BrowseLayout.LIST else BrowseLayout.GRID
+        _state.update { it.copy(layout = next) }
+        viewModelScope.launch(ioDispatcher) { container.settingsRepo.setRecentLayout(next) }
     }
 
     fun refresh() {

@@ -39,6 +39,8 @@ data class ToadSettings(
     val sortMode: SortMode = SortMode.NAME,
     val sortOrder: SortOrder = SortOrder.ASC,
     val browseLayout: BrowseLayout = BrowseLayout.LIST,
+    /** v1.8.1: layout of the Recent screen (list or grid), toggled from its toolbar. */
+    val recentLayout: BrowseLayout = BrowseLayout.LIST,
     val favorites: Set<String> = emptySet(),
     /** Cap applied to in-folder tree search. Bounded to [SEARCH_LIMIT_MIN]..[SEARCH_LIMIT_MAX]. */
     val searchResultLimit: Int = SEARCH_LIMIT_DEFAULT,
@@ -98,6 +100,7 @@ class SettingsRepository(
         val SORT_MODE = stringPreferencesKey("sort_mode")
         val SORT_ORDER = stringPreferencesKey("sort_order")
         val LAYOUT = stringPreferencesKey("browse_layout")
+        val RECENT_LAYOUT = stringPreferencesKey("recent_layout")
         val FAVORITES = stringSetPreferencesKey("favorites")
         val SEARCH_LIMIT = intPreferencesKey("search_limit")
         val CONTENT_SEARCH = booleanPreferencesKey("content_search")
@@ -128,6 +131,8 @@ class SettingsRepository(
             sortOrder = p[Keys.SORT_ORDER]?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
                 ?: SortOrder.ASC,
             browseLayout = p[Keys.LAYOUT]?.let { runCatching { BrowseLayout.valueOf(it) }.getOrNull() }
+                ?: BrowseLayout.LIST,
+            recentLayout = p[Keys.RECENT_LAYOUT]?.let { runCatching { BrowseLayout.valueOf(it) }.getOrNull() }
                 ?: BrowseLayout.LIST,
             favorites = p[Keys.FAVORITES] ?: emptySet(),
             searchResultLimit = p[Keys.SEARCH_LIMIT]?.coerceIn(
@@ -160,6 +165,7 @@ class SettingsRepository(
     suspend fun setSortMode(mode: SortMode) = store.edit { it[Keys.SORT_MODE] = mode.name }
     suspend fun setSortOrder(order: SortOrder) = store.edit { it[Keys.SORT_ORDER] = order.name }
     suspend fun setBrowseLayout(layout: BrowseLayout) = store.edit { it[Keys.LAYOUT] = layout.name }
+    suspend fun setRecentLayout(layout: BrowseLayout) = store.edit { it[Keys.RECENT_LAYOUT] = layout.name }
     suspend fun setSearchResultLimit(limit: Int) = store.edit {
         it[Keys.SEARCH_LIMIT] = limit.coerceIn(ToadSettings.SEARCH_LIMIT_MIN, ToadSettings.SEARCH_LIMIT_MAX)
     }

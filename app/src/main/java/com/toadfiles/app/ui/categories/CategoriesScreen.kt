@@ -174,6 +174,7 @@ fun CategoriesScreen(
         topBar = {
             if (inDrillIn && inSelection) {
                 TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text("${state.selection.size} selected") },
                     navigationIcon = {
                         IconButton(onClick = { vm.clearSelection() }) {
@@ -251,6 +252,7 @@ fun CategoriesScreen(
                 )
             } else {
                 TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                     title = {
                         if (inDrillIn) {
                             Column {
@@ -506,7 +508,7 @@ private fun CategoryGrid(
         else -> LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             modifier = modifier,
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -529,7 +531,7 @@ private fun TotalsHeader(summaries: List<CategorySummary>) {
         shape = RoundedCornerShape(20.dp),
     ) {
         Row(
-            Modifier.padding(18.dp),
+            Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -553,7 +555,7 @@ private fun CategoryTile(summary: CategorySummary, onClick: () -> Unit) {
         shape = RoundedCornerShape(20.dp),
         onClick = onClick,
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Box(
                 Modifier
                     .size(44.dp)

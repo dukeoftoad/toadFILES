@@ -4,6 +4,39 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.8.1] — 2026-11-01
+
+The UX polish release: navigation, spacing, Settings and the minimum
+Android version.
+
+### Changed
+- **Trash as a Quick access tile**: the top-right Trash toolbar icon on Home
+  is gone (it crowded the status bar / storage card). A permanent Trash tile
+  now leads the Quick access grid, so every destination is reachable the
+  same way. Side-menu mode keeps its drawer entry.
+- **Top spacing fixed at the source**: the navigation shell now applies the
+  status-bar inset exactly once and every screen TopAppBar zeroes its own
+  insets — no screen can double-pad (blank band) or under-pad (content
+  under the clock) anymore. Home card/margin sizes tightened throughout;
+  Categories headers and tiles slimmed down.
+- **Settings redesigned**: tonal icon chips per row, grouped surface cards,
+  value labels instead of "Change" links, chevrons for navigation rows, and
+  `animateContentSize` transitions. Screens navigate with a gentle
+  cross-fade + micro-slide instead of an abrupt swap.
+- **Recent layout toggle**: list ⇄ grid from the toolbar, persisted across
+  launches (`recentLayout` setting), with thumbnails, group headers,
+  multi-select and the per-cell ⋮ sheet.
+- **About page trimmed**: "What's new" shows the latest two updates (full
+  history stays in CHANGELOG.md); the "Storage on this device" and
+  "Files on this device" data cards were removed (that information lives on
+  the Home storage card and the Storage page), along with the now-pointless
+  toolbar Refresh.
+- **Minimum Android version is now 14 (API 34)**: minSdk raised from 26,
+  legacy `READ/WRITE_EXTERNAL_STORAGE` permissions and
+  `requestLegacyExternalStorage` removed, and the pre-R permission branch
+  in MainActivity simplified to the single "All files access" flow. Docs
+  and the About "Min Android" row updated to match.
+
 ## [1.8.0] — 2026-10-31
 
 The ZArchiver-parity archive release: encryption, volumes and the full

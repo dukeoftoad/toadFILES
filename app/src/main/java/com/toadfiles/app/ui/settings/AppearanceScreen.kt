@@ -75,6 +75,7 @@ fun AppearanceScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
+            windowInsets = WindowInsets(0, 0, 0, 0),
                 title = { Text("Appearance") },
                 navigationIcon = {
                     if (onOpenDrawer != null) {

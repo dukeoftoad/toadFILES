@@ -267,4 +267,18 @@ class RecentViewModelTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun `layout toggle flips list and grid and persists across view models`() {
+        // v1.8.1: Recent's list/grid choice is real state backed by the settings store.
+        assertEquals(com.toadfiles.app.domain.BrowseLayout.LIST, vm.state.value.layout)
+        vm.toggleLayout()
+        await { vm.state.value.layout == com.toadfiles.app.domain.BrowseLayout.GRID }
+        // A fresh ViewModel (new process / relaunch) must read the persisted value.
+        val relaunched = RecentViewModel(container, ioDispatcher = dispatcher)
+        await { relaunched.state.value.layout == com.toadfiles.app.domain.BrowseLayout.GRID }
+        // Flip back so the shared DataStore file is left in the default state.
+        relaunched.toggleLayout()
+        await { relaunched.state.value.layout == com.toadfiles.app.domain.BrowseLayout.LIST }
+    }
 }
