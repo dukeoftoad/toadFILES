@@ -33,8 +33,14 @@ class StartupUpdateCheck(
 
     private val _banner = MutableStateFlow<GitHubRelease?>(null)
 
+    /** Whether the user dismissed the banner for this process. */
+    private val _bannerDismissed = MutableStateFlow(false)
+
     /** The newer release to advertise in the banner; null when there is nothing to show. */
     val banner: StateFlow<GitHubRelease?> = _banner
+
+    /** True once the user dismissed the banner; the release itself stays available for About seeding. */
+    val bannerDismissed: StateFlow<Boolean> = _bannerDismissed
 
     /** True once [checkOnce] has actually started a check in this instance (= this process). */
     var started: Boolean = false
@@ -65,7 +71,7 @@ class StartupUpdateCheck(
 
     /** Hides the banner for the rest of the process (the release itself is not forgotten by About seeding). */
     fun dismissBanner() {
-        _banner.value = null
+        _bannerDismissed.value = true
     }
 
     companion object {

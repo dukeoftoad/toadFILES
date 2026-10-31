@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -130,7 +131,11 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         icon = { Icon(dest.icon, null) },
                         selected = currentBase == base,
                         onClick = { openFromDrawer(base) },
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                        // Distinct from the bottom-bar items: a closed drawer still
+                        // composes its content, so plain-text lookups would be ambiguous.
+                        modifier = Modifier
+                            .testTag("drawer_${dest.label}")
+                            .padding(NavigationDrawerItemDefaults.ItemPadding),
                     )
                 }
             }
@@ -159,6 +164,8 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         },
                         icon = dest.icon,
                         label = { Text(dest.label) },
+                        // Distinct from the (always-composed, closed) drawer items.
+                        modifier = Modifier.testTag("tab_${dest.label}"),
                     )
                 }
             }

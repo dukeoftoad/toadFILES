@@ -161,7 +161,7 @@ class StartupUpdateCheckTest {
     }
 
     @Test
-    fun `dismissBanner clears the banner for the rest of the process`() {
+    fun `dismissBanner hides the banner but keeps the release for About seeding`() {
         val check = newCheck()
         check.checkOnce(
             kotlinx.coroutines.CoroutineScope(dispatcher),
@@ -169,8 +169,11 @@ class StartupUpdateCheckTest {
             checker = FakeChecker(release(newerTag()), null),
         )
         assertTrue(check.banner.value != null)
+        assertFalse(check.bannerDismissed.value)
 
         check.dismissBanner()
-        assertNull(check.banner.value)
+        // Dismissal only hides the card; the release itself is not forgotten.
+        assertTrue(check.banner.value != null)
+        assertTrue(check.bannerDismissed.value)
     }
 }

@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
             val startupUpdate = remember { StartupUpdateCheck.instance }
             LaunchedEffect(Unit) { startupUpdate.checkOnce(appScope) }
             val updateBanner by startupUpdate.banner.collectAsStateWithLifecycle()
+            val bannerDismissed by startupUpdate.bannerDismissed.collectAsStateWithLifecycle()
 
             // Hoisted so the banner's "Update" can deep-link into the existing About flow.
             val navController = rememberNavController()
@@ -93,7 +94,7 @@ class MainActivity : ComponentActivity() {
                 accentColor = settings.value.accentColor,
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    if (hasFileAccess()) {
+                    if (hasFileAccess() && updateBanner != null && !bannerDismissed) {
                         UpdateBanner(
                             release = updateBanner,
                             onOpenUpdateFlow = {
