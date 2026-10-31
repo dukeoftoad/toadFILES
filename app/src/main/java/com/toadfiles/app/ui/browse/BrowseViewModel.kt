@@ -11,7 +11,6 @@ import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.FileOps
-import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.PathSafety
@@ -20,6 +19,8 @@ import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.Sorting
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.ui.components.PropertiesDetail
+import com.toadfiles.app.ui.components.computeFilePropertiesDetail
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -88,19 +89,6 @@ sealed interface ExtractEvent {
     /** A finished extraction published at least one item; the UI can navigate into it. */
     data class ExtractCompleted(val destination: File) : ExtractEvent
 }
-
-/**
- * Computed detail behind the Browse properties sheet. Folder sizes/counts arrive
- * asynchronously (recursive walk on IO); [error] carries the app's standard error copy
- * when a folder could not be read at all. Files use [fileCount]/[dirCount] = 0.
- */
-data class PropertiesDetail(
-    val sizeText: String,
-    val sizeBytes: Long,
-    val fileCount: Int,
-    val dirCount: Int,
-    val error: String? = null,
-)
 
 @OptIn(FlowPreview::class)
 class BrowseViewModel(
@@ -827,24 +815,11 @@ class BrowseViewModel(
         _state.update { it.copy(pendingProperties = null, propertiesDetail = null) }
     }
 
-    /** Blocking FS walks (size, counts) run inside the IO-dispatched properties job. */
-    private suspend fun computePropertiesDetail(file: File): PropertiesDetail {
-        if (file.isDirectory && !file.canRead()) {
-            return PropertiesDetail(
-                sizeText = "—", sizeBytes = 0L, fileCount = 0, dirCount = 0,
-                error = "Folder is not readable",
-            )
-        }
-        val sizeBytes = FileOps.sizeOf(file)
-        coroutineContext.ensureActive()
-        val counts = if (file.isDirectory) propertiesBuilder.countEntries(file) else null
-        return PropertiesDetail(
-            sizeText = Format.size(sizeBytes),
-            sizeBytes = sizeBytes,
-            fileCount = counts?.files ?: 0,
-            dirCount = counts?.dirs ?: 0,
-        )
-    }
+    /** Blocking FS walks (size, counts) run inside the IO-dispatched properties job; the
+     *  computation itself is the shared [computeFilePropertiesDetail] (v1.7.3: Categories
+     *  runs the exact same engine for its properties sheet). */
+    private suspend fun computePropertiesDetail(file: File): PropertiesDetail =
+        computeFilePropertiesDetail(file, propertiesBuilder)
 
     // ---------- misc ----------
 

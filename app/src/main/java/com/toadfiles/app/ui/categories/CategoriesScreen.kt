@@ -2,22 +2,17 @@ package com.toadfiles.app.ui.categories
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -28,33 +23,38 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.automirrored.outlined.ViewList
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Audiotrack
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderZip
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.InstallMobile
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Videocam
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,26 +64,32 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil3.compose.AsyncImage
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.data.toFileItem
+import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.ui.components.ConfirmDialog
+import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileGridCell
+import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
+import com.toadfiles.app.ui.components.NameInputDialog
+import com.toadfiles.app.ui.components.PropertiesSheet
+import com.toadfiles.app.ui.components.SortMenu
 import com.toadfiles.app.util.Intents
 import java.io.File
 
@@ -120,12 +126,27 @@ fun CategoriesScreen(
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var actionSheetFor by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    var bulkMenuOpen by remember { mutableStateOf(false) }
+    /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
+    var pendingExtractTo by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
             snackbar.showSnackbar(it)
             vm.consumeToast()
         }
+    }
+
+    // Undo for deletes, exactly like Browse: trashed items go straight back.
+    LaunchedEffect(state.lastTrashed) {
+        val trashed = state.lastTrashed ?: return@LaunchedEffect
+        val result = snackbar.showSnackbar(
+            message = "Moved ${trashed.size} item(s) to trash",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete() else vm.dismissUndo()
     }
 
     // System back: first leave multi-select, then the drill-in list, then the tab.
@@ -168,6 +189,56 @@ fun CategoriesScreen(
                         IconButton(onClick = { vm.requestDelete(vm.selectedEntries()) }) {
                             Icon(Icons.Outlined.Delete, "Delete")
                         }
+                        // Bulk menu, like Browse's: the batch ops that make sense for
+                        // media rows (zip, single-archive extract, properties, rename).
+                        IconButton(onClick = { bulkMenuOpen = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                        DropdownMenu(expanded = bulkMenuOpen, onDismissRequest = { bulkMenuOpen = false }) {
+                            val picked = vm.selectedEntries()
+                            DropdownMenuItem(
+                                text = { Text("Zip ${picked.size} item(s)…") },
+                                onClick = {
+                                    bulkMenuOpen = false
+                                    val files = picked.mapNotNull { it.data?.let(::File) }
+                                    if (files.isEmpty()) {
+                                        vm.requestToast("None of these items has an on-disk path")
+                                    } else {
+                                        vm.requestZip(files)
+                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Archive, null) },
+                            )
+                            val single = picked.singleOrNull()
+                            if (single != null && single.data != null &&
+                                ArchiveOps.canExtract(single.name)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Extract here") },
+                                    onClick = {
+                                        bulkMenuOpen = false
+                                        vm.extractZip(File(single.data!!))
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.FolderZip, null) },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Properties") },
+                                onClick = {
+                                    bulkMenuOpen = false
+                                    picked.firstOrNull()?.let { vm.requestProperties(it) }
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Info, null) },
+                            )
+                            val renameTarget = picked.singleOrNull()
+                            if (renameTarget != null && renameTarget.data != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Rename") },
+                                    onClick = {
+                                        bulkMenuOpen = false
+                                        vm.requestRename(renameTarget)
+                                    },
+                                )
+                            }
+                        }
                     },
                 )
             } else {
@@ -193,6 +264,27 @@ fun CategoriesScreen(
                         }
                     },
                     actions = {
+                        if (inDrillIn) {
+                            // Sort + layout toggle, the same shared controls Browse offers.
+                            IconButton(onClick = { vm.toggleLayout() }) {
+                                Icon(
+                                    if (state.layout == BrowseLayout.GRID)
+                                        Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
+                                    "Toggle list / grid view",
+                                )
+                            }
+                            IconButton(onClick = { sortMenuOpen = true }) {
+                                Icon(Icons.AutoMirrored.Outlined.Sort, "Sort")
+                            }
+                            SortMenu(
+                                expanded = sortMenuOpen,
+                                current = state.sortMode,
+                                currentOrder = state.sortOrder,
+                                onSelect = { vm.setSort(it); sortMenuOpen = false },
+                                onSelectOrder = { vm.setSortOrder(it); sortMenuOpen = false },
+                                onDismiss = { sortMenuOpen = false },
+                            )
+                        }
                         IconButton(onClick = { vm.refresh() }) { Icon(Icons.Outlined.Refresh, "Refresh") }
                     },
                 )
@@ -229,8 +321,10 @@ fun CategoriesScreen(
         }
     }
 
-    // Per-entry action sheet (the row's ⋮ button) — the same one Recent uses, with the
-    // shared wiring from ui/components (audit 7.3). Long-press is reserved for multi-select.
+    // Per-entry action sheet (the row's ⋮ button) — the SAME shared sheet Browse renders,
+    // with the shared media wiring from ui/components (audit 7.3). Long-press is reserved
+    // for multi-select. Categories wires the Browse-parity extras: rename, zip,
+    // "Extract to…" and the properties sheet.
     MediaEntryActionSheet(
         entry = actionSheetFor,
         onDismiss = { actionSheetFor = null },
@@ -238,44 +332,85 @@ fun CategoriesScreen(
         onShowInFolder = onShowInFolder,
         toast = vm::requestToast,
         requestDelete = { e -> vm.requestDelete(listOf(e)) },
-        onDetails = vm::requestDetails,
-        onExtract = vm::extractZip,
+        onDetails = vm::requestProperties,
+        onExtract = { f -> vm.extractZip(f) },
+        onRename = vm::requestRename,
+        onZip = { f -> vm.requestZip(listOf(f)) },
+        onExtractTo = { f -> pendingExtractTo = f },
     )
 
     // Delete confirmation: media entries go to the real 30-day trash.
     state.pendingDelete?.let { entries ->
-        AlertDialog(
-            onDismissRequest = { vm.dismissDelete() },
-            title = { Text("Move ${entries.size} item(s) to trash?") },
-            text = {
-                Text("Items are moved to the toadFILES trash and kept for 30 days. " +
-                    "You can restore them from the Trash page in the side menu.")
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { vm.dismissDelete() }) { Text("Cancel") } },
+        ConfirmDialog(
+            title = "Move ${entries.size} item(s) to trash?",
+            message = "Items are moved to the toadFILES trash and kept for 30 days. " +
+                "You can undo right away or restore later from the Trash page in the side menu.",
+            confirmLabel = "Delete",
+            destructive = true,
+            onConfirm = { vm.confirmDelete() },
+            onDismiss = { vm.dismissDelete() },
         )
     }
 
-    // Details dialog for a media entry.
-    state.detailsOf?.let { e ->
-        AlertDialog(
-            onDismissRequest = { vm.dismissDetails() },
-            title = { Text(e.name, maxLines = 2) },
-            text = {
-                Column {
-                    if (e.data != null) Text("Path: ${e.data}", style = MaterialTheme.typography.labelMedium)
-                    Text("Type: ${e.mime}")
-                    Text("Size: ${Format.size(e.size)}")
-                    Text("Modified: ${Format.dateTime(e.dateModified)}")
-                }
-            },
-            confirmButton = { TextButton(onClick = { vm.dismissDetails() }) { Text("Close") } },
+    // Rename, like Browse's NameInputDialog flow.
+    state.pendingRename?.let { entry ->
+        NameInputDialog(
+            title = "Rename",
+            initialValue = entry.name,
+            confirmLabel = "Rename",
+            onConfirm = { vm.rename(entry, it) },
+            onDismiss = { vm.dismissRename() },
         )
     }
 
-    // Extract progress + result: the same op model Browse shows, shared wiring (audit 7.3).
+    // Zip-name dialog: zips are always named by the user, never a silent "archive.zip".
+    state.pendingZipFiles?.let { files ->
+        NameInputDialog(
+            title = "Zip ${files.size} item(s)",
+            initialValue = state.pendingZipName,
+            confirmLabel = "Zip",
+            onConfirm = { vm.confirmZip(it) },
+            onDismiss = { vm.dismissZipDialog() },
+        )
+    }
+
+    // "Extract to…": the user names the destination folder next to the archive, the
+    // same ask-for-a-name pattern as Browse.
+    pendingExtractTo?.let { archive ->
+        NameInputDialog(
+            title = "Extract to…",
+            initialValue = archive.nameWithoutExtension,
+            confirmLabel = "Extract",
+            onConfirm = {
+                pendingExtractTo = null
+                vm.extractZip(archive, targetName = it)
+            },
+            onDismiss = { pendingExtractTo = null },
+        )
+    }
+
+    // "Extract to…" collision: the shared conflict dialog with Browse's semantics
+    // (keep both / replace / skip).
+    state.pendingExtractConflict?.let { pc ->
+        ConflictDialog(
+            conflicts = listOf(pc.target.name),
+            targetName = pc.target.name,
+            onDecide = { vm.resolveExtractConflict(it) },
+            onDismiss = { vm.dismissExtractConflict() },
+        )
+    }
+
+    // Properties: the same read-only sheet Browse shows.
+    state.pendingProperties?.let { file ->
+        PropertiesSheet(
+            file = file,
+            detail = state.propertiesDetail,
+            onDismiss = { vm.dismissProperties() },
+        )
+    }
+
+    // Extract/zip progress + result: the same op model Browse shows, shared wiring
+    // (audit 7.3).
     MediaOpOverlays(
         progress = state.progress,
         result = state.result,
@@ -400,11 +535,12 @@ private fun CategoryTile(summary: CategorySummary, onClick: () -> Unit) {
 }
 
 /**
- * Drill-in view for one category, newest first (MediaStore sorts by DATE_MODIFIED DESC).
- * Photos and videos render as a modern thumbnail grid; other categories use compact
- * rows. Tap opens the file, long-press opens the action sheet or starts multi-select.
+ * Drill-in view for one category. v1.7.3: the rows and grid cells are the SAME shared
+ * [FileRow]/[FileGridCell] components Browse renders (entries bridge to FileItem via
+ * [toFileItem]), with the user-switchable list/grid layout, the shared sort menu and
+ * the same selection affordances. Tap opens the file, long-press starts multi-select,
+ * and the ⋮ affordance opens the shared action sheet.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CategoryEntries(
     state: CategoriesUiState,
@@ -413,7 +549,6 @@ private fun CategoryEntries(
     onEntryLongPress: (MediaRepository.MediaEntry) -> Unit,
     onEntryMore: (MediaRepository.MediaEntry) -> Unit,
 ) {
-    val visual = state.selected == FileCategory.IMAGES || state.selected == FileCategory.VIDEOS
     when {
         state.entriesLoading -> Row(
             modifier.padding(24.dp),
@@ -425,27 +560,31 @@ private fun CategoryEntries(
             modifier,
         )
 
-        visual -> LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 108.dp),
+        state.layout == BrowseLayout.GRID -> LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 112.dp),
             modifier = modifier,
-            contentPadding = PaddingValues(4.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
         ) {
             gridItems(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
-                MediaGridCell(
-                    e = e,
+                FileGridCell(
+                    item = e.toFileItem(),
                     selected = e.uri.toString() in state.selection,
+                    isFavorite = false,
                     onClick = { onEntryTap(e) },
                     onLongClick = { onEntryLongPress(e) },
                     onMore = { onEntryMore(e) },
                 )
             }
+            item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(16.dp)) }
         }
 
         else -> LazyColumn(modifier) {
             items(state.entries, key = { "${it.category.name}#${it.id}" }) { e ->
-                MediaRow(
-                    e = e,
+                FileRow(
+                    item = e.toFileItem(),
                     selected = e.uri.toString() in state.selection,
+                    isFavorite = false,
+                    subtitle = "${Format.size(e.size)} · ${Format.date(e.dateModified)}",
                     onClick = { onEntryTap(e) },
                     onLongClick = { onEntryLongPress(e) },
                     onMore = { onEntryMore(e) },
@@ -464,148 +603,6 @@ private fun CategoryEntries(
                 }
             }
             item { Spacer(Modifier.height(16.dp)) }
-        }
-    }
-}
-
-/**
- * Square thumbnail cell for image/video grids, with a selection check overlay and a
- * discoverable ⋮ affordance for the per-item action sheet (long-press starts
- * multi-select, so the sheet needs its own always-visible trigger).
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MediaGridCell(
-    e: MediaRepository.MediaEntry,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onMore: () -> Unit,
-) {
-    Box(
-        Modifier
-            .padding(2.dp)
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(14.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-    ) {
-        AsyncImage(
-            // Prefer the real file when its path is known (faster, works for video frames);
-            // fall back to the MediaStore URI when the index hides the path.
-            model = e.data?.let(::File) ?: e.uri,
-            contentDescription = e.name,
-            contentScale = ContentScale.Crop,
-            error = androidx.compose.ui.graphics.vector.rememberVectorPainter(lookFor(e.category).icon),
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .fillMaxSize(),
-        )
-        if (selected) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f)),
-            )
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(24.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.Check,
-                    contentDescription = "Selected",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.padding(4.dp),
-                )
-            }
-        } else {
-            // Overflow affordance for the per-entry action sheet. The scrim disc keeps
-            // it visible over any thumbnail; it sits where the selection check goes,
-            // and the two never render at the same time.
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.55f))
-                    .clickable(onClickLabel = "More actions") { onMore() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Outlined.MoreVert,
-                    contentDescription = "More actions",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-    }
-}
-
-/** Compact row for non-visual categories (docs, audio, archives, APKs). */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MediaRow(
-    e: MediaRepository.MediaEntry,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onMore: () -> Unit,
-) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
-    Surface(color = bg, shape = RoundedCornerShape(12.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    lookFor(e.category).icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    e.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Text(
-                    "${Format.size(e.size)} · ${Format.date(e.dateModified)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            // Row overflow: the action sheet lives here because long-press
-            // is reserved for starting multi-select.
-            if (!selected) {
-                IconButton(onClick = onMore) {
-                    Icon(
-                        Icons.Outlined.MoreVert,
-                        contentDescription = "More actions",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (selected) {
-                Icon(Icons.Outlined.Check, "Selected", tint = MaterialTheme.colorScheme.primary)
-            }
         }
     }
 }
