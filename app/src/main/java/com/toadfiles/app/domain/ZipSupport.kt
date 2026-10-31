@@ -58,11 +58,11 @@ object ZipSupport {
     private const val RATIO_OVERHEAD = 64L
 
     /** Sentinel for global abort conditions; its message is reported verbatim. */
-    private class ArchiveAbort(message: String) : IOException(message)
+    internal class ArchiveAbort(message: String) : IOException(message)
 
     /** Internal control-flow signal: a replace-mode publication item failed and the run
      *  must roll back. The specific failure is already recorded in the failures list. */
-    private class PublicationAbort : IOException("publication aborted")
+    internal class PublicationAbort : IOException("publication aborted")
 
     /** Input stream that counts every byte actually consumed from the archive. */
     private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
@@ -88,7 +88,12 @@ object ZipSupport {
         }
     }
 
-    private class Counts(var moved: Int = 0, var skipped: Int = 0, var failed: Int = 0)
+    internal class Counts(var moved: Int = 0, var skipped: Int = 0, var failed: Int = 0)
+
+    /** Friendly copy for encrypted archives (v1.7.1): passwords aren't supported yet. */
+    internal fun friendlyArchiveError(e: Exception): String =
+        if ((e.message ?: "").contains("encrypt", ignoreCase = true)) PASSWORD_UNSUPPORTED
+        else e.message ?: "error"
 
     suspend fun extract(
         zipFile: File,
@@ -114,6 +119,10 @@ object ZipSupport {
         var entries = 0
         var totalBytes = 0L
         val counts = Counts()
+        // Determinate progress (v1.7.1): the central directory gives the entry count
+        // upfront; streaming archives that can't be opened this way fall back to -1
+        // (indeterminate), exactly like the old behaviour.
+        val total = runCatching { java.util.zip.ZipFile(zipFile).use { it.size() } }.getOrDefault(-1)
 
         try {
             // The chain order matters (audit P2.3): the 64 KiB buffer prefetches from the
@@ -206,9 +215,9 @@ object ZipSupport {
                         break
                     } catch (e: Exception) {
                         fail++
-                        failures += "$name: ${e.message ?: "error"}"
+                        failures += "$name: ${friendlyArchiveError(e)}"
                     } finally {
-                        onProgress(OpProgress(entries, -1, name))
+                        onProgress(OpProgress(entries, total, name))
                     }
                 }
             }
@@ -261,8 +270,12 @@ object ZipSupport {
         var fail = 0
         val failures = mutableListOf<String>()
         var cancelled = false
-        var done = 0
-        val total = sources.size
+        // Determinate progress (v1.7.1): total file entries are known upfront (a cheap
+        // pre-walk with the same no-follow link policy as addToZip), and every completed
+        // file entry ticks the counter — folders and skipped links just don't count.
+        var filesDone = 0
+        val totalFiles = sources.sumOf { countZipFiles(it) }
+        onProgress(OpProgress(0, totalFiles, ""))
         val usedEntryNames = mutableSetOf<String>()
         val visited = mutableSetOf<String>()
         val skipped = mutableListOf<String>()
@@ -273,7 +286,6 @@ object ZipSupport {
                 for (src in sources) {
                     try {
                         currentCoroutineContext().ensureActive()
-                        onProgress(OpProgress(done, total, src.name))
                         val reason = unfollowableLinkReason(src)
                         if (reason != null) {
                             // The SOURCE ITSELF is a link we never follow: nothing of it
@@ -282,7 +294,10 @@ object ZipSupport {
                             skipped += "${src.name}: not added: $reason (links are not followed)"
                             topLevelSkipped++
                         } else {
-                            addToZip(src, uniqueEntryName(usedEntryNames, src.name), zos, visited, skipped)
+                            addToZip(src, uniqueEntryName(usedEntryNames, src.name), zos, visited, skipped) {
+                                filesDone++
+                                onProgress(OpProgress(filesDone, totalFiles, src.name))
+                            }
                         }
                     } catch (ce: kotlinx.coroutines.CancellationException) {
                         cancelled = true
@@ -294,7 +309,6 @@ object ZipSupport {
                         failures += "${src.name}: ${e.message ?: "error"}"
                         break
                     }
-                    done++
                 }
             }
             completed = !cancelled && fail == 0
@@ -330,6 +344,9 @@ object ZipSupport {
 
     private const val BUFFER_SIZE = 64 * 1024
 
+    /** Shown for encrypted zip/7z archives instead of a raw codec error (v1.7.1). */
+    internal const val PASSWORD_UNSUPPORTED = "Password-protected archives aren't supported yet"
+
     /** Hidden backup name prefix for replace-mode publication; mirrors FileOps.
      *  Dot-prefixed so normal listings skip it. */
     private const val BACKUP_PREFIX = ".tf-old-"
@@ -348,7 +365,7 @@ object ZipSupport {
      * no successes). On success the backups are discarded. Cancellation checkpoints run
      * per staged folder and per published item (audit P2.4).
      */
-    private suspend fun publishStaging(
+    internal suspend fun publishStaging(
         staging: File,
         targetDir: File,
         replace: Boolean,
@@ -554,6 +571,7 @@ object ZipSupport {
         zos: ZipOutputStream,
         visited: MutableSet<String>,
         skipped: MutableList<String>,
+        onFileDone: () -> Unit,
     ) {
         currentCoroutineContext().ensureActive()
         val canonical = try {
@@ -573,11 +591,25 @@ object ZipSupport {
                 zos.putNextEntry(ZipEntry("$entryName/"))
                 zos.closeEntry()
             } else {
-                for (c in children) addToZip(c, "$entryName/${c.name}", zos, visited, skipped)
+                for (c in children) addToZip(c, "$entryName/${c.name}", zos, visited, skipped, onFileDone)
             }
             return
         }
         writeFileEntry(file, entryName, zos)
+        onFileDone()
+    }
+
+    /** File-entry count of what addToZip would add for [file]: plain files (and links to
+     *  files) count 1, folders count their contents; unfollowable links count 0. Mirrors
+     *  the add policy so the zip progress total is honest. */
+    private fun countZipFiles(file: File): Int {
+        if (unfollowableLinkReason(file) != null) return 0
+        if (file.isFile) return 1
+        if (!file.isDirectory) return 0
+        val children = file.listFiles() ?: return 0
+        var n = 0
+        for (c in children) n += countZipFiles(c) // folder links are skipped above: no cycles
+        return n
     }
 
     /** Non-null when [file] is a symbolic link this policy refuses to follow: a link to

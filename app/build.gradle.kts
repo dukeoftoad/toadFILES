@@ -109,6 +109,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video) // video thumbnails for the Categories/Recent grids
     implementation(libs.kotlinx.coroutines.core)
+    // 7z read support (pure Java, minSdk-26 safe). ZIP stays on java.util.zip.
+    implementation("org.apache.commons:commons-compress:1.27.1")
 
     // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
     testImplementation(libs.junit)
