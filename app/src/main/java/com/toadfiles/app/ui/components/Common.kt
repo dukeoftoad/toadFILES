@@ -391,18 +391,30 @@ fun NameInputDialog(
     confirmLabel: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
+    /** Optional destination path shown under the field (v1.7.3: archive folder default). */
+    destination: String? = null,
 ) {
     var value by remember { mutableStateOf(initialValue) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                singleLine = true,
-                label = { Text("Name") },
-            )
+            Column {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    singleLine = true,
+                    label = { Text("Name") },
+                )
+                destination?.let {
+                    Text(
+                        "Into $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(value) }, enabled = value.isNotBlank()) {

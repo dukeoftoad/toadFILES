@@ -5,10 +5,18 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.PasswordRequiredException
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.archivers.sevenz.SevenZMethod
+import org.apache.commons.compress.archivers.sevenz.SevenZMethodConfiguration
+import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
+import org.tukaani.xz.LZMA2Options
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * Safe 7z extraction (v1.7.1) — the 7z twin of [ZipSupport.extract], reusing the exact
@@ -27,9 +35,12 @@ import java.io.IOException
  *    app-wide friendly copy [ZipSupport.PASSWORD_UNSUPPORTED] instead of a codec crash.
  *  - Cancellation checkpoints per entry and per buffer; everything runs on Dispatchers.IO.
  *
- * 7z is extract-only by design (v1.7.1): creation stays on the zip pipeline, so there is
- * deliberately no "compress to 7z" anywhere in the UI. commons-compress is pure Java and
- * minSdk-26 safe (no native codecs are used — only the LZMA/LZMA2/BCJ Java decoders).
+ * Creation (v1.7.3, [create7z]) reuses the zip pipeline's shape: staged temp file +
+ * atomic rename, no-follow symlink walk with a visited set, per-file determinate progress
+ * (pre-walked totals), cancellation checkpoints per file and per buffer, and the
+ * [ZipSupport.Limits] entry cap so a runaway tree can't balloon the header.
+ * commons-compress is pure Java and minSdk-26 safe (no native codecs are used — only the
+ * LZMA/LZMA2/BCJ Java codecs from commons-compress + XZ for Java).
  */
 object SevenZipSupport {
 
@@ -198,6 +209,232 @@ object SevenZipSupport {
         SevenZFile(sevenZFile).use { it.entries.toList().size }
     } catch (_: Exception) {
         null
+    }
+
+    // ---------- creation (v1.7.3) ----------
+
+    /**
+     * [CompressLevel] → xz LZMA2 preset (dictionary + match-finder settings), mirroring
+     * the xz CLI presets. STORE is handled separately via the COPY codec and never maps
+     * to a preset.
+     *
+     * Encoder memory is roughly 10.5× the dictionary size (xz for Java's own formula):
+     * FAST ≈ 11 MB, NORMAL ≈ 88 MB, MAXIMUM ≈ 700 MB. MAXIMUM is offered for desktop-grade
+     * content; [create7z] converts an encoder OOM into an honest failure instead of a crash.
+     */
+    internal fun lzma2Preset(level: CompressLevel): Int = when (level) {
+        CompressLevel.FAST -> 1      // 1 MiB dictionary
+        CompressLevel.NORMAL -> 6    // 8 MiB dictionary (the xz default)
+        CompressLevel.MAXIMUM -> 9   // 64 MiB dictionary
+        CompressLevel.STORE -> throw IllegalArgumentException("STORE uses the COPY codec, not LZMA2")
+    }
+
+    /**
+     * The commons-compress content-method configuration for [level]:
+     *  - STORE → [SevenZMethod.COPY]: every byte lands in the archive verbatim;
+     *  - FAST/NORMAL/MAXIMUM → LZMA2 at the xz preset from [lzma2Preset]
+     *    (passed as a full [LZMA2Options], which commons-compress accepts natively).
+     */
+    internal fun contentMethodsFor(level: CompressLevel): List<SevenZMethodConfiguration> =
+        if (level == CompressLevel.STORE) {
+            listOf(SevenZMethodConfiguration(SevenZMethod.COPY))
+        } else {
+            val options = LZMA2Options()
+            options.setPreset(lzma2Preset(level))
+            listOf(SevenZMethodConfiguration(SevenZMethod.LZMA2, options))
+        }
+
+    /** Entry-count budget for creation: the 7z header must stay bounded like the zip one. */
+    private class EntryBudget(private val max: Int) {
+        var used = 0
+            private set
+
+        fun take() {
+            if (++used > max) {
+                throw ZipSupport.ArchiveAbort("Aborted: more than $max entries (possible bomb)")
+            }
+        }
+    }
+
+    /**
+     * Creates a solid 7z archive from [sources] at [target] (v1.7.3).
+     *
+     * Mirrors [ZipSupport.zip] protection-for-protection: the archive is assembled in a
+     * hidden temp sibling and atomically renamed onto [target] only on success (an
+     * existing target is replaced); a failing source aborts the whole run so no broken
+     * archive is ever published; cancellation checkpoints run per source, per file and
+     * per buffer; symbolic links are never followed (links to files stored by content,
+     * folder/dangling links skipped with reasons, visited-set breaks cycles); duplicate
+     * top-level names get "(1)"-style entry names; and [limits.maxEntries] bounds the
+     * header size. Progress is determinate: the file count comes from the same pre-walk
+     * that produces the entries.
+     */
+    suspend fun create7z(
+        sources: List<File>,
+        target: File,
+        level: CompressLevel = CompressLevel.NORMAL,
+        limits: ZipSupport.Limits = ZipSupport.Limits(),
+        onProgress: (OpProgress) -> Unit = {},
+    ): OpResult = withContext(Dispatchers.IO) {
+        PathSafety.rejectSelfTarget(sources, target.parentFile ?: File("."))
+        val parent = target.parentFile ?: File(".")
+        if (!parent.isDirectory && !parent.mkdirs()) {
+            return@withContext OpResult(0, 0, 1, false, listOf("Cannot create ${parent.name}"))
+        }
+        val tmp = File(parent, ".${target.name}.part-${System.nanoTime()}")
+        var fail = 0
+        val failures = mutableListOf<String>()
+        var cancelled = false
+        var filesDone = 0
+        val totalFiles = sources.sumOf { ZipSupport.countFileEntries(it) }
+        onProgress(OpProgress(0, totalFiles, ""))
+        val usedEntryNames = mutableSetOf<String>()
+        val visited = mutableSetOf<String>()
+        val skipped = mutableListOf<String>()
+        var topLevelSkipped = 0
+        val budget = EntryBudget(limits.maxEntries)
+        var completed = false
+        try {
+            SevenZOutputFile(tmp).use { sz ->
+                sz.setContentMethods(contentMethodsFor(level))
+                for (src in sources) {
+                    try {
+                        currentCoroutineContext().ensureActive()
+                        val reason = ZipSupport.unfollowableLinkReason(src)
+                        if (reason != null) {
+                            // The SOURCE ITSELF is a link we never follow: nothing of it
+                            // enters the archive. Nested skips inside a real folder are
+                            // recorded in `skipped` without failing the source.
+                            skipped += "${src.name}: not added: $reason (links are not followed)"
+                            topLevelSkipped++
+                        } else {
+                            addTo7z(
+                                src, ZipSupport.uniqueEntryName(usedEntryNames, src.name),
+                                sz, visited, skipped, budget,
+                            ) {
+                                filesDone++
+                                onProgress(OpProgress(filesDone, totalFiles, src.name))
+                            }
+                        }
+                    } catch (ce: kotlinx.coroutines.CancellationException) {
+                        cancelled = true
+                        break
+                    } catch (ab: ZipSupport.ArchiveAbort) {
+                        // Entry-budget overrun: nothing after this can be trusted.
+                        fail++
+                        failures += ab.message ?: "aborted"
+                        break
+                    } catch (e: Exception) {
+                        // The stream may already hold a half-written entry: publishing it
+                        // would hand out a broken archive, so abort and delete.
+                        fail++
+                        failures += "${src.name}: ${e.message ?: "error"}"
+                        break
+                    }
+                }
+            }
+            completed = !cancelled && fail == 0
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            cancelled = true
+        } catch (oom: OutOfMemoryError) {
+            // The LZMA2 encoder needs ~10.5× the dictionary; a too-big dictionary on a
+            // heap-limited device must degrade to an honest failure, not a crash.
+            fail++
+            failures += "${target.name}: not enough memory for the ${level.name.lowercase()} " +
+                "compression level — try a lower one"
+        } catch (e: Exception) {
+            if (!cancelled) {
+                fail++
+                failures += "${target.name}: ${e.message ?: "write failed"}"
+            }
+        }
+        if (completed) {
+            try {
+                Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: Exception) {
+                fail++
+                failures += "${target.name}: ${e.message ?: "publish failed"}"
+                completed = false
+            }
+        }
+        if (tmp.exists()) tmp.delete()
+        // `completed` implies every followable source was added; an archive that was
+        // never published means nothing the user asked for succeeded. Unfollowed links
+        // are reported as skips (with reasons), not failures — the archive is still valid.
+        OpResult(
+            if (completed) sources.size - topLevelSkipped else 0,
+            skipped.size,
+            fail,
+            cancelled,
+            failures + skipped,
+        )
+    }
+
+    /**
+     * 7z twin of ZipSupport's addToZip: same no-follow link policy, same visited-set
+     * cycle guard, same relative entry names — writing [SevenZArchiveEntry]s instead.
+     * Cancellation is checked per file AND per directory.
+     */
+    private suspend fun addTo7z(
+        file: File,
+        entryName: String,
+        sz: SevenZOutputFile,
+        visited: MutableSet<String>,
+        skipped: MutableList<String>,
+        budget: EntryBudget,
+        onFileDone: () -> Unit,
+    ) {
+        currentCoroutineContext().ensureActive()
+        val canonical = try {
+            file.canonicalPath
+        } catch (_: Exception) {
+            file.absolutePath
+        }
+        if (!visited.add(canonical)) return // link cycle / already added: never recurse twice
+        val reason = ZipSupport.unfollowableLinkReason(file)
+        if (reason != null) {
+            skipped += "$entryName: not added: $reason (links are not followed)"
+            return
+        }
+        if (file.isDirectory) {
+            val children = file.listFiles()
+            if (children.isNullOrEmpty()) {
+                // Empty folders must survive the round-trip: a stream-less directory
+                // entry, exactly like the zip pipeline's "name/" entries.
+                budget.take()
+                val e = SevenZArchiveEntry()
+                e.name = "$entryName/"
+                e.isDirectory = true
+                sz.putArchiveEntry(e)
+                sz.closeArchiveEntry()
+            } else {
+                for (c in children) addTo7z(c, "$entryName/${c.name}", sz, visited, skipped, budget, onFileDone)
+            }
+            return
+        }
+        budget.take()
+        writeFileEntry(file, entryName, sz)
+        onFileDone()
+    }
+
+    /** Opens the source before the entry: an unreadable source then never leaves a
+     *  half-open entry behind in the archive. Sizes/stream flags are derived by
+     *  closeArchiveEntry from the bytes actually written (commons-compress), so a file
+     *  that changed length mid-read aborts honestly instead of corrupting the header. */
+    private suspend fun writeFileEntry(file: File, entryName: String, sz: SevenZOutputFile) {
+        FileInputStream(file).use { fis ->
+            val e = SevenZArchiveEntry()
+            e.name = entryName
+            sz.putArchiveEntry(e)
+            val buf = ByteArray(BUFFER_SIZE)
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val n = fis.read(buf)
+                if (n == -1) break
+                sz.write(buf, 0, n)
+            }
+            sz.closeArchiveEntry()
+        }
     }
 
     private const val BUFFER_SIZE = 64 * 1024

@@ -95,15 +95,15 @@ class FileActionSheetTest {
         // File-only actions
         assertRowShown("Copy path")
         assertRowShown("Open with…")
-        // For a non-zip file the zip row reads "Zip this file" (not "Extract here")
-        assertRowShown("Zip this file")
+        // For a non-zip file the compress row reads "Compress this file" (not "Extract here")
+        assertRowShown("Compress this file")
     }
 
     @Test
-    fun `folder sheet hides Copy path and Open with, shows Zip this folder`() {
+    fun `folder sheet hides Copy path and Open with, shows Compress this folder`() {
         renderSheet(fileItem("Pictures", isDir = true))
         assertRowShown("Open")
-        assertRowShown("Zip this folder")
+        assertRowShown("Compress this folder")
         // File-only actions must NOT appear for a folder — the sheet hides them.
         assertRowHidden("Copy path")
         assertRowHidden("Open with…")
@@ -111,12 +111,20 @@ class FileActionSheetTest {
     }
 
     @Test
-    fun `zip file sheet shows Extract here instead of Zip this file`() {
+    fun `zip file sheet shows Extract here instead of Compress this file`() {
         renderSheet(fileItem("archive.zip", isDir = false), onExtract = {})
         assertRowShown("Extract here")
-        // The file-zip row must be hidden when the extract row is shown.
-        assertRowHidden("Zip this file")
-        assertRowHidden("Zip this folder")
+        // The file-compress row must be hidden when the extract row is shown.
+        assertRowHidden("Compress this file")
+        assertRowHidden("Compress this folder")
+    }
+
+    @Test
+    fun `7z file sheet shows Extract here instead of Compress this file`() {
+        // The 7z twin keeps the same honest-visibility promise.
+        renderSheet(fileItem("archive.7z", isDir = false))
+        assertRowShown("Extract here")
+        assertRowHidden("Compress this file")
     }
 
     @Test

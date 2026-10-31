@@ -46,11 +46,13 @@ import com.toadfiles.app.domain.Format
  * the user taps a row's ⋮ button; long-press starts multi-select instead.
  *
  * Action visibility is honest: an action the calling screen did not wire (null callback)
- * or that doesn't apply to the item (e.g. "Extract here" for a non-zip, "Open with…" for
+ * or that doesn't apply to the item (e.g. "Extract here" for a non-archive, "Open with…" for
  * a folder) is simply not shown — we never render a disabled row that hints at features
  * the user can't reach. Browse wires everything; the media screens wire the actions that
  * make sense for a MediaStore row (path-dependent actions only when the on-disk path is
- * known, clipboard copy/move only where a paste target exists).
+ * known, clipboard copy/move only where a paste target exists). Both zip and 7z are
+ * creatable since v1.7.3 via the compress dialog's format chooser, but an existing
+ * archive is far more often extracted, so archives get Extract actions instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,15 +131,16 @@ fun FileActionSheet(
                 SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
             }
 
-            // Organize: Delete / Zip / Extract. Archives toadFILES can extract (.zip,
-            // .7z) get Extract actions instead of "Zip this file" — 7z is extract-only,
-            // zip keeps its compress flow on the selection toolbar and folder rows.
+            // Organize: Delete / Compress / Extract. Archives toadFILES can extract (.zip,
+            // .7z) get Extract actions instead of "Compress this file" — both formats are
+            // also creatable since v1.7.3 via the compress dialog's format chooser, but an
+            // existing archive is far more often extracted.
             if (onDelete != null) {
                 SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
             }
             when {
                 item.isDir && onZip != null ->
-                    SheetRow(Icons.Outlined.Archive, "Zip this folder", onClick = onZip)
+                    SheetRow(Icons.Outlined.Archive, "Compress this folder", onClick = onZip)
                 ArchiveOps.canExtract(item.name) && onExtract != null -> {
                     SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = onExtract)
                     // Destination picking is optional plumbing: hide the row when a screen
@@ -147,7 +150,7 @@ fun FileActionSheet(
                     }
                 }
                 onZip != null ->
-                    SheetRow(Icons.Outlined.Archive, "Zip this file", onClick = onZip)
+                    SheetRow(Icons.Outlined.Archive, "Compress this file", onClick = onZip)
             }
 
             // Favorite / advanced
