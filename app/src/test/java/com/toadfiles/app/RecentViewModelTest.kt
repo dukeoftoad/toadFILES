@@ -230,4 +230,42 @@ class RecentViewModelTest {
             root.deleteRecursively()
         }
     }
+
+    // ---------- v1.8.0: extract password prompt ----------
+
+    /**
+     * TODO(integration): needs Agent 1's domain (AES-256 7z creation + password-aware
+     * extraction). Covers the Recent extract password-prompt flow: a passwordRequired
+     * result opens the prompt (never a failure dialog), and Retry re-runs the same
+     * extract with the typed password. Enable when the domain contract has landed.
+     */
+    @Test
+    @org.junit.Ignore("TODO(integration): password prompt requires the v1.8.0 domain (passwordRequired)")
+    fun `passwordRequired opens the prompt and retry extracts with the password`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "recent-prompt-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val src = File(root, "a.txt").apply { writeText("secret stuff") }
+            val vault = File(root, "vault.7z")
+            com.toadfiles.app.domain.ArchiveOps.compress(
+                listOf(src), vault, com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z,
+                password = "hunter2".toCharArray(),
+            )
+
+            vm.extractZip(vault)
+            await { vm.state.value.pendingPasswordFor != null }
+            assertNull("a password ask is not a failure", vm.state.value.result)
+            assertEquals(vault, vm.state.value.pendingPasswordFor)
+            assertEquals(vault, vm.state.value.pendingPasswordRetry!!.archive)
+            assertEquals(File(root, "vault"), vm.state.value.pendingPasswordRetry!!.target)
+
+            vm.retryExtractWithPassword("hunter2")
+            await { vm.state.value.result != null }
+            assertNull(vm.state.value.pendingPasswordFor)
+            assertEquals(0, vm.state.value.result!!.failed)
+            assertEquals("secret stuff", File(root, "vault/a.txt").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
