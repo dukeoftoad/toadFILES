@@ -128,6 +128,61 @@ class TrashViewModelTest {
     }
 
     @Test
+    fun `multi-select batch restore returns every selected item`() = runTest {
+        seedTrash("b1.txt")
+        seedTrash("b2.txt")
+        vm.refresh()
+        await { vm.state.value.entries.size == 2 }
+
+        vm.state.value.entries.forEach { vm.toggleSelection(it) }
+        assertEquals(2, vm.state.value.selection.size)
+
+        vm.requestBatchRestore()
+        await { vm.state.value.entries.isEmpty() && vm.state.value.selection.isEmpty() }
+        assertEquals("Restored 2 item(s)", vm.state.value.toast)
+        assertTrue(File(volume, "b1.txt").exists() && File(volume, "b2.txt").exists())
+    }
+
+    @Test
+    fun `multi-select batch delete forever requires confirmation`() = runTest {
+        val t1 = seedTrash("bd1.txt")
+        seedTrash("bd2.txt")
+        vm.refresh()
+        await { vm.state.value.entries.size == 2 }
+
+        // Confirm gate: request alone must not destroy anything.
+        // (Entries are listed newest first — pick by name, not position.)
+        val bd1 = vm.state.value.entries.first { it.originPath.endsWith("bd1.txt") }
+        vm.toggleSelection(bd1)
+        vm.requestBatchDeleteForever()
+        assertTrue(vm.state.value.confirmingBatchDelete)
+        vm.dismissBatchDeleteForever()
+        assertFalse(vm.state.value.confirmingBatchDelete)
+        assertTrue(t1.exists())
+
+        vm.confirmBatchDeleteForever()
+        await { vm.state.value.entries.size == 1 && vm.state.value.selection.isEmpty() }
+        assertFalse(t1.exists())
+        assertTrue(vm.state.value.toast!!.contains("Deleted 1"))
+    }
+
+    @Test
+    fun `toggleSelection deselects and clearSelection resets`() = runTest {
+        seedTrash("s1.txt")
+        vm.refresh()
+        await { vm.state.value.entries.size == 1 }
+        val e = vm.state.value.entries.first()
+
+        vm.toggleSelection(e)
+        assertEquals(1, vm.state.value.selection.size)
+        vm.toggleSelection(e)
+        assertTrue(vm.state.value.selection.isEmpty())
+        vm.toggleSelection(e)
+        vm.clearSelection()
+        assertTrue(vm.state.value.selection.isEmpty())
+    }
+
+    @Test
     fun `emptyNow wipes everything and reports the count`() = runTest {
         seedTrash("e1.txt")
         seedTrash("e2.txt")

@@ -1,5 +1,7 @@
 package com.toadfiles.app.ui.trash
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,11 +17,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -76,17 +81,33 @@ fun TrashScreen(
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
             TopAppBar(
-                title = { Text("Trash") },
+                title = {
+                    Text(if (state.selection.isEmpty()) "Trash" else "${state.selection.size} selected")
+                },
                 navigationIcon = {
-                    if (onOpenDrawer != null) {
+                    if (state.selection.isNotEmpty()) {
+                        IconButton(onClick = { vm.clearSelection() }) {
+                            Icon(Icons.Outlined.Close, "Clear selection")
+                        }
+                    } else if (onOpenDrawer != null) {
                         IconButton(onClick = onOpenDrawer) { Icon(Icons.Outlined.Menu, "Open navigation menu") }
                     } else {
                         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
                     }
                 },
                 actions = {
-                    IconButton(onClick = { vm.requestEmpty() }, enabled = state.entries.isNotEmpty()) {
-                        Icon(Icons.Outlined.DeleteSweep, "Empty trash")
+                    if (state.selection.isNotEmpty()) {
+                        // Batch restore never destroys data — no confirmation needed.
+                        IconButton(onClick = { vm.requestBatchRestore() }) {
+                            Icon(Icons.Outlined.Restore, "Restore selected")
+                        }
+                        IconButton(onClick = { vm.requestBatchDeleteForever() }) {
+                            Icon(Icons.Outlined.DeleteForever, "Delete selected forever")
+                        }
+                    } else {
+                        IconButton(onClick = { vm.requestEmpty() }, enabled = state.entries.isNotEmpty()) {
+                            Icon(Icons.Outlined.DeleteSweep, "Empty trash")
+                        }
                     }
                 },
             )
@@ -139,7 +160,15 @@ fun TrashScreen(
                     )
                 }
                 items(state.entries, key = { it.file.absolutePath }) { e ->
-                    TrashRow(e, onRestore = { vm.restore(e) }, onDelete = { vm.requestDeleteForever(e) })}
+                    TrashRow(
+                        e = e,
+                        selected = e.file.absolutePath in state.selection,
+                        selectionMode = state.selection.isNotEmpty(),
+                        onRestore = { vm.restore(e) },
+                        onDelete = { vm.requestDeleteForever(e) },
+                        onToggle = { vm.toggleSelection(e) },
+                    )
+                }
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
@@ -170,22 +199,51 @@ fun TrashScreen(
             onDismiss = { vm.dismissDeleteForever() },
         )
     }
+
+    // Batch delete forever: same respect, applied to the whole selection (v1.7.5).
+    if (state.confirmingBatchDelete) {
+        ConfirmDialog(
+            title = "Delete ${state.selection.size} item(s) forever?",
+            message = "Permanently delete the ${state.selection.size} selected item(s)? This cannot be undone.",
+            confirmLabel = "Delete forever",
+            destructive = true,
+            onConfirm = { vm.confirmBatchDeleteForever() },
+            onDismiss = { vm.dismissBatchDeleteForever() },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TrashRow(e: TrashEntry, onRestore: () -> Unit, onDelete: () -> Unit) {
+private fun TrashRow(
+    e: TrashEntry,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onRestore: () -> Unit,
+    onDelete: () -> Unit,
+    onToggle: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
+            .combinedClickable(
+                // Long-press enters selection mode (same affordance as Browse/Recent).
+                onLongClick = onToggle,
+                onClick = { if (selectionMode) onToggle() else onRestore() },
+            )
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Outlined.Delete,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.size(22.dp),
-        )
+        if (selectionMode) {
+            Checkbox(checked = selected, onCheckedChange = { onToggle() })
+        } else {
+            Icon(
+                Icons.Outlined.Delete,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(22.dp),
+            )
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -210,7 +268,15 @@ private fun TrashRow(e: TrashEntry, onRestore: () -> Unit, onDelete: () -> Unit)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = onRestore) { Icon(Icons.Outlined.Restore, "Restore") }
-        IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteForever, "Delete forever") }
+        if (!selectionMode) {
+            IconButton(onClick = onRestore) { Icon(Icons.Outlined.Restore, "Restore") }
+            IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteForever, "Delete forever") }
+        } else if (selected) {
+            Icon(
+                Icons.Outlined.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }

@@ -20,6 +20,10 @@ data class TrashUiState(
     val confirmingEmpty: Boolean = false,
     /** Item awaiting its "delete forever" confirmation. */
     val confirmingDelete: TrashEntry? = null,
+    /** Multi-select (v1.7.5): absolute paths of the currently selected trash items. */
+    val selection: Set<String> = emptySet(),
+    /** Batch "delete forever" confirmation (operates on [selection]). */
+    val confirmingBatchDelete: Boolean = false,
     val toast: String? = null,
 )
 
@@ -90,6 +94,64 @@ class TrashViewModel(
 
     fun requestEmpty() = _state.update { it.copy(confirmingEmpty = true) }
     fun dismissEmpty() = _state.update { it.copy(confirmingEmpty = false) }
+
+    // ---- Multi-select (v1.7.5): batch restore / delete forever ----
+
+    fun toggleSelection(entry: TrashEntry) = _state.update {
+        val path = entry.file.absolutePath
+        it.copy(selection = if (path in it.selection) it.selection - path else it.selection + path)
+    }
+
+    fun clearSelection() = _state.update { it.copy(selection = emptySet(), confirmingBatchDelete = false) }
+
+    /** Select everything currently listed (the header row doubles as select-all). */
+    fun selectAll() = _state.update {
+        it.copy(selection = it.entries.mapTo(mutableSetOf()) { e -> e.file.absolutePath })
+    }
+
+    fun requestBatchRestore() {
+        val selected = selectedEntries()
+        if (selected.isEmpty()) return
+        viewModelScope.launch(ioDispatcher) {
+            val restored = selected.count { Trash.restore(it.file) != null }
+            _state.update {
+                it.copy(
+                    selection = emptySet(),
+                    toast = if (restored == selected.size) "Restored $restored item(s)"
+                    else "Restored $restored of ${selected.size} — some original locations are unavailable",
+                )
+            }
+            refresh()
+        }
+    }
+
+    /** Permanent batch deletion must be confirmed first — there is no undo for this. */
+    fun requestBatchDeleteForever() {
+        if (_state.value.selection.isNotEmpty()) _state.update { it.copy(confirmingBatchDelete = true) }
+    }
+
+    fun dismissBatchDeleteForever() = _state.update { it.copy(confirmingBatchDelete = false) }
+
+    fun confirmBatchDeleteForever() {
+        val selected = selectedEntries()
+        _state.update { it.copy(confirmingBatchDelete = false, selection = emptySet()) }
+        if (selected.isEmpty()) return
+        viewModelScope.launch(ioDispatcher) {
+            val deleted = selected.count { Trash.deleteForever(it.file) }
+            _state.update {
+                it.copy(
+                    toast = if (deleted == selected.size) "Deleted $deleted item(s) forever"
+                    else "Deleted $deleted of ${selected.size} — the rest may already be gone",
+                )
+            }
+            refresh()
+        }
+    }
+
+    private fun selectedEntries(): List<TrashEntry> {
+        val sel = _state.value.selection
+        return _state.value.entries.filter { it.file.absolutePath in sel }
+    }
 
     fun emptyNow() {
         _state.update { it.copy(confirmingEmpty = false) }
