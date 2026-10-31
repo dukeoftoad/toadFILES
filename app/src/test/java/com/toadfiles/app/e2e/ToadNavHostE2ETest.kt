@@ -9,6 +9,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -184,6 +187,8 @@ class ToadNavHostE2ETest {
         compose.onNodeWithTag("drawer_Settings").assertDoesNotExist()
         compose.onNodeWithContentDescription("Open navigation menu").assertDoesNotExist()
         // On sub-screens the drawer fallback is a Back arrow, not a hamburger.
+        // ("See all" sits below the fold in Home's LazyColumn — scroll it into view first.)
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("See all"))
         compose.onNodeWithText("See all").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Recent").fetchSemanticsNodes().isNotEmpty()

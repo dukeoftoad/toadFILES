@@ -563,9 +563,13 @@ class BrowseViewModelTest {
             zos.closeEntry()
         }
         // STORED entries keep their bytes verbatim: flip one inside the second entry's
-        // data region so its CRC no longer matches.
+        // data region so its CRC no longer matches. (Manual search: ByteArray has no
+        // indexOfSublist — that is a List extension.)
         val bytes = out.readBytes()
-        val idx = bytes.indexOfSublist(bad.toList())
+        val needle = bad.toList()
+        val idx = (0..bytes.size - needle.size).firstOrNull { off ->
+            bytes.copyOfRange(off, off + needle.size).toList() == needle
+        } ?: -1
         check(idx > 0) { "test setup: stored bytes not found" }
         bytes[idx] = (bytes[idx].toInt() xor 0x5A).toByte()
         out.writeBytes(bytes)

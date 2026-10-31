@@ -445,6 +445,12 @@ private fun UpdateAvailable(
  * download. Append a new pair at the top when shipping.
  */
 private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
+    "v1.7.4" to listOf(
+        "The two navigation styles are now truly separate: bottom-bar mode has no side menu, and side-menu mode has no bottom bar — and the side menu now lists every destination (Home, Browse, Categories, Recent, Trash, Settings, About).",
+        "Removed the wasted space at the top of the app: the branding header is gone and status-bar padding is applied once, so every screen starts right under the status bar.",
+        "Removed duplicate navigation icons (hamburger in bottom-bar mode, extra settings/menu buttons on Home).",
+        "Safer archive options: delete-after-extract only trashes the archive when the extraction fully succeeded, Categories now honors delete-after-compression and the archive-folder default for compress and extract.",
+    ),
     "v1.7.3" to listOf(
         "Create 7z archives, not just extract them: the compress dialog now offers ZIP and 7z with a compression level (Store / Fast / Normal / Maximum), destination shown, overwrite protection and delete-source options.",
         "Settings rebuilt: a dedicated Appearance page, and a new General section — per-format archive open actions (ZIP and 7z separately), back-key action, navigation style (bottom bar or side menu), delete after compress/extract, abort and overwrite confirmations, and a default archive folder used for storing and extracting.",
