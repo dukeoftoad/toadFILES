@@ -341,7 +341,7 @@ class CategoriesViewModelTest {
             assertEquals(com.toadfiles.app.domain.CompressLevel.NORMAL, vm.state.value.pendingZipLevel)
 
             vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
-            vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.STORE)
+            vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.NONE)
             vm.confirmZip("packed")
             assertNull(vm.state.value.pendingZipFiles)
             await { vm.state.value.result != null }

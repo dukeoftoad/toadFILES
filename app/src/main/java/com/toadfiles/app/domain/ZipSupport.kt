@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import org.apache.commons.compress.PasswordRequiredException
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -90,7 +91,8 @@ object ZipSupport {
 
     internal class Counts(var moved: Int = 0, var skipped: Int = 0, var failed: Int = 0)
 
-    /** Friendly copy for encrypted archives (v1.7.1): passwords aren't supported yet. */
+    /** Friendly copy for encrypted archives (v1.7.1, reworded v1.8.0): encrypted ZIP
+     *  stays unsupported — java.util.zip cannot decrypt anything. */
     internal fun friendlyArchiveError(e: Exception): String =
         if ((e.message ?: "").contains("encrypt", ignoreCase = true)) PASSWORD_UNSUPPORTED
         else e.message ?: "error"
@@ -100,6 +102,7 @@ object ZipSupport {
         targetDir: File,
         replace: Boolean,
         limits: Limits = Limits(),
+        password: CharArray? = null, // signature symmetry with 7z; zip can't decrypt (below)
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = withContext(Dispatchers.IO) {
         val parent = targetDir.parentFile ?: File(".")
@@ -213,6 +216,13 @@ object ZipSupport {
                         fail++
                         failures += ab.message ?: "aborted"
                         break
+                    } catch (e: PasswordRequiredException) {
+                        // Only reachable if a commons-compress stream is ever wired in;
+                        // java.util.zip declines encryption with its own "encrypt" message
+                        // instead. Never reported as passwordRequired for zip: prompting
+                        // can't help, java.util.zip cannot decrypt anything.
+                        fail++
+                        failures += "$name: $PASSWORD_UNSUPPORTED"
                     } catch (e: Exception) {
                         fail++
                         failures += "$name: ${friendlyArchiveError(e)}"
@@ -228,11 +238,12 @@ object ZipSupport {
             fail++
             failures += ab.message ?: "aborted"
         } catch (e: Exception) {
-            // Stream-level death (truncated/corrupt archive): nothing after this point
+            // Stream-level death (truncated/corrupt archive — or an encrypted one, which
+            // java.util.zip declines at the very first entry): nothing after this point
             // can be trusted, so nothing gets published.
             abort = true
             fail++
-            failures += "${zipFile.name}: ${e.message ?: "unreadable archive"}"
+            failures += "${zipFile.name}: ${friendlyArchiveError(e)}"
         }
 
         if (!cancelled && !abort) {
@@ -358,18 +369,26 @@ object ZipSupport {
     private const val BUFFER_SIZE = 64 * 1024
 
     /**
-     * [CompressLevel] → `java.util.zip.Deflater` constant (v1.7.3). STORE keeps every
-     * byte verbatim (deflated "stored" blocks), the others trade speed for size.
+     * [CompressLevel] → `java.util.zip.Deflater` level (v1.7.3, six ZArchiver levels in
+     * v1.8.0). NONE keeps every byte verbatim (deflated "stored" blocks), the middle
+     * levels trade speed for size. Deflate caps at 9, so ULTRA equals MAXIMUM for zip —
+     * there is nothing above BEST_COMPRESSION to reach for (7z is where ULTRA differs,
+     * via its 128 MiB dictionary in [SevenZipSupport]).
      */
     internal fun deflaterLevel(level: CompressLevel): Int = when (level) {
-        CompressLevel.STORE -> java.util.zip.Deflater.NO_COMPRESSION
-        CompressLevel.FAST -> java.util.zip.Deflater.BEST_SPEED
+        CompressLevel.NONE -> java.util.zip.Deflater.NO_COMPRESSION
+        CompressLevel.FASTEST -> java.util.zip.Deflater.BEST_SPEED
+        CompressLevel.FAST -> 3 // between BEST_SPEED (1) and DEFAULT (6)
         CompressLevel.NORMAL -> java.util.zip.Deflater.DEFAULT_COMPRESSION
         CompressLevel.MAXIMUM -> java.util.zip.Deflater.BEST_COMPRESSION
+        CompressLevel.ULTRA -> java.util.zip.Deflater.BEST_COMPRESSION // deflate caps at 9
     }
 
-    /** Shown for encrypted zip/7z archives instead of a raw codec error (v1.7.1). */
-    internal const val PASSWORD_UNSUPPORTED = "Password-protected archives aren't supported yet"
+    /** Friendly copy for encrypted zip archives (v1.7.1, reworded v1.8.0): java.util.zip
+     *  cannot decrypt, so encrypted ZIP stays declined — 7z is the supported encrypted
+     *  format (AES-256 data-only, [SevenZipSupport]). */
+    internal const val PASSWORD_UNSUPPORTED =
+        "Encrypted ZIP archives aren't supported — only 7z encryption is supported"
 
     /** Hidden backup name prefix for replace-mode publication; mirrors FileOps.
      *  Dot-prefixed so normal listings skip it. */
