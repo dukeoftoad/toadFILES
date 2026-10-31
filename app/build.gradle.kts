@@ -12,8 +12,8 @@ android {
         applicationId = "com.toadfiles.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.7.1"
+        versionCode = 12
+        versionName = "1.7.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
