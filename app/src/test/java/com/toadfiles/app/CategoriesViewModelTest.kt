@@ -2,8 +2,13 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.CategorySummary
+import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileCategory
+import com.toadfiles.app.domain.SortMode
+import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.ui.categories.CategoriesViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -15,6 +20,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -121,7 +127,7 @@ class CategoriesViewModelTest {
     }
 
     @Test
-    fun `confirmDelete moves a real file into the trash and reports it`() = runTest {
+    fun `confirmDelete moves a real file into the trash and stages it for undo`() = runTest {
         val src = java.io.File(container.fileRepo.primaryRoot(), "cat-delete-me.txt")
         src.parentFile.mkdirs()
         src.writeText("delete me")
@@ -129,8 +135,10 @@ class CategoriesViewModelTest {
             vm.requestDelete(listOf(entry(1, src.name, data = src.absolutePath)))
             assertEquals(1, vm.state.value.pendingDelete?.size)
             vm.confirmDelete()
-            await { vm.state.value.toast != null }
-            assertEquals("Moved 1 item(s) to trash", vm.state.value.toast)
+            // Full success is reported by the screen's Undo snackbar (Browse parity),
+            // not a plain toast: the trashed payloads are staged for restore.
+            await { vm.state.value.lastTrashed?.size == 1 }
+            assertEquals(null, vm.state.value.toast)
             // The file must have actually moved into the trash dir on the same volume.
             assertFalse(src.exists())
             val trashDir = java.io.File(
@@ -138,6 +146,11 @@ class CategoriesViewModelTest {
                 com.toadfiles.app.domain.Trash.DIR_NAME,
             )
             assertTrue(trashDir.listFiles()?.any { it.name.endsWith(src.name) } == true)
+
+            // Undo puts it right back where it was.
+            vm.undoDelete()
+            await { vm.state.value.toast == "Restored 1 item(s)" }
+            assertTrue(src.exists())
         } finally {
             src.delete()
         }
@@ -254,5 +267,162 @@ class CategoriesViewModelTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    // ---------- v1.7.3 Browse-parity flows ----------
+
+    @Test
+    fun `rename moves the on-disk file with the shared FileOps engine`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-rename-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val src = File(root, "old-name.txt").apply { writeText("payload") }
+            val e = entry(1, src.name, data = src.absolutePath)
+
+            vm.requestRename(e)
+            assertEquals(e, vm.state.value.pendingRename)
+
+            vm.rename(e, "new-name.txt")
+            await { vm.state.value.toast != null }
+            assertNull(vm.state.value.pendingRename)
+            assertEquals("Renamed to \"new-name.txt\"", vm.state.value.toast)
+            assertFalse(src.exists())
+            assertEquals("payload", File(root, "new-name.txt").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `rename of an entry without an on-disk path fails honestly`() = runTest {
+        val e = entry(1, "orphan.txt", data = null)
+        vm.requestRename(e)
+        vm.rename(e, "whatever.txt")
+        assertEquals("This file has no on-disk path to rename", vm.state.value.toast)
+        assertNull(vm.state.value.pendingRename)
+    }
+
+    @Test
+    fun `zip flow names the archive via the dialog and runs the real op`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-zip-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val a = File(root, "a.txt").apply { writeText("aaa") }
+            val b = File(root, "b.txt").apply { writeText("bbb") }
+
+            vm.requestZip(listOf(a, b))
+            assertEquals(listOf(a, b), vm.state.value.pendingZipFiles)
+            assertEquals("archive.zip", vm.state.value.pendingZipName)
+
+            vm.confirmZip("packed")
+            assertNull(vm.state.value.pendingZipFiles)
+            await { vm.state.value.result != null }
+            assertEquals("Zipping", vm.state.value.resultTitle)
+            assertEquals(2, vm.state.value.result!!.succeeded)
+            val out = File(root, "packed.zip")
+            assertTrue(out.exists())
+            java.util.zip.ZipFile(out).use { z ->
+                assertEquals(setOf("a.txt", "b.txt"), z.entries().asSequence().map { it.name }.toSet())
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `extract to an existing folder asks for a strategy and keep-both extracts aside`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-extractto-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val zip = File(root, "bundle.zip")
+            makeZip(zip, mapOf("inner.txt" to "zipbody".toByteArray()))
+            File(root, "bundle").mkdirs() // the colliding destination
+
+            vm.extractZip(zip, targetName = "bundle")
+            val pc = vm.state.value.pendingExtractConflict
+            assertNotNull(pc)
+            assertEquals(zip, pc!!.archive)
+
+            vm.resolveExtractConflict(ConflictStrategy.RENAME)
+            await { vm.state.value.result != null }
+            assertNull(vm.state.value.pendingExtractConflict)
+            assertEquals(1, vm.state.value.result!!.succeeded)
+            // "Keep both": a uniquely named sibling ("bundle (1)"), the existing folder untouched.
+            assertEquals("zipbody", File(root, "bundle (1)/inner.txt").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `requestProperties opens the shared sheet and computes the real detail`() = runTest {
+        val root = File(container.fileRepo.primaryRoot(), "cat-props-${System.nanoTime()}")
+        root.mkdirs()
+        try {
+            val f = File(root, "sized.bin").apply { writeBytes(ByteArray(2_048) { 7 }) }
+            vm.requestProperties(entry(1, f.name, data = f.absolutePath))
+
+            assertEquals(f, vm.state.value.pendingProperties)
+            await { vm.state.value.propertiesDetail != null }
+            val d = vm.state.value.propertiesDetail!!
+            assertEquals(2_048L, d.sizeBytes)
+            assertNull(d.error)
+
+            vm.dismissProperties()
+            assertNull(vm.state.value.pendingProperties)
+            assertNull(vm.state.value.propertiesDetail)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `sort and layout follow the Browse model`() = runTest {
+        // Default layout: visual categories open as a grid, others as a list.
+        vm.open(FileCategory.DOCS)
+        assertEquals(com.toadfiles.app.domain.BrowseLayout.LIST, vm.state.value.layout)
+        vm.toggleLayout()
+        assertEquals(com.toadfiles.app.domain.BrowseLayout.GRID, vm.state.value.layout)
+        vm.open(FileCategory.IMAGES)
+        assertEquals(com.toadfiles.app.domain.BrowseLayout.GRID, vm.state.value.layout)
+
+        // Sorting is the shared Sorting engine; NAME ASC is deterministic regardless of
+        // MediaStore's own date order.
+        val sorted = com.toadfiles.app.ui.categories.CategoriesViewModel(
+            container,
+            ioDispatcher = dispatcher,
+            media = SortedFakeMedia(),
+        )
+        await { !sorted.state.value.loading }
+        sorted.open(FileCategory.DOCS)
+        await { !sorted.state.value.entriesLoading }
+        assertEquals(listOf("b.pdf", "a.pdf"), sorted.state.value.entries.map { it.name }) // DATE DESC, same date → source order
+        sorted.setSort(SortMode.NAME)
+        sorted.setSortOrder(SortOrder.ASC)
+        assertEquals(listOf("a.pdf", "b.pdf"), sorted.state.value.entries.map { it.name })
+    }
+
+    /** Deterministic two-row media source so sorting can be asserted without MediaStore. */
+    private class SortedFakeMedia : MediaQuerySource {
+        private fun e(id: Long, name: String) = MediaRepository.MediaEntry(
+            id = id,
+            uri = android.net.Uri.parse("content://test/$id"),
+            name = name,
+            size = 10L,
+            dateModified = 0L,
+            mime = "application/pdf",
+            category = FileCategory.DOCS,
+            data = null,
+        )
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> =
+            if (category == FileCategory.DOCS) listOf(e(1, "b.pdf"), e(2, "a.pdf")) else emptyList()
+
+        override fun recent(limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+
+        override fun summaries(): List<CategorySummary> =
+            FileCategory.entries.map { CategorySummary(it, 0, 0L) }
+
+        override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int = 0
     }
 }
