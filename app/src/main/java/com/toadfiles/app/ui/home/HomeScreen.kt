@@ -31,14 +31,13 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Movie
-import androidx.compose.material.icons.outlined.PhotoCamera
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -110,27 +109,29 @@ fun HomeScreen(
             .padding(bottom = bottomPadding),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
     ) {
-        // ---- Header ----
+        // ---- Compact action row ----
+        // v1.7.4: the old branding header ("toadFILES" headline + tagline) was removed —
+        // it carried no information and wasted the top of the screen. What remains is a
+        // single slim icon row with exactly one entry per concern:
+        //   SIDE_MENU mode: hamburger (drawer is the primary nav; Trash lives inside it).
+        //   BOTTOM_BAR mode: a Trash shortcut (the only destination with no bottom tab).
+        // The redundant Settings gear is gone — Settings is always one tap away.
         item {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 4.dp),
+                    .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("toadFILES", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "Lightweight · Fast · Private",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (onOpenDrawer != null) {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, "Open navigation menu")
+                    }
                 }
-                IconButton(onClick = { onOpenDrawer?.invoke() }) {
-                    Icon(Icons.Outlined.Menu, "Open navigation menu")
+                Spacer(Modifier.weight(1f))
+                if (onOpenDrawer == null) {
+                    IconButton(onClick = onOpenTrash) { Icon(Icons.Outlined.Delete, "Trash") }
                 }
-                IconButton(onClick = onOpenTrash) { Icon(Icons.Outlined.Delete, "Trash") }
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, "Settings") }
             }
         }
 
