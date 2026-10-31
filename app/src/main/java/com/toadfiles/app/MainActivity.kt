@@ -94,14 +94,18 @@ class MainActivity : ComponentActivity() {
                 accentColor = settings.value.accentColor,
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    if (hasFileAccess() && updateBanner != null && !bannerDismissed) {
-                        UpdateBanner(
-                            release = updateBanner,
-                            onOpenUpdateFlow = {
-                                navController.navigate(Routes.ABOUT) { launchSingleTop = true }
-                            },
-                            onDismiss = startupUpdate::dismissBanner,
-                        )
+                    if (hasFileAccess()) {
+                        // File browsing depends only on storage permission. The update
+                        // banner is optional and must never gate the main app UI.
+                        if (updateBanner != null && !bannerDismissed) {
+                            UpdateBanner(
+                                release = updateBanner,
+                                onOpenUpdateFlow = {
+                                    navController.navigate(Routes.ABOUT) { launchSingleTop = true }
+                                },
+                                onDismiss = startupUpdate::dismissBanner,
+                            )
+                        }
                         Box(Modifier.weight(1f)) { ToadNavHost(navController) }
                     } else {
                         OnboardingScreen(
