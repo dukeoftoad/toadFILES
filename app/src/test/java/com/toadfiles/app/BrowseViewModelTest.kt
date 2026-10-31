@@ -601,6 +601,148 @@ class BrowseViewModelTest {
         assertEquals("OLD", File(dir, "unpacked/n.txt").readText())
     }
 
+    // ---------- v1.7.3: compress dialog (format + level), archive folder, delete-after ----------
+
+    @Test
+    fun `normalizeArchiveName swaps the extension with the chosen format`() {
+        assertEquals("pack.zip", vm.normalizeArchiveName("pack", com.toadfiles.app.domain.ArchiveFormat.ZIP))
+        assertEquals("pack.7z", vm.normalizeArchiveName("pack", com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z))
+        assertEquals("pack.7z", vm.normalizeArchiveName("pack.zip", com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z))
+        assertEquals("pack.zip", vm.normalizeArchiveName("pack.7z", com.toadfiles.app.domain.ArchiveFormat.ZIP))
+        // The user's own suffix survives untouched.
+        assertEquals("pack.tar.zip", vm.normalizeArchiveName("pack.tar", com.toadfiles.app.domain.ArchiveFormat.ZIP))
+    }
+
+    @Test
+    fun `compress dialog preselects zip, normal level and the archive-folder destination`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("zip me") }
+        val archiveFolder = File(dir, "archives").apply { mkdirs() }
+        container.settingsRepo.setArchiveFolder(archiveFolder.path)
+        vm.openDir(dir)
+        await { vm.state.value.settings.archiveFolder == archiveFolder.path }
+
+        vm.requestZip(listOf(f))
+
+        assertEquals(listOf(f), vm.state.value.pendingZipFiles)
+        assertEquals("doc.zip", vm.state.value.pendingZipName)
+        assertEquals(com.toadfiles.app.domain.ArchiveFormat.ZIP, vm.state.value.pendingZipFormat)
+        assertEquals(com.toadfiles.app.domain.CompressLevel.NORMAL, vm.state.value.pendingZipLevel)
+        assertEquals(archiveFolder, vm.state.value.pendingZipDestination)
+    }
+
+    @Test
+    fun `confirmZip creates a 7z when the 7z format is chosen`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("seven me") }
+        vm.openDir(dir)
+
+        vm.requestZip(listOf(f))
+        vm.setZipFormat(com.toadfiles.app.domain.ArchiveFormat.SEVEN_Z)
+        vm.setZipLevel(com.toadfiles.app.domain.CompressLevel.FAST)
+        vm.confirmZip("pack")
+
+        await { vm.state.value.result != null && vm.state.value.items.any { it.name == "pack.7z" } }
+        assertEquals(0, vm.state.value.result!!.failed)
+        assertEquals("Compressing", vm.state.value.resultTitle)
+        val made = File(dir, "pack.7z")
+        assertTrue(made.length() > 0)
+        // The produced archive is a real, extractable 7z.
+        val target = File(dir, "unpacked")
+        assertEquals(1, com.toadfiles.app.domain.ArchiveOps.extract(made, target, replace = false).succeeded)
+        assertEquals("seven me", File(target, "doc.txt").readText())
+    }
+
+    @Test
+    fun `existing archive target asks for overwrite and replaces on confirm`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("NEW") }
+        File(dir, "pack.zip").writeText("OLD")
+        vm.openDir(dir)
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("pack")
+
+        // overwriteConfirm defaults to on: the overwrite dialog appears instead.
+        assertEquals(File(dir, "pack.zip"), vm.state.value.pendingZipOverwrite)
+        assertNotNull("compress dialog stays open behind the ask", vm.state.value.pendingZipFiles)
+        assertNull(vm.state.value.result)
+
+        vm.confirmZipOverwrite()
+
+        await { vm.state.value.result != null }
+        assertNull(vm.state.value.pendingZipOverwrite)
+        assertNull(vm.state.value.pendingZipFiles)
+        assertTrue(File(dir, "pack.zip").length() > 0)
+    }
+
+    @Test
+    fun `overwriteConfirm off replaces the target silently`() = runTest {
+        val f = File(dir, "doc.txt").apply { writeText("NEW") }
+        File(dir, "pack.zip").writeText("OLD")
+        container.settingsRepo.setOverwriteConfirm(false)
+        vm.openDir(dir)
+        await { !vm.state.value.settings.overwriteConfirm }
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("pack")
+
+        assertNull(vm.state.value.pendingZipOverwrite)
+        await { vm.state.value.result != null }
+        // Replaced without asking: a real zip replaced the stale placeholder bytes.
+        assertTrue(File(dir, "pack.zip").length() > 3)
+    }
+
+    @Test
+    fun `delete after compress trashes the sources and undo restores them`() = runTest {
+        container.settingsRepo.setDeleteAfterCompress(true)
+        val f = File(dir, "doc.txt").apply { writeText("zip and trash me") }
+        vm.openDir(dir)
+        await { vm.state.value.settings.deleteAfterCompress }
+
+        vm.requestZip(listOf(f))
+        vm.confirmZip("pack")
+
+        await { vm.state.value.result != null && !f.exists() }
+        // App delete convention: trash (undoable), not a permanent erase.
+        assertEquals(listOf(f), vm.state.value.lastTrashed)
+        assertTrue(File(dir, "pack.zip").exists())
+
+        vm.undoDelete()
+        await { f.exists() }
+    }
+
+    @Test
+    fun `delete after extract trashes the archive`() = runTest {
+        container.settingsRepo.setDeleteAfterExtract(true)
+        val zip = File(dir, "pack.zip")
+        makeZip(zip, mapOf("one.txt" to "hello".toByteArray()))
+        vm.openDir(dir)
+        await { vm.state.value.settings.deleteAfterExtract }
+
+        vm.extractZip(zip)
+
+        await { vm.state.value.result != null && !zip.exists() }
+        assertEquals("hello", File(dir, "pack/one.txt").readText())
+        assertEquals(listOf(zip), vm.state.value.lastTrashed)
+    }
+
+    @Test
+    fun `extract to uses the archive folder as default destination`() = runTest {
+        val archiveFolder = File(dir, "archdest").apply { mkdirs() }
+        container.settingsRepo.setArchiveFolder(archiveFolder.path)
+        val nested = File(dir, "nested").apply { mkdirs() }
+        val zip = File(nested, "pack.zip")
+        makeZip(zip, mapOf("one.txt" to "hello".toByteArray()))
+        vm.openDir(dir)
+        await { vm.state.value.settings.archiveFolder == archiveFolder.path }
+
+        vm.extractZip(zip, targetName = "unpacked")
+
+        await { vm.state.value.result != null }
+        assertEquals(0, vm.state.value.result!!.failed)
+        // Landed under the archive folder, not the current directory.
+        assertEquals("hello", File(archiveFolder, "unpacked/one.txt").readText())
+        assertFalse(File(dir, "unpacked").exists())
+    }
+
     @Test
     fun `clearing the search restores the folder listing`() = runTest {
         val nested = File(dir, "nested").apply { mkdirs() }

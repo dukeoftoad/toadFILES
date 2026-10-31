@@ -47,9 +47,9 @@ import com.toadfiles.app.domain.Format
  * not shown — we never render a disabled row that hints at features the user can't reach.
  *
  * The sheet is deliberately narrow: Open / Share / Rename / Copy / Move / Delete /
- * Zip / Favorite / Pin to Home / Properties / Copy path / Open with. Multi-select is
+ * Compress / Favorite / Pin to Home / Properties / Copy path / Open with. Multi-select is
  * started by long-pressing a row (Google Files style) — no extra entry point needed —
- * and the bulk toolbar (select-all, bulk zip, …) takes over from there.
+ * and the bulk toolbar (select-all, bulk compress, …) takes over from there.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,12 +121,13 @@ fun FileActionSheet(
             SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = onCopy)
             SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
 
-            // Organize: Delete / Zip / Extract. Archives toadFILES can extract (.zip,
-            // .7z) get Extract actions instead of "Zip this file" — 7z is extract-only,
-            // zip keeps its compress flow on the selection toolbar and folder rows.
+            // Organize: Delete / Compress / Extract. Archives toadFILES can extract
+            // (.zip, .7z) get Extract actions instead of "Compress this file" — both
+            // formats are also creatable since v1.7.3 via the compress dialog's
+            // format chooser, but an existing archive is far more often extracted.
             SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
             if (item.isDir) {
-                SheetRow(Icons.Outlined.Archive, "Zip this folder", onClick = onZip)
+                SheetRow(Icons.Outlined.Archive, "Compress this folder", onClick = onZip)
             } else if (ArchiveOps.canExtract(item.name)) {
                 SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = { onExtract?.invoke() })
                 // Destination picking is optional plumbing: hide the row when a screen
@@ -135,7 +136,7 @@ fun FileActionSheet(
                     SheetRow(Icons.Outlined.FolderOpen, "Extract to…", onClick = onExtractTo)
                 }
             } else {
-                SheetRow(Icons.Outlined.Archive, "Zip this file", onClick = onZip)
+                SheetRow(Icons.Outlined.Archive, "Compress this file", onClick = onZip)
             }
 
             // Favorite / advanced
