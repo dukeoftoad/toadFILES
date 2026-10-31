@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.2] — 2026-10-31
+
+### Fixed
+- **App remains usable after granting storage access**: the main navigation
+  is now gated only by the storage permission. The optional startup update
+  banner no longer controls whether Browse and the rest of the app render.
+  This also fixes the onboarding screen reappearing when no update is
+  available, the update check fails offline, or the banner is dismissed.
+
 All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
