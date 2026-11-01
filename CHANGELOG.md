@@ -4,7 +4,10 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
-## [Unreleased]
+## [1.8.2] — 2026-11-01
+
+The analyzer-hardening release — final version for now. No new features; it
+makes the storage analyzer correct under concurrency and honest on screen.
 
 ### Fixed
 - **Analyzer**: a scan superseded by a newer one (Refresh, another volume,
