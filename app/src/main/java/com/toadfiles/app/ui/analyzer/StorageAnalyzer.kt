@@ -202,12 +202,25 @@ object StorageAnalyzer {
                 size += subSize
                 count += subCount
             } else {
-                val s = try {
+                // One metadata read per regular file: BasicFileAttributes yields size AND
+                // mtime together — addFile's default lastModified would otherwise stat
+                // every file a second time, doubling the syscalls on large trees.
+                val attrs = try {
+                    Files.readAttributes(
+                        c.toPath(),
+                        BasicFileAttributes::class.java,
+                        LinkOption.NOFOLLOW_LINKS,
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+                val s = attrs?.size() ?: try {
                     c.length()
                 } catch (_: Exception) {
                     0L
                 }
-                acc.addFile(c, s)
+                val mtime = attrs?.lastModifiedTime()?.toMillis() ?: 0L
+                acc.addFile(c, s, mtime)
                 onFile(s)
                 size += s
                 count++

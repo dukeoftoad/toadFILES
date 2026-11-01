@@ -4,6 +4,27 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased]
+
+### Fixed
+- **Analyzer**: a scan superseded by a newer one (Refresh, another volume,
+  "Change volume") can no longer clobber the live scan's progress — the stale
+  walk's finalizer used to reset the counters and hide the progress card after
+  its replacement had started (scan-generation guard, with a regression test).
+- **Analyzer**: the tapped file's size is no longer read on the main thread
+  (StrictMode-clean properties sheet).
+
+### Changed
+- **Analyzer**: one metadata read per file during scans instead of two (faster
+  walks on large trees); the deep-link auto-scan survives rotation and
+  back-navigation without restarting the walk; the volume picker stays
+  reachable after "Change volume" on a deep-linked entry (the placeholder could
+  previously deadlock the screen); volume rows have a single labelled TalkBack
+  target instead of a nested button; the folders' sort menu no longer offers a
+  no-op "Recently modified" choice; zero-size categories no longer paint a
+  phantom bar; the Top-N chips scroll instead of overflowing on narrow
+  screens; Refresh is disabled while a scan is running.
+
 ## [1.8.1] — 2026-11-01
 
 The UX polish release: navigation, spacing, Settings and the minimum
