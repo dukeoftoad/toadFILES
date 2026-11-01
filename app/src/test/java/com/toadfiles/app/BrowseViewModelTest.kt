@@ -385,7 +385,13 @@ class BrowseViewModelTest {
         vm.rename(folder, "pinned-renamed")
 
         val renamed = File(dir, "pinned-renamed").path
-        await { vm.state.value.quickPins.contains(renamed) }
+        // Wait for the usage-history rewrite as well: the pin rewrite and the
+        // folderUses update land on separate StateFlow emissions, and under load the
+        // history can lag one scheduler tick behind the pin (observed as a flake).
+        await {
+            vm.state.value.quickPins.contains(renamed) &&
+                container.settingsRepo.folderUses.value[renamed] == 1
+        }
         assertFalse(vm.state.value.quickPins.contains(folder.path))
         // Usage history follows the folder too (P2.8).
         assertEquals(1, container.settingsRepo.folderUses.value[renamed])
