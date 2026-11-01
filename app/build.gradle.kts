@@ -13,8 +13,8 @@ android {
         // v1.8.1: minimum raised from Android 8.0 (API 26) to Android 14 (API 34).
         minSdk = 34
         targetSdk = 36
-        versionCode = 17
-        versionName = "1.8.1"
+        versionCode = 18
+        versionName = "1.8.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
