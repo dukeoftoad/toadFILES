@@ -21,6 +21,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -116,6 +119,61 @@ class StorageAnalyzerViewModelTest {
 
         assertEquals(dir, vm.state.value.root)
         assertEquals(2, vm.state.value.result?.fileCount)
+    }
+
+    @Test
+    fun `autoScan treats the same path as one root regardless of spelling`() {
+        val dir = seedTree()
+        vm.scan(dir)
+        await { vm.state.value.result != null }
+        val first = vm.state.value.result
+
+        // Trailing separator must not fool the "already scanned" guard into a re-walk.
+        vm.autoScan(File("${dir.absolutePath}/"))
+
+        assertSame(first, vm.state.value.result)
+        assertFalse(vm.state.value.scanning)
+    }
+
+    @Test
+    fun `a superseded scan cannot clobber its replacement's state`() {
+        val entered = CountDownLatch(1)
+        val proceed = CountDownLatch(1)
+        val gated = AtomicBoolean(false)
+        val gatedVm = StorageAnalyzerViewModel(
+            container,
+            ioDispatcher = Dispatchers.IO, // real threads: the gate can park mid-scan
+            scanGate = {
+                if (gated.compareAndSet(false, true)) {
+                    entered.countDown()
+                    proceed.await()
+                }
+            },
+        )
+        try {
+            val first = seedTree()
+            gatedVm.scan(first)
+            assertTrue(entered.await(10, TimeUnit.SECONDS)) // first scan parked mid-walk
+
+            val second = File(volume, "analyzer-seed-2").apply {
+                mkdirs()
+                File(this, "c.zip").writeText("z".repeat(42))
+            }
+            gatedVm.scan(second) // supersedes the parked scan (cancel + generation bump)
+            await { gatedVm.state.value.result?.fileCount == 1 && !gatedVm.state.value.scanning }
+
+            proceed.countDown() // let the stale scan unwind through its finally
+            Thread.sleep(500)   // a regression would publish its stale counters within ms
+
+            assertEquals(second, gatedVm.state.value.root)
+            assertEquals(1, gatedVm.state.value.scannedFiles)
+            assertEquals(42L, gatedVm.state.value.scannedBytes)
+            assertEquals(1, gatedVm.state.value.result?.fileCount)
+            assertFalse(gatedVm.state.value.scanning)
+        } finally {
+            proceed.countDown()
+            gatedVm.cancelScan()
+        }
     }
 
     @Test
