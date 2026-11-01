@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.domain.StorageRoot
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 data class StorageAnalyzerUiState(
     /** Mounted volumes offered before a scan starts (same source as the Storage screen). */
@@ -37,6 +37,12 @@ data class StorageAnalyzerUiState(
 class StorageAnalyzerViewModel(
     private val container: AppContainer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Test-only interlock: invoked at the top of every scan launch, before the walk
+     * (null in production). Lets VM tests park a scan deterministically to prove that
+     * a superseded scan cannot clobber its replacement's state.
+     */
+    private val scanGate: (() -> Unit)? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(StorageAnalyzerUiState())
@@ -44,6 +50,15 @@ class StorageAnalyzerViewModel(
 
     private var scanJob: Job? = null
     private var volumesJob: Job? = null
+
+    /**
+     * Monotonic generation guarding scan-lifecycle state writes. Only the newest scan
+     * may flip `scanning` off or publish counters: without this guard, a scan that is
+     * superseded mid-walk publishes its stale `finally` update AFTER the replacement
+     * has started — hiding the progress card and resetting the counters to the dead
+     * walk's values. `reset()` bumps the generation for the same reason.
+     */
+    private val scanGeneration = AtomicInteger(0)
 
     init {
         loadVolumes()
@@ -60,15 +75,17 @@ class StorageAnalyzerViewModel(
     /**
      * Auto-scan on entry (route argument): never restarts a scan of a root that is
      * already scanned or in progress, so back-navigation does not re-trigger the walk.
+     * Compares absolute paths, so "/sdcard" and "/sdcard/" count as the same root.
      */
     fun autoScan(root: File) {
         val s = _state.value
-        if (s.root == root && (s.scanning || s.result != null)) return
+        if (s.root?.absolutePath == root.absolutePath && (s.scanning || s.result != null)) return
         scan(root)
     }
 
     fun scan(root: File) {
         scanJob?.cancel()
+        val generation = scanGeneration.incrementAndGet()
         _state.update {
             it.copy(
                 root = root,
@@ -80,26 +97,27 @@ class StorageAnalyzerViewModel(
             )
         }
         scanJob = viewModelScope.launch(ioDispatcher) {
-            if (!root.isDirectory) {
-                _state.update {
-                    it.copy(scanning = false, error = "\"${root.absolutePath}\" is not a folder.")
-                }
-                return@launch
-            }
-            if (root.listFiles() == null) {
-                _state.update {
-                    it.copy(
-                        scanning = false,
-                        error = "Could not read \"${root.absolutePath}\". " +
-                            "Check that toadFILES has access to this folder.",
-                    )
-                }
-                return@launch
-            }
-            val acc = SizeAccumulator()
             var files = 0
             var bytes = 0L
             try {
+                scanGate?.invoke()
+                if (!root.isDirectory) {
+                    _state.update {
+                        it.copy(scanning = false, error = "\"${root.absolutePath}\" is not a folder.")
+                    }
+                    return@launch
+                }
+                if (root.listFiles() == null) {
+                    _state.update {
+                        it.copy(
+                            scanning = false,
+                            error = "Could not read \"${root.absolutePath}\". " +
+                                "Check that toadFILES has access to this folder.",
+                        )
+                    }
+                    return@launch
+                }
+                val acc = SizeAccumulator()
                 val result = StorageAnalyzer.scan(root, acc) { size ->
                     files++
                     bytes += size
@@ -120,12 +138,15 @@ class StorageAnalyzerViewModel(
                         scannedBytes = result.totalBytes,
                     )
                 }
-            } catch (ce: CancellationException) {
-                // Cancelled mid-walk: keep the last partial snapshot, flip scanning off
-                // in finally. Re-throw so the coroutine completes as cancelled.
-                throw ce
             } finally {
-                _state.update { it.copy(scanning = false, scannedFiles = files, scannedBytes = bytes) }
+                // Guarded publish: a superseded scan must leave the state alone (its
+                // cancellation unwinds through here, but the generation no longer
+                // matches, so the replacement's progress is untouched).
+                if (scanGeneration.get() == generation) {
+                    _state.update {
+                        it.copy(scanning = false, scannedFiles = files, scannedBytes = bytes)
+                    }
+                }
             }
         }
     }
@@ -136,6 +157,9 @@ class StorageAnalyzerViewModel(
 
     /** Back to the volume picker; forgets results and errors, reloads volumes. */
     fun reset() {
+        // Bump the generation first: a dying scan's finally must not write into the
+        // freshly reset state (its partial counters would survive as ghosts).
+        scanGeneration.incrementAndGet()
         scanJob?.cancel()
         _state.update {
             StorageAnalyzerUiState(volumes = it.volumes, volumesLoading = it.volumesLoading)
