@@ -2,7 +2,10 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.CategorySummary
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.ui.recent.RecentViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -118,18 +121,98 @@ class RecentViewModelTest {
     }
 
     @Test
-    fun `confirmDelete moves a real file into the trash`() = runTest {
-        val src = java.io.File(container.fileRepo.primaryRoot(), "recent-delete-me.txt")
+    fun `confirmDelete stages the payloads for undo and undoDelete restores them`() = runTest {
+        val src = java.io.File(container.fileRepo.primaryRoot(), "recent-undo-me.txt")
         src.parentFile.mkdirs()
         src.writeText("delete me")
         try {
             vm.requestDelete(listOf(entry(1, src.name, data = src.absolutePath)))
             vm.confirmDelete()
-            await { vm.state.value.toast != null }
-            assertEquals("Moved 1 item(s) to trash", vm.state.value.toast)
+
+            // The payload really moved into the per-volume trash dir and is offered for
+            // undo; full success is reported by the screen's Undo snackbar, so no plain
+            // toast competes with it (Categories/Browse parity).
+            await { vm.state.value.lastTrashed?.size == 1 }
+            assertNull(vm.state.value.toast)
             assertFalse(src.exists())
+            val trashDir = java.io.File(
+                container.fileRepo.primaryRoot(),
+                com.toadfiles.app.domain.Trash.DIR_NAME,
+            )
+            val payload = vm.state.value.lastTrashed!!.single()
+            assertTrue(payload.absolutePath.startsWith(trashDir.absolutePath))
+            assertEquals("delete me", payload.readText())
+
+            // Undo (the one-shot offer consumed by the screen first) puts it right back.
+            val trashed = vm.state.value.lastTrashed!!
+            vm.consumeUndoOffer()
+            assertNull(vm.state.value.lastTrashed)
+            vm.undoDelete(trashed)
+            await { vm.state.value.toast == "Restored 1 item(s)" }
+            assertTrue(src.exists())
+            assertFalse(payload.exists())
         } finally {
             src.delete()
+        }
+    }
+
+    @Test
+    fun `undoDelete re-scans the restored paths through the injected media source`() = runTest {
+        val rec = RecordingMedia()
+        val undoVm = RecentViewModel(container, ioDispatcher = dispatcher, media = rec)
+        val src = java.io.File(container.fileRepo.primaryRoot(), "recent-rescan-me.txt")
+        src.parentFile.mkdirs()
+        src.writeText("rescan me")
+        try {
+            undoVm.requestDelete(listOf(entry(1, src.name, data = src.absolutePath)))
+            undoVm.confirmDelete()
+            await { undoVm.state.value.lastTrashed?.size == 1 }
+            val trashed = undoVm.state.value.lastTrashed!!
+            undoVm.consumeUndoOffer()
+            undoVm.undoDelete(trashed)
+
+            await { undoVm.state.value.toast != null }
+            assertTrue(src.exists())
+            // The restored file was handed back to the media source for re-indexing (D1):
+            // the real repository runs the platform media scanner over exactly these paths.
+            await { rec.rescanned.isNotEmpty() }
+            assertEquals(listOf(src.absolutePath), rec.rescanned.single())
+        } finally {
+            src.delete()
+        }
+    }
+
+    @Test
+    fun `a newer delete replaces the pending undo offer instead of stacking onto it`() = runTest {
+        val a = java.io.File(container.fileRepo.primaryRoot(), "recent-offer-a.txt")
+        a.parentFile.mkdirs()
+        a.writeText("a")
+        val b = java.io.File(container.fileRepo.primaryRoot(), "recent-offer-b.txt")
+        b.writeText("b")
+        try {
+            vm.requestDelete(listOf(entry(1, a.name, data = a.absolutePath)))
+            vm.confirmDelete()
+            await { vm.state.value.lastTrashed?.size == 1 }
+            val firstSeq = vm.state.value.undoOfferSeq
+
+            // A second delete bumps the offer sequence and swaps the payload list: the
+            // snackbar about to show belongs to the newer batch, and its Undo restores
+            // exactly that batch — never a stale mixture (D2 one-shot offer).
+            vm.requestDelete(listOf(entry(2, b.name, data = b.absolutePath)))
+            vm.confirmDelete()
+            await { vm.state.value.undoOfferSeq > firstSeq }
+            val secondOffer = vm.state.value.lastTrashed!!
+            assertEquals(1, secondOffer.size)
+            assertTrue(secondOffer.single().name.endsWith(b.name))
+
+            vm.consumeUndoOffer()
+            vm.undoDelete(secondOffer)
+            await { vm.state.value.toast == "Restored 1 item(s)" }
+            assertTrue(b.exists())
+            assertFalse(a.exists()) // the first batch stays trashed until its own undo
+        } finally {
+            a.delete()
+            b.delete()
         }
     }
 
@@ -139,6 +222,7 @@ class RecentViewModelTest {
         vm.confirmDelete()
         await { vm.state.value.toast != null }
         assertEquals("Moved 0 to trash · 1 had no on-disk path", vm.state.value.toast)
+        assertNull("nothing moved — there is no undo to offer", vm.state.value.lastTrashed)
     }
 
     @Test
@@ -280,5 +364,26 @@ class RecentViewModelTest {
         // Flip back so the shared DataStore file is left in the default state.
         relaunched.toggleLayout()
         await { relaunched.state.value.layout == com.toadfiles.app.domain.BrowseLayout.LIST }
+    }
+
+    /**
+     * Media source that records [rescan] calls (restore-undo re-indexing) and answers
+     * everything else empty — the same injectable pattern the race test's GatedMedia
+     * uses, so undo can be asserted without a live MediaStore.
+     */
+    private class RecordingMedia : MediaQuerySource {
+        val rescanned = mutableListOf<List<String>>()
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+
+        override fun recent(limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+
+        override fun summaries(): List<CategorySummary> = emptyList()
+
+        override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int = 0
+
+        override fun rescan(paths: List<String>) {
+            rescanned += paths
+        }
     }
 }

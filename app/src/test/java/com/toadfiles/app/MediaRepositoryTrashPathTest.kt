@@ -8,6 +8,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.ContentUrisHelper
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Trash
@@ -85,7 +86,12 @@ class MediaRepositoryTrashPathTest {
         ): Cursor {
             val cols = projection
                 ?: arrayOf("_id", "_display_name", "_size", "date_modified", "mime_type", "_data", "media_type")
-            val filtered = rows.filter { matches(it, selection, selectionArgs) }
+            // A per-row URI (content://media/<table>/<id>) names exactly one row — the
+            // shape of the fresh-DATA re-query deleteStale performs before it may drop
+            // a stale row. Collection queries (last segment not an id) stay unfiltered.
+            val rowId = uri.lastPathSegment?.toLongOrNull()
+            val scoped = if (rowId == null) rows else rows.filter { it.id == rowId }
+            val filtered = scoped.filter { matches(it, selection, selectionArgs) }
             // Aggregate projection (summaries()): COUNT(_id) + SUM(_size) over the selection.
             if (cols.size == 2 && cols[0].startsWith("COUNT(") && cols[1].startsWith("SUM(")) {
                 return MatrixCursor(cols).apply {
@@ -161,6 +167,29 @@ class MediaRepositoryTrashPathTest {
      *  ("/storage/emulated/0/.toadfiles-trash/…") — where [Trash] actually creates it. */
     private fun rootTrashPath(name: String): String =
         "/storage/emulated/0/${Trash.DIR_NAME}/$name"
+
+    /** A file that REALLY exists inside a ".toadfiles-trash" folder on the (Robolectric)
+     *  external storage volume — a trash payload deleteStale must never unlink. */
+    private fun realTrashFile(name: String): String =
+        File(Environment.getExternalStorageDirectory(), "${Trash.DIR_NAME}/$name")
+            .apply { parentFile?.mkdirs(); writeText("x") }.path
+
+    /**
+     * A captured [MediaRepository.MediaEntry] handed to deleteStale by the ViewModels:
+     * its uri points at the provider row, its captured [capturedData] is what the row
+     * held when it was listed (possibly stale by the time deleteStale runs).
+     */
+    private fun capturedEntry(row: Row, capturedData: String?): MediaRepository.MediaEntry =
+        MediaRepository.MediaEntry(
+            id = row.id,
+            uri = ContentUrisHelper.uriFor(FileCategory.IMAGES, row.id),
+            name = row.name,
+            size = row.size,
+            dateModified = row.dateModifiedSecs * 1000L,
+            mime = row.mime ?: "application/octet-stream",
+            category = FileCategory.IMAGES,
+            data = capturedData,
+        )
 
     // ---------- trash-path detection (pure) ----------
 
@@ -248,6 +277,60 @@ class MediaRepositoryTrashPathTest {
         repo.list(FileCategory.DOCS, 100)
 
         assertEquals(50, provider.deletedUris.size)
+    }
+
+    // ---------- deleteStale decides on the row's CURRENT data, never the captured one ----------
+
+    @Test
+    fun `deleteStale never deletes a row whose current DATA still exists in the trash`() {
+        // The v1.9.1 race: the entry was captured at the origin path, then the delete
+        // moved the payload into the trash and the provider's async re-scan re-pointed
+        // the row's DATA at the trash payload. The captured path is gone — but the row's
+        // CURRENT data is alive inside the trash, so dropping the row would unlink the
+        // only surviving copy (undo would later find "N already gone").
+        val payload = realTrashFile("1700000000_photo.jpg")
+        val live = row("photo.jpg", "image/jpeg", payload, 1)
+        seed(live)
+        val captured = capturedEntry(
+            live,
+            capturedData = "/storage/emulated/0/DCIM/photo.jpg", // origin, gone after the trash move
+        )
+
+        val dropped = repo.deleteStale(listOf(captured))
+
+        assertEquals(0, dropped)
+        assertTrue(provider.deletedUris.isEmpty())
+        assertTrue("the trash payload must survive", File(payload).exists())
+    }
+
+    @Test
+    fun `deleteStale still drops rows whose current DATA is gone`() {
+        val ghost = row("ghost.jpg", "image/jpeg", "/storage/emulated/0/DCIM/ghost.jpg", 1)
+        seed(ghost)
+
+        val dropped = repo.deleteStale(listOf(capturedEntry(ghost, capturedData = ghost.data)))
+
+        assertEquals(1, dropped)
+        assertEquals(listOf(ghost.id.toString()), provider.deletedUris.map { it.lastPathSegment })
+    }
+
+    @Test
+    fun `deleteStale drops only the ghost in a batch mixing live trash payloads and vanished rows`() {
+        val payload = realTrashFile("1700000000_kept.jpg")
+        val live = row("kept.jpg", "image/jpeg", payload, 1)
+        val ghost = row("ghost.jpg", "image/jpeg", "/storage/emulated/0/DCIM/ghost.jpg", 1)
+        seed(live, ghost)
+
+        val dropped = repo.deleteStale(
+            listOf(
+                capturedEntry(live, capturedData = "/storage/emulated/0/DCIM/kept.jpg"),
+                capturedEntry(ghost, capturedData = ghost.data),
+            ),
+        )
+
+        assertEquals(1, dropped)
+        assertEquals(listOf(ghost.id.toString()), provider.deletedUris.map { it.lastPathSegment })
+        assertTrue("the trash payload must survive", File(payload).exists())
     }
 
     // ---------- archives match by extension, not only by MIME ----------
