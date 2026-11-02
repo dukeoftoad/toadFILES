@@ -168,6 +168,52 @@ class CategoriesViewModelTest {
         assertEquals("Moved 0 to trash · 1 had no on-disk path", vm.state.value.toast)
     }
 
+    /** Records row-hygiene args so the "stale entries are never row-dropped" rule is assertable. */
+    private class RecordingMedia : MediaQuerySource {
+        val deleteStaleArgs = mutableListOf<List<MediaRepository.MediaEntry>>()
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+        override fun recent(limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+        override fun summaries(): List<CategorySummary> =
+            FileCategory.entries.map { CategorySummary(it, 0, 0L) }
+
+        override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int {
+            deleteStaleArgs += entries
+            return entries.size
+        }
+    }
+
+    @Test
+    fun `confirmDelete skips stale entries honestly and never row-drops them`() = runTest {
+        val fake = RecordingMedia()
+        val undoVm = CategoriesViewModel(container, ioDispatcher = dispatcher, media = fake)
+        val live = java.io.File(container.fileRepo.primaryRoot(), "cat-live.txt")
+        live.parentFile.mkdirs()
+        live.writeText("payload")
+        // The cached path is gone: the file was moved or renamed OUTSIDE the app, and
+        // the row's CURRENT data may point at a real file — it must never be dropped.
+        val staleEntry = entry(2, "renamed-away.jpg", data = "/storage/emulated/0/DCIM/renamed-away.jpg")
+        try {
+            undoVm.requestDelete(
+                listOf(entry(1, live.name, data = live.absolutePath), staleEntry),
+            )
+            undoVm.confirmDelete()
+            await { undoVm.state.value.toast != null }
+            assertEquals(
+                "Moved 1 to trash · 1 were moved or renamed outside the app and were skipped",
+                undoVm.state.value.toast,
+            )
+            // Row hygiene sees ONLY the successfully trashed entry.
+            assertEquals(listOf(1L), fake.deleteStaleArgs.single().map { it.id })
+            // The undo offer covers only what really moved, and the offer id advanced.
+            assertEquals(1, undoVm.state.value.lastTrashed?.size)
+            assertEquals(1L, undoVm.state.value.undoOfferSeq)
+            assertFalse(live.exists())
+        } finally {
+            live.delete()
+        }
+    }
+
     @Test
     fun `requestDelete with nothing is a no-op`() = runTest {
         vm.requestDelete(emptyList())
