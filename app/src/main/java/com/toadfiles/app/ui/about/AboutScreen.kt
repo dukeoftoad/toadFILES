@@ -29,6 +29,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,29 +43,41 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.ui.whatsnew.Changelog
+import com.toadfiles.app.ui.whatsnew.ChangelogRelease
 import com.toadfiles.app.util.Intents
 
 /**
- * Full About page. Replaces the tiny About card in Settings: it carries everything a
- * privacy-conscious user expects from a file manager — version/build, real storage
- * numbers, per-category counts, a user-initiated update check against GitHub Releases,
- * the OSS credits, and an in-app changelog.
+ * Full About page: identity, version/build and Android compatibility straight from
+ * BuildConfig, what the app can do (implemented features only), why each manifest
+ * permission exists, an accurate privacy statement, the bounded self-update flow,
+ * a changelog preview, project/source links, and the OSS credits.
  *
- * Layout: a vertically scrolling column of cards. One concern per card so the page stays
- * navigable on small screens. Updates: a silent, once-per-launch check contacts
- * api.github.com (no periodic polling, no telemetry); a downloaded update APK lands in the
- * app-private download dir and is handed to the system installer as a DownloadManager
- * content URI.
+ * Layout: a vertically scrolling column of cards — one concern per card so the page
+ * stays navigable on small screens.
+ *
+ * NETWORK FACTS (identical in every claim on this page): the only endpoint toadFILES
+ * ever contacts is the repo's releases/latest on api.github.com — once per app open
+ * (silent, failure-invisible; see StartupUpdateCheck) and again whenever the user taps
+ * "Check for updates". The update APK is fetched by the system DownloadManager only
+ * after an explicit tap, then handed to the system installer. No telemetry, no ads,
+ * no accounts; nothing about the device's files ever leaves it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
+    onOpenWhatsNew: () -> Unit = {},
     vm: AboutViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // Release notes parsed from the changelog.md asset generated at build time from the
+    // repository's CHANGELOG.md (Gradle syncChangelog); null while the read/parse runs.
+    val changelog by produceState<List<ChangelogRelease>?>(null) {
+        value = Changelog.fromAssets(context)
+    }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -103,16 +116,20 @@ fun AboutScreen(
                     Spacer(Modifier.height(12.dp))
                     VersionRow("Version", BuildConfig.VERSION_NAME)
                     VersionRow("Build", BuildConfig.VERSION_CODE.toString())
-                    VersionRow("Min Android", "14 (API 34)")
-                    VersionRow("Target Android", "API 36+")
+                    // From the build config, so these rows can never drift from the
+                    // minSdk/targetSdk the APK was actually compiled with.
+                    VersionRow("Min Android", "API ${BuildConfig.MIN_SDK_VERSION}")
+                    VersionRow("Target Android", "API ${BuildConfig.TARGET_SDK_VERSION}")
                     VersionRow("Package", BuildConfig.APPLICATION_ID)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "toadFILES goes online in exactly one case: when you tap \"Check for " +
-                            "updates\" below, it talks to GitHub Releases to fetch the newest " +
-                            "version — and downloads the update APK only if you ask for it. It " +
-                            "never uploads files, favorites, settings or analytics, and never " +
-                            "contacts anything else in the background.",
+                        "toadFILES works entirely on this device: every file operation, " +
+                            "favorite and setting stays local. The only network use is the " +
+                            "optional update check — one silent request to api.github.com per " +
+                            "app open, repeated only if you tap \"Check for updates\" below. An " +
+                            "update APK is downloaded only after you tap \"Download & install\". " +
+                            "No telemetry, no ads, no accounts — nothing about your files ever " +
+                            "leaves the device.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -121,7 +138,7 @@ fun AboutScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ---- Updates (strictly user-initiated check against GitHub Releases) ----
+            // ---- Updates (GitHub Releases check: once per app open + user-initiated) ----
             // v1.8.1: the "Storage on this device" and "Files on this device" data
             // cards were removed from About — that live storage/usage information lives
             // on the Home storage card and the Storage page, where it belongs.
@@ -130,9 +147,9 @@ fun AboutScreen(
                     Text("Updates", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "toadFILES checks GitHub Releases for a newer version only when you tap " +
-                            "the button below — never in the background, and nothing about this " +
-                            "device is sent or stored.",
+                        "toadFILES contacts GitHub Releases once per app open (silently, in " +
+                            "the background) and whenever you tap the button below. Nothing " +
+                            "about this device is sent, and nothing downloads without a tap.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -150,27 +167,76 @@ fun AboutScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ---- Inline changelog ----
+            // ---- Inline changelog (parsed from the bundled CHANGELOG.md asset) ----
             Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp)) {
                     Text("What's new", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    // v1.8.1: only the latest two updates are shown — the full history
-                    // lives in the repository's CHANGELOG.md.
-                    ChangelogEntries.take(2).forEach { (version, lines) ->
+                    val latest = changelog?.firstOrNull()
+                    if (latest != null) {
                         Text(
-                            version,
+                            "v${latest.version}" + (latest.date?.let { " · $it" } ?: ""),
                             style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                         )
-                        lines.forEach { line -> ChangelogBullet(line) }
+                        latest.allItems.take(LATEST_CHANGELOG_ITEMS).forEach { line ->
+                            ChangelogBullet(line)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = onOpenWhatsNew) { Text("See all changes") }
+                    } else {
+                        Text(
+                            "No changelog was bundled with this build — see CHANGELOG.md in " +
+                                "the toadFILES repository.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ---- Capabilities (implemented only — nothing aspirational) ----
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Capabilities", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Capabilities.forEach { line -> ChangelogBullet(line) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ---- Permissions (every manifest permission, with its reason) ----
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Permissions", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Permissions.forEach { (name, reason) -> PermissionRow(name, reason) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ---- Source & project ----
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Source & project", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        "Older releases: see CHANGELOG.md in the toadFILES repository.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.outline,
+                        "toadFILES is free software under GPL-3.0: you can use, study, " +
+                            "change and share it. The full license ships as the LICENSE file " +
+                            "in the repository.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(10.dp))
+                    TextButton(onClick = { Intents.openUrl(context, REPO_URL) }) {
+                        Text("Source code · github.com/dukeoftoad/toadFILES")
+                    }
+                    TextButton(onClick = { Intents.openUrl(context, RELEASES_URL) }) {
+                        Text("Releases and tagged changelogs on GitHub")
+                    }
                 }
             }
 
@@ -200,7 +266,8 @@ fun AboutScreen(
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "toadFILES itself is GPL-3.0. See the source at the repository you cloned it from.",
+                        "Build details and licenses for everything above are in the " +
+                            "repository's dependency files.",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -242,6 +309,9 @@ private fun ChangelogBullet(text: String) {
 }
 
 private const val NOTES_PREVIEW_LINES = 4
+
+/** Bullets of the newest release shown on the About page before "See all changes". */
+private const val LATEST_CHANGELOG_ITEMS = 4
 
 /**
  * The update panel proper — every [UpdateState] rendered in the card's existing M3
@@ -363,125 +433,54 @@ private fun UpdateAvailable(
     TextButton(onClick = onDismiss) { Text("Dismiss") }
 }
 
-/**
- * Hand-maintained changelog. Kept inside the app (not pulled from a remote feed) so it works
- * offline; network use is limited to the startup update check and the About-page check/update
- * download. Append a new pair at the top when shipping.
- */
-private val ChangelogEntries: List<Pair<String, List<String>>> = listOf(
-    "v1.8.1" to listOf(
-        "Trash moved into Quick access: a permanent tile on Home replaces the top-right toolbar icon, so every destination is reachable the same way.",
-        "Top spacing fixed for good: the status-bar inset is now applied exactly once by the navigation shell, cards and margins tightened — no more blank band at the top of any screen.",
-        "Settings redesigned: tonal icon chips, grouped cards and smooth animated transitions, plus gentle cross-fade navigation between screens.",
-        "Recent gets a list/grid layout toggle (persisted), like Browse and Categories.",
-        "About is leaner: What's new shows the latest two updates only, and the storage/file-count data cards moved out (they live on Home and the Storage page).",
-        "Minimum Android version raised to 14 (API 34); legacy storage permissions dropped.",
-    ),
-    "v1.8.0" to listOf(
-        "Password-protected 7z archives: create AES-256 encrypted archives right from the Compress dialog, and get a password prompt when extracting one — wrong passwords never publish anything.",
-        "Split into volumes: create name.001, name.002… archive sets (fixed sizes or custom), and extract any volume set by tapping its .001 file.",
-        "Six ZArchiver-style compression levels (No compression, Fastest, Fast, Normal, Maximum, Ultra) and the full Create-archive dialog: dropdowns, encryption, passwords, volume size, delete-sources and separate-archive-per-item options.",
-    ),
-    "v1.7.5" to listOf(
-        "Trash now supports multi-select: long-press items to batch-restore or batch delete-forever (with confirmation).",
-        "Categories' Compress now opens the same full dialog as Browse — name, destination, ZIP/7z format and compression level.",
-        "Storage uses pull-to-refresh like every other screen; the last toolbar refresh button is gone.",
-    ),
-    "v1.7.4" to listOf(
-        "The two navigation styles are now truly separate: bottom-bar mode has no side menu, and side-menu mode has no bottom bar — and the side menu now lists every destination (Home, Browse, Categories, Recent, Trash, Settings, About).",
-        "Removed the wasted space at the top of the app: the branding header is gone and status-bar padding is applied once, so every screen starts right under the status bar.",
-        "Removed duplicate navigation icons (hamburger in bottom-bar mode, extra settings/menu buttons on Home).",
-        "Safer archive options: delete-after-extract only trashes the archive when the extraction fully succeeded, Categories now honors delete-after-compression and the archive-folder default for compress and extract.",
-    ),
-    "v1.7.3" to listOf(
-        "Create 7z archives, not just extract them: the compress dialog now offers ZIP and 7z with a compression level (Store / Fast / Normal / Maximum), destination shown, overwrite protection and delete-source options.",
-        "Settings rebuilt: a dedicated Appearance page, and a new General section — per-format archive open actions (ZIP and 7z separately), back-key action, navigation style (bottom bar or side menu), delete after compress/extract, abort and overwrite confirmations, and a default archive folder used for storing and extracting.",
-        "Categories now uses the exact same components and features as Browse: full action sheet (extract to…, rename, compress, properties), sort and list/grid controls, and batch operations in multi-select.",
-        "New MI Files-style storage analyzer (category breakdown, biggest files, largest folders), pull-to-refresh everywhere in place of refresh buttons, and the app got lighter with shared components.",
-    ),
-    "v1.7.2" to listOf(
-        "Fixed: the app stays fully usable right after granting storage access — the optional update banner no longer gates the main UI behind the permission check.",
-    ),
-    "v1.7.1" to listOf(
-        "Tapping an archive now opens its actions (Extract) instead of asking which app to open it with, and after extraction you land straight in the extracted folder.",
-        "ZIP and 7z operations show a real progress bar, and 7z archives are now supported for extraction (password-protected archives were detected and declined politely — full password support arrived in v1.8.0).",
-        "Update check reliability: retries, redirect handling and friendlier errors for the GitHub connection; toadFILES now also checks silently once on open and shows a small banner when a new version is available.",
-        "New Google Files-style side menu (Browse / Recent / Trash / Settings / About), Recent items grouped by Today / Yesterday / This week / Older, and the missing v1.6.0–v1.6.2 entries were added to this changelog.",
-    ),
-    "v1.7.0" to listOf(
-        "Extract from ZIP archives everywhere: Browse gets \"Extract to…\" with the Replace / Keep both / Skip dialog, and Recent & Categories archive rows get \"Extract here\" — all through the hardened archive pipeline.",
-        "Check for updates right from the About page: one tap scans GitHub Releases and, when a newer signed APK exists, downloads it and offers install. It only runs when you press the button — no background traffic.",
-        "New Properties sheet for files and folders: type, location, recursive size, modified time, hidden flag.",
-        "Housekeeping: removed the never-functional Diagnostics toggle and consolidated duplicated action plumbing.",
-    ),
-    "v1.6.2" to listOf(
-        "Follow-up re-audit pass: ZIP replace now rolls back cleanly on failure or cancel, with per-item checkpoints and precise partial-commit reporting.",
-        "Browse search can't be trapped by symlink cycles anymore, and a stale load can no longer overwrite a newer folder listing.",
-        "Category totals count only visible files — trash and vanished rows are excluded.",
-        "Trash sidecar migration validates schema AND payload, so real user .tfmeta files stay payloads; cross-volume moves report cleanup failures instead of fake success.",
-        "Folder-use bookkeeping is serialized under one mutex; the flaky Browse ZIP tests were stabilized (the root cause of the red CI unit-test step).",
-    ),
-    "v1.6.1" to listOf(
-        "Reliability and security pass driven by the full codebase audit: stale Recent entries are cleaned up, video thumbnails are keyed to file identity, and queries carry request tokens so a slow result can never overwrite a newer one.",
-        "APK installation gets distinct installer outcomes, and the pending APK is retained across the \"Install unknown apps\" settings round-trip — no re-pick needed.",
-        "Sharing 2+ files now carries every URI in ClipData with grants — receivers could previously only read the first item.",
-        "Symlink-safe recursive traversal, transactional move/replace with trash metadata preserved, and a fixed tfmeta payload encoding.",
-        "Archive extraction hardened: zip-bomb quotas, staged extraction into a temp dir with atomic publishing, path-traversal entries rejected.",
-        "UriGuard denylist keeps files under system/private locations away from external apps; documents, archives and APKs get proper MediaStore content URIs.",
-        "CI instrumentation suite runs on API 29/33/36 emulators; the full audit and release checklist live under docs/.",
-    ),
-    "v1.6.0" to listOf(
-        "Long-press starts multi-select in Browse, Categories and Recent (Google-Files style); per-row ⋮ overflow menu replaces the old action sheet.",
-        "Recent filter tabs — All / Images / Videos / Audio / Docs / Archives / APKs — backed by MediaStore per-category queries.",
-        "Customizable Quick Access on Home: pin/unpin folders from Browse's action sheet, edit the row via the ＋ dialog, and most-used folders (2+ visits) surface automatically.",
-        "ZIP creation always asks for the archive name (suggested from the selection, .zip appended, path separators rejected); tapping a ZIP offers \"Extract here\" or \"Open\".",
-        "Settings changes that don't affect the listing no longer reload the current folder; README screenshots were regenerated for the updated Home / Browse / Recent.",
-    ),
-    "v1.5.0" to listOf(
-        "Real Android share: the system share sheet hands files to the app you pick (single or batch), replacing the old local-copy share.",
-        "Open files with the standard \"Just once / Always\" chooser so you can pin a default app per file type.",
-        "APK install fixed: toadFILES now walks you to the exact \"Install unknown apps\" toggle when Android requires it.",
-        "Categories redesign: back from a category returns to the grid, photos and videos open as a thumbnail grid, long-press opens the action sheet, and multi-select batch-shares or deletes to trash.",
-        "Recent is fully actionable: open, share, show in folder, delete to trash, details — plus multi-select and thumbnails.",
-        "Home redesigned: hero storage card, quick-access icon grid, polished favorites and recent feeds.",
-        "Hidden-files eye toggle right in the Browse toolbar; clearing a search restores the folder listing.",
-        "Permanent trash deletions (single item and empty-all) now ask for confirmation.",
-        "Storage page gains a media-by-type breakdown and trash usage; trashed files are hidden from Recent and Categories.",
-    ),
-    "v1.4.0" to listOf(
-        "Merged Recent into Home as a smart-recent list with a \"See all\" hop to the full view.",
-        "Categories is back as its own tab — an organized grid with per-type icons, item counts and sizes.",
-        "Long-press a file opens a Mi-Files-style action sheet (open, share, rename, copy, move, delete, details, zip, favorite, copy-path, open-with).",
-        "Share is now local-only: copies into an app-private 'shared' folder, nothing leaves the device.",
-        "Pick your accent color (toad, blue, purple, green, orange, red, pink) when dynamic color is off.",
-        "About is a real page now: storage stats, per-category counts, OSS credits, changelog, clear-shared-copies.",
-        "More tests across all of the above.",
-    ),
-    "v1.3.0" to listOf(
-        "Favorites that follow renames/moves and prune themselves when the target disappears.",
-        "In-folder content search with configurable result limit.",
-        "Trash chip on Browse for surfacing recently-deleted items.",
-    ),
-    "v1.2.0" to listOf(
-        "30-day trash with undo; SD-card and OTG volume support; thumbnails + grid view on Browse.",
-    ),
-    "v1.1.0" to listOf(
-        "APK install handoff, sort-order picker, item counts on Browse.",
-    ),
-    "v1.0.0" to listOf(
-        "Initial release: privacy-first, no internet permission, fast browse.",
-    ),
+/** Every feature the app actually ships (verified against the code and CHANGELOG.md). */
+private val Capabilities: List<String> = listOf(
+    "Browse, open, rename, copy, move and delete files on internal storage, SD cards and OTG drives.",
+    "Create and extract ZIP and 7z archives, including AES-256 password-protected 7z and split (.001, .002…) volumes.",
+    "30-day trash with restore and undo — deletions land in toadFILES' trash, with batch restore and permanent-delete confirmations.",
+    "Media browsing: photo/video thumbnails, category pages, recent files and a storage analyzer.",
+    "Search by name — optionally inside small text files — plus favorites and quick-access pins that survive renames and moves.",
+    "Share and open files with any app, and install APKs you keep in storage.",
+    "Theming: Material You dynamic color, seven accent palettes, and six launcher icon designs with six background tints.",
 )
 
-/** Open-source libraries toadFILES ships. Update when adding a new dependency. */
+/** Every manifest permission with a plain-language reason; kept in manifest order. */
+private val Permissions: List<Pair<String, String>> = listOf(
+    "INTERNET" to
+        "Contacts api.github.com for the optional update check only — no other network use.",
+    "All files access (MANAGE_EXTERNAL_STORAGE)" to
+        "A file manager must read and change the files you act on. Nothing is uploaded, ever.",
+    "Install unknown apps (REQUEST_INSTALL_PACKAGES)" to
+        "Hands the update APK — or an APK you tapped — to the system installer. Android still " +
+            "asks you to confirm every install.",
+)
+
+private const val REPO_URL = "https://github.com/dukeoftoad/toadFILES"
+private const val RELEASES_URL = "$REPO_URL/releases"
+
+@Composable
+private fun PermissionRow(name: String, reason: String) {
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text(name, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
+        Text(
+            reason,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Open-source libraries the release APK ships — mirrors app/build.gradle.kts implementation deps. */
 private val OssCredits: List<Pair<String, String>> = listOf(
     "AndroidX Core KTX" to "Apache-2.0",
     "AndroidX Lifecycle" to "Apache-2.0",
     "AndroidX Activity Compose" to "Apache-2.0",
-    "AndroidX Compose" to "Apache-2.0",
+    "AndroidX Compose (UI, Material 3, icons)" to "Apache-2.0",
     "AndroidX Navigation Compose" to "Apache-2.0",
     "AndroidX DataStore" to "Apache-2.0",
-    "Coil3" to "Apache-2.0",
+    "Coil 3 (images + video thumbs)" to "Apache-2.0",
     "Kotlinx Coroutines" to "Apache-2.0",
-    "Robolectric" to "MIT",
+    "Apache Commons Compress (7z)" to "Apache-2.0",
+    "XZ for Java (7z LZMA)" to "Public Domain",
 )
+
