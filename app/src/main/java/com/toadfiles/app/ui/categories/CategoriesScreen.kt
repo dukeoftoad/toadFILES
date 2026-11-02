@@ -143,15 +143,19 @@ fun CategoriesScreen(
         }
     }
 
-    // Undo for deletes, exactly like Browse: trashed items go straight back.
-    LaunchedEffect(state.lastTrashed) {
+    // Undo for deletes, exactly like Browse: trashed items go straight back. The
+    // offer is consumed the moment it is shown (D2) so navigating away mid-window
+    // can never resurrect an ancient undo later; keyed on the offer sequence so
+    // consuming cannot cancel the snackbar that is still showing.
+    LaunchedEffect(state.undoOfferSeq) {
         val trashed = state.lastTrashed ?: return@LaunchedEffect
+        vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
             message = "Moved ${trashed.size} item(s) to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
-        if (result == SnackbarResult.ActionPerformed) vm.undoDelete() else vm.dismissUndo()
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete(trashed)
     }
 
     // System back: first leave multi-select, then the drill-in list, then the tab.
@@ -360,7 +364,7 @@ fun CategoriesScreen(
         ConfirmDialog(
             title = "Move ${entries.size} item(s) to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
-                "You can undo right away or restore later from the Trash page in the side menu.",
+                "You can undo right away or restore them from the Trash page.",
             confirmLabel = "Delete",
             destructive = true,
             onConfirm = { vm.confirmDelete() },

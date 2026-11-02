@@ -189,14 +189,19 @@ fun BrowseScreen(
     }
 
     // Undo for deletes: trashed items go straight back to their original location.
-    LaunchedEffect(state.lastTrashed) {
+    // The offer is consumed the moment it is shown (D2): navigating away mid-window
+    // must never leave a stale offer in the retained ViewModel that resurrects an
+    // ancient undo later. Keyed on the offer sequence — not on the payload — so
+    // consuming (nulling lastTrashed) cannot cancel the snackbar still showing.
+    LaunchedEffect(state.undoOfferSeq) {
         val trashed = state.lastTrashed ?: return@LaunchedEffect
+        vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
             message = "Moved ${trashed.size} item(s) to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
-        if (result == SnackbarResult.ActionPerformed) vm.undoDelete() else vm.dismissUndo()
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete(trashed)
     }
 
     val selectionMode = state.selection.isNotEmpty()
@@ -737,7 +742,7 @@ fun BrowseScreen(
         ConfirmDialog(
             title = "Move ${files.size} item(s) to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
-                "You can undo right away or restore later from the Trash page in the side menu.",
+                "You can undo right away or restore them from the Trash page.",
             confirmLabel = "Delete",
             destructive = true,
             onConfirm = { vm.confirmDelete() },

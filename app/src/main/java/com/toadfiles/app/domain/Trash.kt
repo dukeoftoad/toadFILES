@@ -2,6 +2,9 @@ package com.toadfiles.app.domain
 
 import androidx.annotation.VisibleForTesting
 import java.io.File
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.file.Files
 
 /** One item sitting in the trash, together with where it came from. */
 data class TrashEntry(
@@ -51,6 +54,14 @@ object Trash {
     private const val PENDING_SUFFIX = ".pending"
     private const val DAY_MS = 24L * 60 * 60 * 1000
 
+    /** Byte budget for a payload name inside the trash: the sidecar adds ".tfmeta"
+     *  (".pending" during the transaction) and the filesystem caps a name at 255
+     *  bytes, so long original names are truncated to fit (D9). */
+    private const val MAX_PAYLOAD_NAME_BYTES = 240
+
+    /** Extra bytes reserved inside [MAX_PAYLOAD_NAME_BYTES] for the clash variant's "_<n>". */
+    private const val CLASH_SUFFIX_RESERVE_BYTES = 8
+
     /** A "<stamp>_" group the trash prefixes to payload names (also "<n>_" on a clash). */
     private val STAMP_GROUP = Regex("^\\d+_")
 
@@ -92,7 +103,10 @@ object Trash {
         for (src in files) {
             var target: File? = null
             try {
-                if (!src.exists()) {
+                // exists() follows symlinks, so a dangling link looks "gone" — but its
+                // path still names a restorable link (renameTo moves the link itself),
+                // so only skip it when it neither exists nor is a symbolic link (D7).
+                if (!src.exists() && !Files.isSymbolicLink(src.toPath())) {
                     failed += src
                     continue
                 }
@@ -109,8 +123,13 @@ object Trash {
                 target = File(dir, uniqueTrashName(dir, src.name))
                 val sidecar = File(metaDir, target.name + META_SUFFIX)
                 // 1. Prepare the metadata as a pending temp file, before anything moves.
+                //    The origin is URL-encoded: a '\n' in a filename must not corrupt
+                //    the line-based schema (readMeta decodes, with a raw-path fallback
+                //    for legacy sidecars — see [decodeOrigin]).
                 val pending = File(metaDir, target.name + META_SUFFIX + PENDING_SUFFIX)
-                pending.writeText("origin=${src.absolutePath}\ntrashedAt=${clock()}")
+                pending.writeText(
+                    "origin=${URLEncoder.encode(src.absolutePath, "UTF-8")}\ntrashedAt=${clock()}",
+                )
                 // Test-only barrier (audit P2.6): lets a test park the transaction in
                 // this window to prove a concurrent listing waits instead of pruning.
                 onAfterPendingWrite?.invoke()
@@ -193,13 +212,20 @@ object Trash {
             recoverPendingMeta(dir)
             for (f in children) {
                 if (f.name == META_DIR_NAME || f in migrated) continue
-                if (!f.exists()) continue // moved away between the two passes
+                // Same symlink rule as trash(): a dangling-link payload is still a
+                // real payload and must stay listed and restorable (D7).
+                if (!f.exists() && !Files.isSymbolicLink(f.toPath())) continue // moved away between the two passes
                 payloads += f
                 val meta = readMeta(f)
                 out += TrashEntry(
                     file = f,
                     originPath = meta?.second ?: "",
-                    trashedAt = meta?.first ?: f.lastModified(),
+                    // Without metadata the trashed-at time is UNKNOWN, not old: rename
+                    // preserves mtime, so falling back to lastModified() would let the
+                    // next purge destroy a sidecar-less payload despite the 30-day
+                    // retention promise. 0 keeps it listed (it sorts last — the list
+                    // is newest-first) and manually deletable, but never auto-purged (D10).
+                    trashedAt = meta?.first ?: 0L,
                 )
             }
             pruneOrphanMeta(dir, payloads)
@@ -207,14 +233,21 @@ object Trash {
         return out.sortedByDescending { it.trashedAt }
     }
 
-    /** Deletes items trashed more than [maxAgeDays] ago. Returns how many were purged. */
+    /** Deletes items trashed more than [maxAgeDays] ago. Returns how many were purged.
+     *  Items with an unknown trashed-at time (0 — no or corrupt metadata) are never
+     *  auto-purged; they stay listed and manually deletable (D10). */
     fun purge(volumeRoots: List<File>, maxAgeDays: Int = RETENTION_DAYS): Int {
         val cutoff = System.currentTimeMillis() - maxAgeDays * DAY_MS
-        return entries(volumeRoots).count { it.trashedAt < cutoff && deleteForever(it.file) }
+        return entries(volumeRoots).count { it.trashedAt > 0 && it.trashedAt < cutoff && deleteForever(it.file) }
     }
 
     /** Permanently removes every trashed item. Returns how many were removed. */
     fun empty(volumeRoots: List<File>): Int = entries(volumeRoots).count { deleteForever(it.file) }
+
+    /** The recorded origin path for [trashed], or null when its metadata is missing or
+     *  corrupt. Lets callers report collision renames honestly (a restore that landed
+     *  as "name (1).ext" — D4) without re-reading the sidecar format themselves. */
+    fun originOf(trashed: File): String? = synchronized(lock) { readMeta(trashed)?.second }
 
     // ---------- internal ----------
 
@@ -228,13 +261,32 @@ object Trash {
         else File(trashed.parentFile, trashed.name + META_SUFFIX)
     }
 
-    /** Timestamp-prefixed so several files with the same name can coexist in the trash. */
+    /** Timestamp-prefixed so several files with the same name can coexist in the trash.
+     *  Near the filesystem's 255-byte filename cap the name portion is truncated on a
+     *  UTF-8 character boundary (D9): the display name comes from the sidecar origin,
+     *  so the truncation is invisible to users — payload + ".tfmeta" (+ ".pending" and
+     *  the clash variant's "_<n>") must all fit under the cap. */
     private fun uniqueTrashName(dir: File, name: String): String {
         val stamp = clock()
-        if (!File(dir, "${stamp}_$name").exists()) return "${stamp}_$name"
+        val prefix = "$stamp" // plain ASCII digits, always survives truncation
+        val nameBudget =
+            MAX_PAYLOAD_NAME_BYTES - CLASH_SUFFIX_RESERVE_BYTES - prefix.toByteArray(Charsets.UTF_8).size - 1
+        val trimmed = truncateUtf8Bytes(name, nameBudget)
+        if (!File(dir, "${prefix}_$trimmed").exists()) return "${prefix}_$trimmed"
         var i = 1
-        while (File(dir, "${stamp}_${i}_$name").exists()) i++
-        return "${stamp}_${i}_$name"
+        while (File(dir, "${prefix}_${i}_$trimmed").exists()) i++
+        return "${prefix}_${i}_$trimmed"
+    }
+
+    /** Longest prefix of [s] that is at most [maxBytes] UTF-8 bytes, cut on a character
+     *  boundary so a multi-byte sequence is never split. */
+    private fun truncateUtf8Bytes(s: String, maxBytes: Int): String {
+        if (maxBytes <= 0) return ""
+        val bytes = s.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= maxBytes) return s
+        var end = maxBytes
+        while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end-- // don't split a sequence
+        return String(bytes, 0, end, Charsets.UTF_8)
     }
 
     /** Returns (trashedAt, originPath), or null when the sidecar is missing or corrupt. */
@@ -260,9 +312,21 @@ object Trash {
         var origin = ""
         for (line in text.lineSequence()) {
             if (line.startsWith("trashedAt=")) at = line.removePrefix("trashedAt=").toLongOrNull() ?: at
-            else if (line.startsWith("origin=")) origin = line.removePrefix("origin=")
+            else if (line.startsWith("origin=")) origin = decodeOrigin(line.removePrefix("origin="))
         }
         return if (at > 0 && origin.startsWith("/")) at to origin else null
+    }
+
+    /** Sidecar origins are URL-encoded on write so a '\n' in a filename cannot corrupt
+     *  the line-based schema (D8). Every encoded origin starts with "%2F" (every
+     *  absolute path starts with "/"), which is also the discriminator against legacy
+     *  sidecars that store the raw path: a literal '+' or '%' in an old path must not
+     *  be decoded into something else. Decoding failures and non-absolute results fall
+     *  back to the raw value, which [parseMeta] then validates as before. */
+    private fun decodeOrigin(raw: String): String {
+        if (!raw.startsWith("%2F", ignoreCase = true)) return raw // legacy plain path
+        val decoded = runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+        return if (decoded.startsWith("/")) decoded else raw
     }
 
     private fun pendingMetaFor(trashed: File): File? = trashed.parentFile
