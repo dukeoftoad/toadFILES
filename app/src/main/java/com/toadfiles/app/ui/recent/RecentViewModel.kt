@@ -7,6 +7,7 @@ import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.BrowseLayout
+import com.toadfiles.app.domain.MediaTrashOps
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
@@ -36,6 +37,12 @@ data class RecentUiState(
     val pendingDelete: List<MediaRepository.MediaEntry>? = null,
     val detailsOf: MediaRepository.MediaEntry? = null,
     val toast: String? = null,
+    /** Last delete batch (trash payload files), for the snackbar's Undo action.
+     *  One-shot (D2): the screen consumes it the moment the snackbar shows it. */
+    val lastTrashed: List<File>? = null,
+    /** Bumped whenever a new undo offer is made; the snackbar effect keys on this id
+     *  so consuming the offer (nulling [lastTrashed]) cannot cancel the showing snackbar. */
+    val undoOfferSeq: Long = 0,
     /** Encrypted archive whose extraction is waiting for a password (drives PasswordPromptDialog). */
     val pendingPasswordFor: File? = null,
     /** Retry context for [pendingPasswordFor]: same target dir / replace semantics as the original call. */
@@ -65,6 +72,9 @@ class RecentViewModel(
     private var requestSeq = 0L
     private var queryJob: Job? = null
 
+    /** Monotonic id of the current undo offer; see [RecentUiState.undoOfferSeq]. */
+    private var undoOfferId = 0L
+
     /** Shared op plumbing (audit 7.3): launches the extract, owns cancel/dispose. */
     private val ops = OpRunner(viewModelScope, ioDispatcher)
 
@@ -91,9 +101,11 @@ class RecentViewModel(
         _state.update { it.copy(loading = true) }
         queryJob?.cancel()
         queryJob = viewModelScope.launch(ioDispatcher) {
+            // One query, no uncapped cleanup pass: the repository's own capped
+            // reconcileStaleRows + trash-path hiding already heal ghost rows inside
+            // recent()/list(); the extra deleteStale here used to re-query (and row-drop)
+            // up to QUERY_LIMIT entries on every refresh.
             val entries = if (filter == null) {
-                val indexed = media.recent(limit = QUERY_LIMIT)
-                media.deleteStale(indexed)
                 media.recent(limit = QUERY_LIMIT)
             } else {
                 media.list(filter, limit = QUERY_LIMIT)
@@ -145,31 +157,79 @@ class RecentViewModel(
 
     fun dismissDelete() = _state.update { it.copy(pendingDelete = null) }
 
-    /** Same trash flow as Categories: real paths into the 30-day trash, stale rows dropped. */
+    /**
+     * Same trash flow as Categories, through the shared [MediaTrashOps] pipeline: real
+     * paths into the 30-day trash, per-entry honest accounting. Entries whose cached
+     * path is stale (moved/renamed outside the app) are SKIPPED and reported — never
+     * trashed, never row-dropped. Only entries that really moved have their now-stale
+     * rows dropped. Full success is reported by the screen's Undo snackbar (like
+     * Browse/Categories) instead of a plain toast.
+     */
     fun confirmDelete() {
         val entries = _state.value.pendingDelete ?: return
         _state.update { it.copy(pendingDelete = null, selection = emptySet()) }
         viewModelScope.launch(ioDispatcher) {
-            val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
-            val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            // exists() follows symlinks — a dangling link is still trashable (D7).
-            val result = withPath.filter { (_, f) -> f.exists() || Files.isSymbolicLink(f.toPath()) }
-                .map { (_, f) -> f }
-                .let { Trash.trash(it, roots) }
-            container.mediaRepo.deleteStale(entries)
+            val result = MediaTrashOps.deleteToTrash(entries, roots)
+            media.deleteStale(result.movedEntries)
+            _state.update {
+                it.copy(
+                    lastTrashed = result.movedFiles.takeIf { t -> t.isNotEmpty() },
+                    undoOfferSeq = ++undoOfferId,
+                    toast = MediaTrashOps.toastFor(result),
+                )
+            }
+            refresh()
+        }
+    }
+
+    /**
+     * Restores a delete batch (snackbar "Undo") from the captured payload list,
+     * exactly like Browse/Categories. Honest accounting (N5): items already gone from
+     * the trash are reported as such, collision renames are counted (D4), and restored
+     * files are re-scanned into the media index (D1) so they reappear here immediately.
+     */
+    fun undoDelete(trashed: List<File>) {
+        if (trashed.isEmpty()) return
+        viewModelScope.launch(ioDispatcher) {
+            var restored = 0
+            var renamed = 0
+            var gone = 0
+            val restoredPaths = mutableListOf<String>()
+            for (t in trashed) {
+                // exists() follows symlinks — a dangling-link payload still restores (D7).
+                if (!t.exists() && !Files.isSymbolicLink(t.toPath())) {
+                    gone++
+                    continue
+                }
+                val origin = Trash.originOf(t)
+                val dest = Trash.restore(t) ?: continue // stays in the trash, still restorable
+                restored++
+                if (origin != null && dest.name != origin.substringAfterLast('/')) renamed++
+                restoredPaths += dest.absolutePath
+            }
+            media.rescan(restoredPaths)
+            val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
             _state.update {
                 it.copy(
                     toast = when {
-                        result.moved.size == entries.size -> "Moved ${result.moved.size} item(s) to trash"
-                        noPath > 0 -> "Moved ${result.moved.size} to trash · $noPath had no on-disk path"
-                        else -> "Moved ${result.moved.size} of ${entries.size} to trash"
+                        gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
+                        restored < trashed.size ->
+                            "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
+                        else -> "Restored $restored item(s)$renamedNote"
                     },
                 )
             }
             refresh()
         }
     }
+
+    /**
+     * One-shot undo offer (D2): consumed the moment the snackbar shows it, so a
+     * navigation mid-window can never leave a stale offer in the retained ViewModel
+     * that resurrects (and lies about "restoring") on the next visit.
+     */
+    fun consumeUndoOffer() = _state.update { it.copy(lastTrashed = null) }
 
     // ---------- zip extract ----------
 
