@@ -77,10 +77,15 @@ class AppearanceScreenTest {
             val row = compose.onAllNodesWithText("Navigation Style")
                 .fetchSemanticsNodes().firstOrNull()?.boundsInRoot
             if (row != null && row.left < viewport.right && row.right > viewport.left &&
-                row.top < viewport.bottom && row.bottom > viewport.top) return
+                row.top >= viewport.top && row.bottom <= viewport.bottom) {
+                compose.onNodeWithText("Navigation Style").assertIsDisplayed()
+                compose.onNodeWithText("Back Key Action").assertIsDisplayed()
+                return
+            }
             compose.onRoot().performTouchInput { swipeUp() }
             compose.waitForIdle()
         }
+        throw AssertionError("Navigation card did not become visible after 30 scroll attempts")
     }
 
     @Test
@@ -100,9 +105,17 @@ class AppearanceScreenTest {
         awaitNavigationCard()
 
         compose.onNodeWithText("Navigation Style").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Side Menu").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithText("Side Menu").performClick()
 
         val app = ApplicationProvider.getApplicationContext<ToadApp>()
+        compose.waitUntil(5_000) {
+            runBlocking {
+                app.container.settingsRepo.settings.first().navStyle == NavStyle.SIDE_MENU
+            }
+        }
         runBlocking {
             assertEquals(NavStyle.SIDE_MENU, app.container.settingsRepo.settings.first().navStyle)
         }
@@ -114,9 +127,17 @@ class AppearanceScreenTest {
         awaitNavigationCard()
 
         compose.onNodeWithText("Back Key Action").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Exit App").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithText("Exit App").performClick()
 
         val app = ApplicationProvider.getApplicationContext<ToadApp>()
+        compose.waitUntil(5_000) {
+            runBlocking {
+                app.container.settingsRepo.settings.first().backKeyAction == BackKeyAction.EXIT
+            }
+        }
         runBlocking {
             assertEquals(
                 BackKeyAction.EXIT,
