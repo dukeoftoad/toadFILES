@@ -4,6 +4,50 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased]
+
+### Added
+- **What's New page**: a full in-app changelog fed by this file, which is now bundled
+  into every APK at build time (Gradle `syncChangelog` copies the repo-root
+  CHANGELOG.md to `app/src/main/assets/changelog.md` before `preBuild`) and parsed at
+  runtime by a tolerant Keep-a-Changelog reader — release notes are no longer
+  hardcoded in the app. The installed version's release leads as an expanded card with
+  per-section icons (Added / Changed / Fixed / Removed / Deprecated / Security),
+  older releases are expandable, and a build with no entry — or an unreadable asset —
+  says so honestly.
+- **About: Capabilities card** — only features that actually ship: file operations on
+  internal/SD/OTG storage, ZIP & 7z (including AES-256 and split volumes), 30-day
+  trash with restore/undo, media browsing and the storage analyzer, search (including
+  content search), share/open-with/APK install, and theming.
+- **About: Permissions card** — each manifest permission with a plain-language reason:
+  INTERNET (update check only), All files access (a file manager must read and change
+  the files you act on), Install unknown apps (system-installer handoff).
+- **About: Source & project card** — repository and releases links (the page had no
+  URL before) plus the GPL-3.0 statement.
+- **Tests**: a Keep-a-Changelog parser suite (structure, Unreleased/footers skipping,
+  missing dates, markdown flattening, unparsable-input fallback, and a bundled-asset
+  ↔ `BuildConfig.VERSION_NAME` consistency check) and Appearance screen tests for the
+  relocated navigation preferences.
+
+### Changed
+- **Settings**: the Back Key Action and Navigation Style preferences moved from the
+  General section into the Appearance tab as a Navigation card between Theme and App
+  icon; same setters, same DataStore keys (`nav_style`, `back_key_action`), no
+  behavior change. The Settings → Appearance entry now reads "Theme, colors,
+  navigation, app icon".
+- **About rebuilt around verified facts**: version/build/Android-compatibility rows
+  come from `BuildConfig` (`VERSION_NAME`, `VERSION_CODE`, new `MIN_SDK_VERSION` and
+  `TARGET_SDK_VERSION` fields), the open-source credits were cross-checked against the
+  actual Gradle implementation dependencies (test-only Robolectric dropped; Apache
+  Commons Compress and XZ for Java added), and the privacy and update-check wording
+  now describes the real behavior consistently everywhere: local file operations only;
+  one silent `api.github.com` update check per app open plus the user-initiated check;
+  nothing downloads without a tap; no telemetry, ads or accounts; nothing ever
+  uploaded.
+- **What's new on the About page** now previews the latest parsed release (up to four
+  bullets) with a "See all changes" jump to the full page; the duplicated hand-written
+  changelog list was deleted.
+
 ## [1.9.0] — 2026-11-02
 
 The personalization & housekeeping release — the final version of toadFILES.
