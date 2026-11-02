@@ -103,9 +103,12 @@ open class FileRepository(private val context: Context) {
     /** [open] only so tests can park/gate the listing for deterministic race regressions. */
     open fun list(dir: File, showHidden: Boolean): List<FileItem> {
         val children = if (dir.isDirectory && dir.canRead()) dir.listFiles() else return emptyList()
+        // The trash folder is managed by the Trash screen; keep it out of Browse — but
+        // only the real one at a volume root (D11): a user's own folder with the same
+        // name deeper in the tree is ordinary data and must stay listed.
+        val volumeRoots = roots().mapTo(mutableSetOf()) { it.dir }
         return children.orEmpty()
-            // The trash folder is managed by the Trash screen; keep it out of Browse.
-            .filter { it.name != Trash.DIR_NAME }
+            .filter { !(it.name == Trash.DIR_NAME && dir in volumeRoots) }
             .filter { showHidden || !it.name.startsWith(".") }
             .map { f ->
                 FileItem(

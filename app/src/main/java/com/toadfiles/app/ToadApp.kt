@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val fileRepo = FileRepository(context)
-    val mediaRepo = MediaRepository(context.contentResolver)
+    val mediaRepo = MediaRepository(context)
     val settingsRepo = SettingsRepository(context)
     val clipboard = Clipboard()
 }
