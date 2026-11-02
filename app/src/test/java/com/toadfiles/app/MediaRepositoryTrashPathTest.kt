@@ -49,12 +49,19 @@ class MediaRepositoryTrashPathTest {
     /**
      * Minimal MediaStore double: row listing (selection evaluated the way the repo
      * writes it — media_type=?, mime IN/=? plus lower(name) LIKE extension fallbacks),
-     * COUNT/SUM aggregates for summaries(), and recorded deletes.
+     * COUNT/SUM aggregates for summaries(), row-scoped DATA re-queries and recorded
+     * (or failing) deletes.
      */
     private class FakeMediaProvider : ContentProvider() {
 
         var rows: List<Row> = emptyList()
         val deletedUris = mutableListOf<Uri>()
+
+        /** Row ids whose per-row query must throw (deleteStale's re-check failure path). */
+        val failQueryForIds = mutableSetOf<Long>()
+
+        /** Row ids whose delete must throw (best-effort cleanup failure path). */
+        val failDeleteForIds = mutableSetOf<Long>()
 
         override fun onCreate(): Boolean = true
         override fun getType(uri: Uri): String? = null
@@ -83,9 +90,19 @@ class MediaRepositoryTrashPathTest {
             selectionArgs: Array<out String>?,
             sortOrder: String?,
         ): Cursor {
+            // Row-scoped query (deleteStale's CURRENT-DATA re-check): the last segment
+            // of a row uri is the numeric row id; listing uris end in a table name.
+            val rowId = uri.lastPathSegment?.toLongOrNull()
+            if (rowId != null && rowId in failQueryForIds) {
+                throw IllegalStateException("provider query failed for row $rowId")
+            }
             val cols = projection
                 ?: arrayOf("_id", "_display_name", "_size", "date_modified", "mime_type", "_data", "media_type")
-            val filtered = rows.filter { matches(it, selection, selectionArgs) }
+            val filtered = if (rowId != null) {
+                rows.filter { it.id == rowId }
+            } else {
+                rows.filter { matches(it, selection, selectionArgs) }
+            }
             // Aggregate projection (summaries()): COUNT(_id) + SUM(_size) over the selection.
             if (cols.size == 2 && cols[0].startsWith("COUNT(") && cols[1].startsWith("SUM(")) {
                 return MatrixCursor(cols).apply {
@@ -122,6 +139,7 @@ class MediaRepositoryTrashPathTest {
 
         override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
             val id = uri.lastPathSegment?.toLongOrNull() ?: return 0
+            if (id in failDeleteForIds) throw IllegalStateException("provider delete failed for row $id")
             return if (rows.any { it.id == id }) {
                 deletedUris += uri
                 1
@@ -206,6 +224,19 @@ class MediaRepositoryTrashPathTest {
 
     // ---------- stale rows: hidden AND removed from the index ----------
 
+    /** An entry handed straight to [MediaRepository.deleteStale], addressed at [id]. */
+    private fun entryForRow(id: Long, category: FileCategory, cachedData: String?) =
+        MediaRepository.MediaEntry(
+            id = id,
+            uri = com.toadfiles.app.data.ContentUrisHelper.uriFor(category, id),
+            name = "row$id",
+            size = 10L,
+            dateModified = 0L,
+            mime = "image/jpeg",
+            category = category,
+            data = cachedData,
+        )
+
     @Test
     fun `list hides rows whose file vanished and deletes those stale rows`() {
         seed(
@@ -248,6 +279,64 @@ class MediaRepositoryTrashPathTest {
         repo.list(FileCategory.DOCS, 100)
 
         assertEquals(50, provider.deletedUris.size)
+    }
+
+    // ---------- deleteStale's CURRENT-DATA guard (TOCTOU data-loss fix) ----------
+
+    @Test
+    fun `deleteStale keeps the row when its CURRENT provider path exists`() {
+        // The row was updated (e.g. the app renamed the file and MediaStore caught up),
+        // so the CURRENT DATA points at a real file while the entry's cached path is
+        // stale. Dropping the row on the cached path alone used to destroy that file.
+        val live = realFile("pics/renamed-live.jpg")
+        seed(row("renamed.jpg", "image/jpeg", live, 1))
+        val staleCache = entryForRow(1, FileCategory.IMAGES, "/storage/emulated/0/DCIM/old-name.jpg")
+
+        assertEquals(0, repo.deleteStale(listOf(staleCache)))
+
+        assertTrue(provider.deletedUris.isEmpty())
+        assertTrue("the live file the row points at must survive", File(live).exists())
+    }
+
+    @Test
+    fun `deleteStale drops the row when the CURRENT provider path is gone too`() {
+        seed(row("ghost.mp3", "audio/mpeg", "/storage/emulated/0/Music/ghost.mp3", 2))
+        val stale = entryForRow(1, FileCategory.AUDIO, "/storage/emulated/0/Music/old-name.mp3")
+
+        assertEquals(1, repo.deleteStale(listOf(stale)))
+
+        assertEquals(listOf("1"), provider.deletedUris.map { it.lastPathSegment })
+    }
+
+    @Test
+    fun `deleteStale skips the row when the provider query fails`() {
+        seed(row("x.jpg", "image/jpeg", "/storage/emulated/0/pics/x.jpg", 1))
+        provider.failQueryForIds += 1
+        val stale = entryForRow(1, FileCategory.IMAGES, "/storage/emulated/0/pics/gone.jpg")
+
+        // Inconclusive (query threw): the row is kept, never crashed on.
+        assertEquals(0, repo.deleteStale(listOf(stale)))
+        assertTrue(provider.deletedUris.isEmpty())
+    }
+
+    @Test
+    fun `deleteStale skips the row when the provider delete fails`() {
+        seed(row("x.jpg", "image/jpeg", "/storage/emulated/0/pics/x.jpg", 1))
+        provider.failDeleteForIds += 1
+        val stale = entryForRow(1, FileCategory.IMAGES, "/storage/emulated/0/pics/gone.jpg")
+
+        // Best-effort by contract: a refused delete leaves the row and never crashes.
+        assertEquals(0, repo.deleteStale(listOf(stale)))
+    }
+
+    @Test
+    fun `deleteStale ignores entries without a cached path`() {
+        seed(row("no-data.jpg", "image/jpeg", null, 1))
+        val entry = entryForRow(1, FileCategory.IMAGES, null)
+
+        assertEquals(0, repo.deleteStale(listOf(entry)))
+
+        assertTrue(provider.deletedUris.isEmpty())
     }
 
     // ---------- archives match by extension, not only by MIME ----------

@@ -2,7 +2,10 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.CategorySummary
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.ui.recent.RecentViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -67,9 +70,29 @@ class RecentViewModelTest {
         size = 5L,
         dateModified = 0L,
         mime = "text/plain",
-        category = com.toadfiles.app.domain.FileCategory.DOCS,
+        category = FileCategory.DOCS,
         data = data,
     )
+
+    /** Records row-hygiene args and rescan paths so delete/undo honesty is assertable. */
+    private class RecordingMedia : MediaQuerySource {
+        val deleteStaleArgs = mutableListOf<List<MediaRepository.MediaEntry>>()
+        val rescanned = mutableListOf<String>()
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+        override fun recent(limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+        override fun summaries(): List<CategorySummary> =
+            FileCategory.entries.map { CategorySummary(it, 0, 0L) }
+
+        override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int {
+            deleteStaleArgs += entries
+            return entries.size
+        }
+
+        override fun rescan(paths: List<String>) {
+            rescanned += paths
+        }
+    }
 
     @Test
     fun `init loads and clears the loading flag`() = runTest {
@@ -118,27 +141,79 @@ class RecentViewModelTest {
     }
 
     @Test
-    fun `confirmDelete moves a real file into the trash`() = runTest {
+    fun `confirmDelete then undo restores the file, rescans it and stages the offer`() = runTest {
+        val fake = RecordingMedia()
+        val undoVm = RecentViewModel(container, ioDispatcher = dispatcher, media = fake)
         val src = java.io.File(container.fileRepo.primaryRoot(), "recent-delete-me.txt")
         src.parentFile.mkdirs()
         src.writeText("delete me")
         try {
-            vm.requestDelete(listOf(entry(1, src.name, data = src.absolutePath)))
-            vm.confirmDelete()
-            await { vm.state.value.toast != null }
-            assertEquals("Moved 1 item(s) to trash", vm.state.value.toast)
+            undoVm.requestDelete(listOf(entry(1, src.name, data = src.absolutePath)))
+            undoVm.confirmDelete()
+            // Full success is reported by the screen's Undo snackbar (Browse/Categories
+            // parity), not a toast; the trashed payloads are staged with a fresh offer id.
+            await { undoVm.state.value.lastTrashed != null }
+            assertNull(undoVm.state.value.toast)
+            assertEquals(1L, undoVm.state.value.undoOfferSeq)
             assertFalse(src.exists())
+            // Row hygiene sees ONLY the successfully trashed entry.
+            assertEquals(listOf(1L), fake.deleteStaleArgs.single().map { it.id })
+
+            // Undo: the file goes straight back and is re-scanned into the media index.
+            val trashed = undoVm.state.value.lastTrashed!!
+            undoVm.consumeUndoOffer()
+            assertNull(undoVm.state.value.lastTrashed)
+            undoVm.undoDelete(trashed)
+            await { undoVm.state.value.toast == "Restored 1 item(s)" }
+            assertTrue(src.exists())
+            assertEquals(listOf(src.absolutePath), fake.rescanned)
         } finally {
             src.delete()
         }
     }
 
     @Test
-    fun `confirmDelete reports pathless entries honestly`() = runTest {
-        vm.requestDelete(listOf(entry(1, "orphan.txt", data = null)))
-        vm.confirmDelete()
-        await { vm.state.value.toast != null }
-        assertEquals("Moved 0 to trash · 1 had no on-disk path", vm.state.value.toast)
+    fun `confirmDelete skips stale entries, reports them and never row-drops them`() = runTest {
+        val fake = RecordingMedia()
+        val undoVm = RecentViewModel(container, ioDispatcher = dispatcher, media = fake)
+        val live = java.io.File(container.fileRepo.primaryRoot(), "recent-live.txt")
+        live.parentFile.mkdirs()
+        live.writeText("trash me")
+        // The cached path is gone: the file was moved or renamed OUTSIDE the app.
+        val staleEntry = entry(2, "renamed-away.jpg", data = "/storage/emulated/0/DCIM/renamed-away.jpg")
+        try {
+            undoVm.requestDelete(listOf(entry(1, live.name, data = live.absolutePath), staleEntry))
+            undoVm.confirmDelete()
+            await { undoVm.state.value.toast != null }
+            assertEquals(
+                "Moved 1 to trash · 1 were moved or renamed outside the app and were skipped",
+                undoVm.state.value.toast,
+            )
+            // The stale row (whose CURRENT data may point at a real file) is never
+            // handed to row hygiene — only the entry that really moved is.
+            assertEquals(listOf(1L), fake.deleteStaleArgs.single().map { it.id })
+            // The undo offer covers only what really moved, and the offer id advanced.
+            assertEquals(1, undoVm.state.value.lastTrashed?.size)
+            assertEquals(1L, undoVm.state.value.undoOfferSeq)
+            assertFalse(live.exists())
+        } finally {
+            live.delete()
+        }
+    }
+
+    @Test
+    fun `confirmDelete reports pathless entries honestly and touches no rows`() = runTest {
+        val fake = RecordingMedia()
+        val undoVm = RecentViewModel(container, ioDispatcher = dispatcher, media = fake)
+        undoVm.requestDelete(listOf(entry(1, "orphan.txt", data = null)))
+        undoVm.confirmDelete()
+        await { undoVm.state.value.toast != null }
+        assertEquals("Moved 0 to trash · 1 had no on-disk path", undoVm.state.value.toast)
+        // Nothing moved → nothing handed to row hygiene, nothing staged for undo —
+        // but the offer id still advances so the screen cannot show a stale snackbar.
+        assertTrue(fake.deleteStaleArgs.single().isEmpty())
+        assertNull(undoVm.state.value.lastTrashed)
+        assertEquals(1L, undoVm.state.value.undoOfferSeq)
     }
 
     @Test
