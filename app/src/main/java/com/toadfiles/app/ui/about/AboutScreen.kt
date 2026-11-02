@@ -172,7 +172,7 @@ fun AboutScreen(
                 Column(Modifier.padding(20.dp)) {
                     Text("What's new", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    val latest = changelog.firstOrNull()
+                    val latest = changelog?.firstOrNull()
                     if (latest != null) {
                         Text(
                             "v${latest.version}" + (latest.date?.let { " · $it" } ?: ""),
