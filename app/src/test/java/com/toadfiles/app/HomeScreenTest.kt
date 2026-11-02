@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollBy
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
@@ -97,9 +98,10 @@ class HomeScreenTest {
     @Test
     fun `recent filter chips render and route the query through the filtered lane`() {
         renderSettled(FakeMedia(docs))
-        // Home's Recent section sits below the fold of the LazyColumn — scroll to its
-        // last row so the whole section (header, chips, body) is actually composed.
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("report.pdf"))
+        // Home's Recent section sits below the fold of the LazyColumn — scroll the
+        // list (the first scrollable; the chips row is a second, composed off-screen
+        // via prefetch) all the way down so the section is actually composed.
+        compose.onAllNodes(hasScrollAction())[0].performScrollBy(10_000f)
         // The settled feed shows its two docs — "All" + every category chip render.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
