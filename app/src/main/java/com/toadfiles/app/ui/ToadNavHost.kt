@@ -54,6 +54,7 @@ import com.toadfiles.app.ui.settings.SettingsScreen
 import com.toadfiles.app.ui.settings.SettingsViewModel
 import com.toadfiles.app.ui.trash.TrashScreen
 import com.toadfiles.app.ui.storage.StorageScreen
+import com.toadfiles.app.ui.whatsnew.WhatsNewScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
@@ -66,6 +67,7 @@ object Routes {
     const val RECENT = "recent"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
+    const val WHATS_NEW = "whats_new"
     const val TRASH = "trash"
     const val STORAGE = "storage"
     const val APPEARANCE = "appearance"
@@ -247,6 +249,14 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
 
             composable(Routes.ABOUT) {
                 AboutScreen(
+                    bottomPadding = padding.calculateBottomPadding(),
+                    onBack = { navController.popBackStack() },
+                    onOpenWhatsNew = { navController.navigateSingleTop(Routes.WHATS_NEW) },
+                )
+            }
+
+            composable(Routes.WHATS_NEW) {
+                WhatsNewScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
                 )
