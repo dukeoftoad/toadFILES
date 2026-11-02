@@ -1,13 +1,13 @@
 package com.toadfiles.app
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasScrollAction
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -64,13 +64,22 @@ class AppearanceScreenTest {
         }
     }
 
-    /** Waits for the Navigation card, then scrolls it into view (it sits below the fold
-     *  of the screen's scrollable column — the accent LazyRow is the other scrollable). */
+    /** Waits for the Navigation card, then swipes the screen up in bounded steps until
+     *  the card is inside the viewport (it sits below the fold of the scrollable column;
+     *  a targeted performScrollToNode cannot be used safely here — it may attach to the
+     *  horizontal accent LazyRow and spin forever, which hung a whole CI run). */
     private fun awaitNavigationCard() {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Navigation Style").fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onAllNodes(hasScrollAction())[0].performScrollToNode(hasText("Navigation Style"))
+        repeat(30) {
+            val viewport = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            val row = compose.onAllNodesWithText("Navigation Style")
+                .fetchSemanticsNodes().firstOrNull()?.boundsInRoot
+            if (row != null && viewport.intersects(row)) return
+            compose.onRoot().performTouchInput { swipeUp() }
+            compose.waitForIdle()
+        }
     }
 
     @Test
