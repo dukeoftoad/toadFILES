@@ -48,8 +48,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -111,6 +113,21 @@ fun RecentScreen(
             snackbar.showSnackbar(it)
             vm.consumeToast()
         }
+    }
+
+    // Undo for deletes, exactly like Browse/Categories: trashed items go straight back.
+    // The offer is consumed the moment it is shown (D2) so navigating away mid-window
+    // can never resurrect an ancient undo later; keyed on the offer sequence so
+    // consuming cannot cancel the snackbar that is still showing.
+    LaunchedEffect(state.undoOfferSeq) {
+        val trashed = state.lastTrashed ?: return@LaunchedEffect
+        vm.consumeUndoOffer()
+        val result = snackbar.showSnackbar(
+            message = "Moved ${trashed.size} item(s) to trash",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete(trashed)
     }
 
     val inSelection = state.selection.isNotEmpty()
