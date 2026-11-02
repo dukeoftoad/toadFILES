@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
+import java.nio.file.Files
 import kotlin.coroutines.coroutineContext
 
 /** "Extract to…" collision waiting for the user's strategy in the shared ConflictDialog. */
@@ -93,8 +94,12 @@ data class CategoriesUiState(
     /** Computed size/contents for the properties sheet; null while the walk is running. */
     val propertiesDetail: PropertiesDetail? = null,
     val toast: String? = null,
-    /** Last delete batch (trash payload files), for the snackbar's Undo action. */
+    /** Last delete batch (trash payload files), for the snackbar's Undo action.
+     *  One-shot (D2): the screen consumes it the moment the snackbar shows it. */
     val lastTrashed: List<File>? = null,
+    /** Bumped whenever a new undo offer is made; the snackbar effect keys on this id
+     *  so consuming the offer (nulling [lastTrashed]) cannot cancel the showing snackbar. */
+    val undoOfferSeq: Long = 0,
     // file ops (same op/progress/result model as Browse)
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
@@ -134,6 +139,9 @@ class CategoriesViewModel(
 
     /** Shared op plumbing (audit 7.3): launches extract/zip, owns cancel/dispose. */
     private val ops = OpRunner(viewModelScope, ioDispatcher)
+
+    /** Monotonic id of the current undo offer; see [CategoriesUiState.undoOfferSeq]. */
+    private var undoOfferId = 0L
 
     init {
         refresh()
@@ -253,7 +261,8 @@ class CategoriesViewModel(
             val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
             val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            val result = withPath.filter { (_, f) -> f.exists() }
+            // exists() follows symlinks — a dangling link is still trashable (D7).
+            val result = withPath.filter { (_, f) -> f.exists() || Files.isSymbolicLink(f.toPath()) }
                 .map { (_, f) -> f }
                 .let { Trash.trash(it, roots) }
             container.mediaRepo.deleteStale(entries)
@@ -261,6 +270,7 @@ class CategoriesViewModel(
             _state.update {
                 it.copy(
                     lastTrashed = result.moved.takeIf { t -> t.isNotEmpty() },
+                    undoOfferSeq = ++undoOfferId,
                     toast = when {
                         ok == entries.size -> null // the undo snackbar reports success
                         noPath > 0 -> "Moved $ok to trash · $noPath had no on-disk path"
@@ -273,17 +283,41 @@ class CategoriesViewModel(
         }
     }
 
-    /** Restores the most recent delete batch (snackbar "Undo"), exactly like Browse. */
-    fun undoDelete() {
-        val trashed = _state.value.lastTrashed ?: return
-        _state.update { it.copy(lastTrashed = null) }
+    /**
+     * Restores a delete batch (snackbar "Undo") from the captured payload list,
+     * exactly like Browse. Honest accounting (N5): items already gone from the trash
+     * are reported as such, collision renames are counted (D4), and restored files
+     * are re-scanned into the media index (D1) so they reappear here immediately.
+     */
+    fun undoDelete(trashed: List<File>) {
+        if (trashed.isEmpty()) return
         viewModelScope.launch(ioDispatcher) {
             var restored = 0
-            for (t in trashed) if (Trash.restore(t) != null) restored++
+            var renamed = 0
+            var gone = 0
+            val restoredPaths = mutableListOf<String>()
+            for (t in trashed) {
+                // exists() follows symlinks — a dangling-link payload still restores (D7).
+                if (!t.exists() && !Files.isSymbolicLink(t.toPath())) {
+                    gone++
+                    continue
+                }
+                val origin = Trash.originOf(t)
+                val dest = Trash.restore(t) ?: continue // stays in the trash, still restorable
+                restored++
+                if (origin != null && dest.name != origin.substringAfterLast('/')) renamed++
+                restoredPaths += dest.absolutePath
+            }
+            media.rescan(restoredPaths)
+            val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
             _state.update {
                 it.copy(
-                    toast = if (restored == trashed.size) "Restored $restored item(s)"
-                    else "Restored $restored of ${trashed.size} — the rest stays in Trash",
+                    toast = when {
+                        gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
+                        restored < trashed.size ->
+                            "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
+                        else -> "Restored $restored item(s)$renamedNote"
+                    },
                 )
             }
             _state.value.selected?.let { open(it) }
@@ -291,7 +325,11 @@ class CategoriesViewModel(
         }
     }
 
-    fun dismissUndo() = _state.update { it.copy(lastTrashed = null) }
+    /**
+     * One-shot undo offer (D2): consumed the moment the snackbar shows it, so a
+     * navigation mid-window can never leave a stale offer that resurrects later.
+     */
+    fun consumeUndoOffer() = _state.update { it.copy(lastTrashed = null) }
 
     // ---------- rename (Browse parity) ----------
 
