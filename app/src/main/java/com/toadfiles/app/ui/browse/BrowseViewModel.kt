@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.BrowseLayout
@@ -66,8 +67,14 @@ data class BrowseUiState(
     /** Folders pinned to Home's Quick access (drives the folder sheet's pin label). */
     val quickPins: Set<String> = emptySet(),
     val clipboard: Clipboard.Clip? = null,
-    /** Number of items currently in the trash across all known volumes; -1 means "not loaded". */
-    val trashCount: Int = -1,
+    /** Last delete batch (trash payload files) offered to the snackbar's Undo action.
+     *  One-shot (D2): the screen consumes it the moment the snackbar shows it, so
+     *  navigating away mid-window can never resurrect an ancient undo later. */
+    val lastTrashed: List<File>? = null,
+    /** Bumped whenever a new undo offer is made. The snackbar effect keys on this id
+     *  (not on [lastTrashed]) so consuming the offer — nulling [lastTrashed] — can
+     *  never cancel the snackbar that is still showing. */
+    val undoOfferSeq: Long = 0,
     // dialogs
     val pendingNewFolder: Boolean = false,
     val pendingRename: File? = null,
@@ -110,7 +117,6 @@ data class BrowseUiState(
     /** Computed size/contents for the properties sheet; null while the walk is running. */
     val propertiesDetail: PropertiesDetail? = null,
     val toast: String? = null,
-    val lastTrashed: List<File>? = null,
 )
 
 data class PendingConflict(val op: OpKind, val targetDir: File, val sources: List<File>, val conflicts: List<String>)
@@ -135,6 +141,9 @@ class BrowseViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /** Injectable for tests; production uses the container's real-file-system repository. */
     private val fileRepo: FileRepository = container.fileRepo,
+    /** Injectable for tests; production uses the container's MediaStore-backed repository
+     *  (an undo re-scans the restored files back into the media index). */
+    private val media: MediaQuerySource = container.mediaRepo,
     /** Injectable for tests; production walks the real file system for contents counts. */
     private val propertiesBuilder: PropertiesBuilder = PropertiesBuilder(),
 ) : ViewModel() {
@@ -165,6 +174,9 @@ class BrowseViewModel(
     /** First directory opened in this session; up-navigation and breadcrumbs never go above it. */
     private var browseRoot: File? = null
 
+    /** Monotonic id of the current undo offer; see [BrowseUiState.undoOfferSeq]. */
+    private var undoOfferId = 0L
+
     init {
         viewModelScope.launch {
             settingsRepo.settings.collect { s ->
@@ -188,17 +200,23 @@ class BrowseViewModel(
                 _state.update { it.copy(clipboard = c) }
             }
         }
-        refreshTrashCount()
     }
 
     fun openDir(dir: File) {
-        // Count visits (skipping the trash) so Home's Quick access can surface
-        // most-used folders. In-memory only — the repository batches the disk write.
-        if (dir.isDirectory && dir.name != Trash.DIR_NAME) {
+        // Count visits so Home's Quick access can surface most-used folders — but only
+        // for folders the user actually browses: the app's own trash dir at a volume
+        // root never qualifies, while a user folder with the same name deeper in the
+        // tree does (D11). In-memory only — the repository batches the disk write.
+        if (dir.isDirectory && !isOwnTrashDir(dir)) {
             viewModelScope.launch { settingsRepo.recordFolderUse(dir.absolutePath) }
         }
         load(dir)
     }
+
+    /** True only for the real trash dir at a volume root. The roots are only consulted
+     *  when the name matches, so normal navigation pays nothing extra. */
+    private fun isOwnTrashDir(dir: File): Boolean =
+        dir.name == Trash.DIR_NAME && fileRepo.roots().any { it.dir == dir.parentFile }
 
     fun load(dir: File) {
         if (browseRoot == null) browseRoot = dir
@@ -422,15 +440,6 @@ class BrowseViewModel(
         }
     }
 
-    /** Refresh the in-trash item count for the "Recently deleted" chip in Browse. */
-    fun refreshTrashCount() {
-        viewModelScope.launch(ioDispatcher) {
-            val roots = fileRepo.roots().map { it.dir }
-            val n = runCatching { Trash.entries(roots).size }.getOrDefault(0)
-            _state.update { it.copy(trashCount = n) }
-        }
-    }
-
     companion object {
         /** Largest file size (in bytes) the content-search peek will open. */
         private const val CONTENT_MAX_BYTES = 1L * 1024 * 1024 // 1 MiB
@@ -623,42 +632,70 @@ class BrowseViewModel(
         opJob = viewModelScope.launch(ioDispatcher) {
             val roots = container.fileRepo.roots().map { it.dir }
             val result = Trash.trash(files, roots)
-            val failed = files.count { it.exists() }
             _state.update {
                 it.copy(
                     progress = null,
                     lastTrashed = result.moved.takeIf { t -> t.isNotEmpty() },
+                    undoOfferSeq = ++undoOfferId,
                     toast = when {
                         result.moved.isEmpty() -> "Could not move anything to trash"
-                        failed > 0 -> "Moved ${result.moved.size} of ${files.size} to trash ($failed failed)"
+                        result.failureCount > 0 ->
+                            "Moved ${result.moved.size} of ${files.size} to trash (${result.failureCount} failed)"
                         else -> null // the undo snackbar reports success instead
                     },
                 )
             }
-            refreshTrashCount()
             _state.value.dir?.let { d -> load(d) }
         }
     }
 
-    /** Restores the most recent delete batch (snackbar "Undo"). */
-    fun undoDelete() {
-        val trashed = _state.value.lastTrashed ?: return
-        _state.update { it.copy(lastTrashed = null) }
+    /**
+     * Restores a delete batch (snackbar "Undo") from the captured payload list.
+     * Honest accounting (N5): items already gone from the trash are reported as
+     * "already gone", collision renames are counted (D4), and restored files are
+     * re-scanned into the media index (D1).
+     */
+    fun undoDelete(trashed: List<File>) {
+        if (trashed.isEmpty()) return
         opJob = viewModelScope.launch(ioDispatcher) {
             var restored = 0
-            for (t in trashed) if (Trash.restore(t) != null) restored++
+            var renamed = 0
+            var gone = 0
+            val restoredPaths = mutableListOf<String>()
+            for (t in trashed) {
+                // exists() follows symlinks — a dangling-link payload still restores (D7).
+                if (!t.exists() && !Files.isSymbolicLink(t.toPath())) {
+                    gone++
+                    continue
+                }
+                val origin = Trash.originOf(t)
+                val dest = Trash.restore(t) ?: continue // stays in the trash, still restorable
+                restored++
+                if (origin != null && dest.name != origin.substringAfterLast('/')) renamed++
+                restoredPaths += dest.absolutePath
+            }
+            media.rescan(restoredPaths)
+            val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
             _state.update {
                 it.copy(
-                    toast = if (restored == trashed.size) "Restored $restored item(s)"
-                    else "Restored $restored of ${trashed.size} — the rest stays in Trash"
+                    toast = when {
+                        gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
+                        restored < trashed.size ->
+                            "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
+                        else -> "Restored $restored item(s)$renamedNote"
+                    },
                 )
             }
-            refreshTrashCount()
             _state.value.dir?.let { d -> load(d) }
         }
     }
 
-    fun dismissUndo() = _state.update { it.copy(lastTrashed = null) }
+    /**
+     * One-shot undo offer (D2): consumed the moment the snackbar shows it, so a
+     * navigation mid-window can never leave a stale offer in the retained ViewModel
+     * that resurrects (and lies about "restoring") on the next visit.
+     */
+    fun consumeUndoOffer() = _state.update { it.copy(lastTrashed = null) }
 
     // ---------- copy / move (paste) ----------
 
@@ -1078,12 +1115,12 @@ class BrowseViewModel(
         _state.update {
             it.copy(
                 lastTrashed = result.moved.takeIf { m -> m.isNotEmpty() },
+                undoOfferSeq = ++undoOfferId,
                 toast = if (result.failureCount > 0) {
                     "Could not delete ${result.failureCount} source item(s)"
                 } else it.toast,
             )
         }
-        refreshTrashCount()
     }
 
     /**

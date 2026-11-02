@@ -139,7 +139,7 @@ class MediaRepositoryTrashPathTest {
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        repo = MediaRepository(context.contentResolver)
+        repo = MediaRepository(context)
         root = File(Environment.getExternalStorageDirectory(), "trash-path-test-${System.nanoTime()}").apply { mkdirs() }
         // Route every content://media/... query/delete to the fake provider.
         ShadowContentResolver.registerProviderInternal("media", provider)
@@ -156,6 +156,11 @@ class MediaRepositoryTrashPathTest {
 
     private fun realFile(name: String): String =
         File(root, name).apply { parentFile?.mkdirs(); writeText("x") }.path
+
+    /** A row path pointing into the REAL trash folder at the primary storage root
+     *  ("/storage/emulated/0/.toadfiles-trash/…") — where [Trash] actually creates it. */
+    private fun rootTrashPath(name: String): String =
+        "/storage/emulated/0/${Trash.DIR_NAME}/$name"
 
     // ---------- trash-path detection (pure) ----------
 
@@ -183,6 +188,20 @@ class MediaRepositoryTrashPathTest {
         assertFalse(MediaRepository.isTrashPath("/storage/emulated/0/notes/.toadfiles-trash.txt"))
         // A sibling with the trash name as a substring is not the trash folder.
         assertFalse(MediaRepository.isTrashPath("/storage/emulated/0/not.toadfiles-trash/file.txt"))
+    }
+
+    @Test
+    fun `trash hiding is scoped to the storage volume root (D11)`() {
+        // The real trash folders live directly at a volume root…
+        assertTrue(MediaRepository.isTrashPath("/storage/emulated/0/${Trash.DIR_NAME}/x.jpg"))
+        assertTrue(MediaRepository.isTrashPath("/storage/0000-0001/${Trash.DIR_NAME}/x.jpg"))
+        assertTrue(MediaRepository.isTrashPath("/storage/emulated/10/${Trash.DIR_NAME}/x.jpg"))
+        // …but a user's own folder with the same name deeper in the tree is NOT the
+        // trash: it must stay visible in Recent and Categories (D11).
+        assertFalse(MediaRepository.isTrashPath("/storage/emulated/0/MyPics/${Trash.DIR_NAME}/x.jpg"))
+        assertFalse(MediaRepository.isTrashPath("/storage/0000-0001/backup/${Trash.DIR_NAME}/x.mp3"))
+        // A trash-named folder directly under a nested folder is user data too.
+        assertFalse(MediaRepository.isTrashPath("/storage/emulated/0/Download/${Trash.DIR_NAME}/doc.pdf"))
     }
 
     // ---------- stale rows: hidden AND removed from the index ----------
@@ -289,16 +308,16 @@ class MediaRepositoryTrashPathTest {
     fun `summaries exclude trashed rows from count and bytes in multiple categories`() {
         seed(
             row("kept.jpg", "image/jpeg", realFile("pics/kept.jpg"), 1, size = 100L),
-            row("trashed.jpg", "image/jpeg", realFile("${Trash.DIR_NAME}/trashed.jpg"), 1, size = 400L),
+            row("trashed.jpg", "image/jpeg", rootTrashPath("trashed.jpg"), 1, size = 400L),
             row("kept.txt", "text/plain", realFile("docs/kept.txt"), 6, size = 50L),
-            row("trashed.txt", "text/plain", realFile("${Trash.DIR_NAME}/trashed.txt"), 6, size = 70L),
+            row("trashed.txt", "text/plain", rootTrashPath("trashed.txt"), 6, size = 70L),
         )
 
         val images = repo.summaries().first { it.category == FileCategory.IMAGES }
         val docs = repo.summaries().first { it.category == FileCategory.DOCS }
 
-        // The trashed payloads still exist on disk inside the trash folder, so only the
-        // trash rule (not the vanished-file rule) can hide them.
+        // The trashed rows point into the real trash folder at the storage root, so
+        // only the trash rule (not the vanished-file rule) can hide them.
         assertEquals(1, images.count)
         assertEquals(100L, images.totalBytes)
         assertEquals(1, docs.count)
@@ -330,7 +349,7 @@ class MediaRepositoryTrashPathTest {
     fun `summaries totals match exactly what the listing shows`() {
         seed(
             row("visible.jpg", "image/jpeg", realFile("pics/visible.jpg"), 1, size = 100L),
-            row("trashed.jpg", "image/jpeg", realFile("${Trash.DIR_NAME}/trashed.jpg"), 1, size = 200L),
+            row("trashed.jpg", "image/jpeg", rootTrashPath("trashed.jpg"), 1, size = 200L),
             row("ghost.jpg", "image/jpeg", "/storage/emulated/0/pics/ghost.jpg", 1, size = 300L),
             row("no-data.jpg", "image/jpeg", null, 1, size = 400L),
             row("visible.txt", "text/plain", realFile("docs/visible.txt"), 6, size = 10L),
