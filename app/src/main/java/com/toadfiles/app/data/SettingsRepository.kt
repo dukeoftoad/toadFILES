@@ -11,6 +11,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppIconColor
+import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.NavStyle
@@ -70,6 +72,11 @@ data class ToadSettings(
     /** Default folder for archives (compression output AND extraction destination).
      *  Blank string = "same folder as the source" (v1.7.2 behavior). */
     val archiveFolder: String = "",
+    // ---- v1.9: app icon ----
+    /** Launcher icon foreground design; applied to the launcher via activity-aliases. */
+    val appIconDesign: AppIconDesign = AppIconDesign.CLASSIC,
+    /** Launcher icon background tint. */
+    val appIconColor: AppIconColor = AppIconColor.GREEN,
 ) {
     companion object {
         const val SEARCH_LIMIT_MIN = 10
@@ -116,6 +123,8 @@ class SettingsRepository(
         val ABORT_CONFIRM = booleanPreferencesKey("abort_confirm")
         val OVERWRITE_CONFIRM = booleanPreferencesKey("overwrite_confirm")
         val ARCHIVE_FOLDER = stringPreferencesKey("archive_folder")
+        val APP_ICON_DESIGN = stringPreferencesKey("app_icon_design")
+        val APP_ICON_COLOR = stringPreferencesKey("app_icon_color")
     }
 
     val settings: Flow<ToadSettings> = store.data.map { p ->
@@ -155,6 +164,10 @@ class SettingsRepository(
             abortConfirm = p[Keys.ABORT_CONFIRM] ?: true,
             overwriteConfirm = p[Keys.OVERWRITE_CONFIRM] ?: true,
             archiveFolder = p[Keys.ARCHIVE_FOLDER] ?: "",
+            appIconDesign = p[Keys.APP_ICON_DESIGN]?.let { runCatching { AppIconDesign.valueOf(it) }.getOrNull() }
+                ?: AppIconDesign.CLASSIC,
+            appIconColor = p[Keys.APP_ICON_COLOR]?.let { runCatching { AppIconColor.valueOf(it) }.getOrNull() }
+                ?: AppIconColor.GREEN,
         )
     }
 
@@ -179,6 +192,8 @@ class SettingsRepository(
     suspend fun setAbortConfirm(enabled: Boolean) = store.edit { it[Keys.ABORT_CONFIRM] = enabled }
     suspend fun setOverwriteConfirm(enabled: Boolean) = store.edit { it[Keys.OVERWRITE_CONFIRM] = enabled }
     suspend fun setArchiveFolder(path: String) = store.edit { it[Keys.ARCHIVE_FOLDER] = path.trim() }
+    suspend fun setAppIconDesign(design: AppIconDesign) = store.edit { it[Keys.APP_ICON_DESIGN] = design.name }
+    suspend fun setAppIconColor(color: AppIconColor) = store.edit { it[Keys.APP_ICON_COLOR] = color.name }
 
     // ---------- Quick access (Home) ----------
 
