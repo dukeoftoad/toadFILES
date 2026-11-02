@@ -25,8 +25,11 @@ import org.robolectric.annotation.Config
 /**
  * Home's recent-feed filter chips: the row renders once the feed has content, a chip
  * tap routes the query through the filtered lane (and shows a filter-aware empty
- * state), and a fresh install with no media renders no dead chip row. Same approach
- * as RecentScreenTest, against the full Home screen with an injected fake media source.
+ * state), and a fresh install with no media renders no dead chip row.
+ *
+ * The view model settles on real dispatchers BEFORE the composition starts (its
+ * recent lane is pure fake-data IO), so the first frame renders the settled state —
+ * the same fully-async post-interaction settling that RecentScreenTest relies on.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(application = ToadApp::class, sdk = [35])
@@ -69,8 +72,10 @@ class HomeScreenTest {
         data = null,
     )
 
-    private fun render(media: FakeMedia) {
+    /** Build the VM with the fake media, wait for its recent lane to settle, then compose. */
+    private fun renderSettled(media: FakeMedia) {
         vm = HomeViewModel(container, media = media)
+        compose.waitUntil(10_000) { !vm.state.value.loadingRecent }
         compose.setContent {
             ToadTheme {
                 HomeScreen(
@@ -88,8 +93,8 @@ class HomeScreenTest {
 
     @Test
     fun `recent filter chips render and route the query through the filtered lane`() {
-        render(FakeMedia(docs))
-        // The feed settles with the two docs — "All" + every category chip render.
+        renderSettled(FakeMedia(docs))
+        // The settled feed shows its two docs — "All" + every category chip render.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
         }
@@ -118,7 +123,7 @@ class HomeScreenTest {
 
     @Test
     fun `no chip row is rendered for an empty unfiltered feed`() {
-        render(FakeMedia(emptyList()))
+        renderSettled(FakeMedia(emptyList()))
         // Fresh install: the feed is empty and no filter is active, so the row would be
         // a dead row of chips — it must not render at all.
         compose.waitUntil(10_000) {
