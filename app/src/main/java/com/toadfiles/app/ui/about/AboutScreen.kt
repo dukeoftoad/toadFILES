@@ -48,16 +48,20 @@ import com.toadfiles.app.ui.whatsnew.ChangelogRelease
 import com.toadfiles.app.util.Intents
 
 /**
- * Full About page. Replaces the tiny About card in Settings: it carries everything a
- * privacy-conscious user expects from a file manager — version/build, real storage
- * numbers, per-category counts, a user-initiated update check against GitHub Releases,
- * the OSS credits, and an in-app changelog.
+ * Full About page: identity, version/build and Android compatibility straight from
+ * BuildConfig, what the app can do (implemented features only), why each manifest
+ * permission exists, an accurate privacy statement, the bounded self-update flow,
+ * a changelog preview, project/source links, and the OSS credits.
  *
- * Layout: a vertically scrolling column of cards. One concern per card so the page stays
- * navigable on small screens. Updates: a silent, once-per-launch check contacts
- * api.github.com (no periodic polling, no telemetry); a downloaded update APK lands in the
- * app-private download dir and is handed to the system installer as a DownloadManager
- * content URI.
+ * Layout: a vertically scrolling column of cards — one concern per card so the page
+ * stays navigable on small screens.
+ *
+ * NETWORK FACTS (identical in every claim on this page): the only endpoint toadFILES
+ * ever contacts is the repo's releases/latest on api.github.com — once per app open
+ * (silent, failure-invisible; see StartupUpdateCheck) and again whenever the user taps
+ * "Check for updates". The update APK is fetched by the system DownloadManager only
+ * after an explicit tap, then handed to the system installer. No telemetry, no ads,
+ * no accounts; nothing about the device's files ever leaves it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,16 +116,20 @@ fun AboutScreen(
                     Spacer(Modifier.height(12.dp))
                     VersionRow("Version", BuildConfig.VERSION_NAME)
                     VersionRow("Build", BuildConfig.VERSION_CODE.toString())
-                    VersionRow("Min Android", "14 (API 34)")
-                    VersionRow("Target Android", "API 36+")
+                    // From the build config, so these rows can never drift from the
+                    // minSdk/targetSdk the APK was actually compiled with.
+                    VersionRow("Min Android", "API ${BuildConfig.MIN_SDK_VERSION}")
+                    VersionRow("Target Android", "API ${BuildConfig.TARGET_SDK_VERSION}")
                     VersionRow("Package", BuildConfig.APPLICATION_ID)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "toadFILES goes online in exactly one case: when you tap \"Check for " +
-                            "updates\" below, it talks to GitHub Releases to fetch the newest " +
-                            "version — and downloads the update APK only if you ask for it. It " +
-                            "never uploads files, favorites, settings or analytics, and never " +
-                            "contacts anything else in the background.",
+                        "toadFILES works entirely on this device: every file operation, " +
+                            "favorite and setting stays local. The only network use is the " +
+                            "optional update check — one silent request to api.github.com per " +
+                            "app open, repeated only if you tap \"Check for updates\" below. An " +
+                            "update APK is downloaded only after you tap \"Download & install\". " +
+                            "No telemetry, no ads, no accounts — nothing about your files ever " +
+                            "leaves the device.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -130,7 +138,7 @@ fun AboutScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ---- Updates (strictly user-initiated check against GitHub Releases) ----
+            // ---- Updates (GitHub Releases check: once per app open + user-initiated) ----
             // v1.8.1: the "Storage on this device" and "Files on this device" data
             // cards were removed from About — that live storage/usage information lives
             // on the Home storage card and the Storage page, where it belongs.
@@ -139,9 +147,9 @@ fun AboutScreen(
                     Text("Updates", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "toadFILES checks GitHub Releases for a newer version only when you tap " +
-                            "the button below — never in the background, and nothing about this " +
-                            "device is sent or stored.",
+                        "toadFILES contacts GitHub Releases once per app open (silently, in " +
+                            "the background) and whenever you tap the button below. Nothing " +
+                            "about this device is sent, and nothing downloads without a tap.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -188,6 +196,52 @@ fun AboutScreen(
 
             Spacer(Modifier.height(16.dp))
 
+            // ---- Capabilities (implemented only — nothing aspirational) ----
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Capabilities", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Capabilities.forEach { line -> ChangelogBullet(line) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ---- Permissions (every manifest permission, with its reason) ----
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Permissions", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Permissions.forEach { (name, reason) -> PermissionRow(name, reason) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ---- Source & project ----
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Source & project", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "toadFILES is free software under GPL-3.0: you can use, study, " +
+                            "change and share it. The full license ships as the LICENSE file " +
+                            "in the repository.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    TextButton(onClick = { Intents.openUrl(context, REPO_URL) }) {
+                        Text("Source code · github.com/dukeoftoad/toadFILES")
+                    }
+                    TextButton(onClick = { Intents.openUrl(context, RELEASES_URL) }) {
+                        Text("Releases and tagged changelogs on GitHub")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
             // ---- OSS credits ----
             Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp)) {
@@ -212,7 +266,8 @@ fun AboutScreen(
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "toadFILES itself is GPL-3.0. See the source at the repository you cloned it from.",
+                        "Build details and licenses for everything above are in the " +
+                            "repository's dependency files.",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -378,15 +433,54 @@ private fun UpdateAvailable(
     TextButton(onClick = onDismiss) { Text("Dismiss") }
 }
 
-/** Open-source libraries toadFILES ships. Update when adding a new dependency. */
+/** Every feature the app actually ships (verified against the code and CHANGELOG.md). */
+private val Capabilities: List<String> = listOf(
+    "Browse, open, rename, copy, move and delete files on internal storage, SD cards and OTG drives.",
+    "Create and extract ZIP and 7z archives, including AES-256 password-protected 7z and split (.001, .002…) volumes.",
+    "30-day trash with restore and undo — deletions land in toadFILES' trash, with batch restore and permanent-delete confirmations.",
+    "Media browsing: photo/video thumbnails, category pages, recent files and a storage analyzer.",
+    "Search by name — optionally inside small text files — plus favorites and quick-access pins that survive renames and moves.",
+    "Share and open files with any app, and install APKs you keep in storage.",
+    "Theming: Material You dynamic color, seven accent palettes, and six launcher icon designs with six background tints.",
+)
+
+/** Every manifest permission with a plain-language reason; kept in manifest order. */
+private val Permissions: List<Pair<String, String>> = listOf(
+    "INTERNET" to
+        "Contacts api.github.com for the optional update check only — no other network use.",
+    "All files access (MANAGE_EXTERNAL_STORAGE)" to
+        "A file manager must read and change the files you act on. Nothing is uploaded, ever.",
+    "Install unknown apps (REQUEST_INSTALL_PACKAGES)" to
+        "Hands the update APK — or an APK you tapped — to the system installer. Android still " +
+            "asks you to confirm every install.",
+)
+
+private const val REPO_URL = "https://github.com/dukeoftoad/toadFILES"
+private const val RELEASES_URL = "$REPO_URL/releases"
+
+@Composable
+private fun PermissionRow(name: String, reason: String) {
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text(name, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
+        Text(
+            reason,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Open-source libraries the release APK ships — mirrors app/build.gradle.kts implementation deps. */
 private val OssCredits: List<Pair<String, String>> = listOf(
     "AndroidX Core KTX" to "Apache-2.0",
     "AndroidX Lifecycle" to "Apache-2.0",
     "AndroidX Activity Compose" to "Apache-2.0",
-    "AndroidX Compose" to "Apache-2.0",
+    "AndroidX Compose (UI, Material 3, icons)" to "Apache-2.0",
     "AndroidX Navigation Compose" to "Apache-2.0",
     "AndroidX DataStore" to "Apache-2.0",
-    "Coil3" to "Apache-2.0",
+    "Coil 3 (images + video thumbs)" to "Apache-2.0",
     "Kotlinx Coroutines" to "Apache-2.0",
-    "Robolectric" to "MIT",
+    "Apache Commons Compress (7z)" to "Apache-2.0",
+    "XZ for Java (7z LZMA)" to "Public Domain",
 )
+
