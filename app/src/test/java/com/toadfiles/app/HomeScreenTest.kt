@@ -1,10 +1,12 @@
 package com.toadfiles.app
 
 import android.content.Context
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToEnd
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -94,6 +96,9 @@ class HomeScreenTest {
     @Test
     fun `recent filter chips render and route the query through the filtered lane`() {
         renderSettled(FakeMedia(docs))
+        // Home's Recent section sits below the fold of the LazyColumn — scroll the
+        // list to its end so the section (header, chips, body) is actually composed.
+        compose.onNode(hasScrollAction()).performScrollToEnd()
         // The settled feed shows its two docs — "All" + every category chip render.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
@@ -124,6 +129,8 @@ class HomeScreenTest {
     @Test
     fun `no chip row is rendered for an empty unfiltered feed`() {
         renderSettled(FakeMedia(emptyList()))
+        // The Recent section is below the fold — bring it into the viewport first.
+        compose.onNode(hasScrollAction()).performScrollToEnd()
         // Fresh install: the feed is empty and no filter is active, so the row would be
         // a dead row of chips — it must not render at all.
         compose.waitUntil(10_000) {
