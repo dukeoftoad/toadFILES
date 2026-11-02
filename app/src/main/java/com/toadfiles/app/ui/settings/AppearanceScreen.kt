@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
@@ -111,7 +112,11 @@ fun AppearanceScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                // Test seam: the ONLY vertical scroller on this screen. UI tests scroll
+                // to the Navigation card through this tag — an unqualified scroll target
+                // can latch onto the horizontal accent LazyRow and hang (CI, Nov 2026).
+                .testTag("appearance_scroll"),
         ) {
             Text("Theme", style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))

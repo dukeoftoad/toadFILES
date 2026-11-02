@@ -1,13 +1,13 @@
 package com.toadfiles.app
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -64,22 +64,18 @@ class AppearanceScreenTest {
         }
     }
 
-    /** Waits for the Navigation card, then swipes the screen up in bounded steps until
-     *  the card is inside the viewport (it sits below the fold of the scrollable column;
-     *  a targeted performScrollToNode cannot be used safely here — it may attach to the
-     *  horizontal accent LazyRow and spin forever, which hung a whole CI run). */
+    /** Scrolls the screen's ONLY vertical scroller (tagged "appearance_scroll") until
+     *  the Navigation card is in view. A targeted performScrollToNode is safe here —
+     *  the tag rules out the horizontal accent LazyRow, which hung a whole CI run when
+     *  an unqualified scroll target latched onto it; blind swiping, in turn, never
+     *  reliably moved the list under Robolectric. */
     private fun awaitNavigationCard() {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Navigation Style").fetchSemanticsNodes().isNotEmpty()
         }
-        repeat(30) {
-            val viewport = compose.onRoot().fetchSemanticsNode().boundsInRoot
-            val row = compose.onAllNodesWithText("Navigation Style")
-                .fetchSemanticsNodes().firstOrNull()?.boundsInRoot
-            if (row != null && viewport.intersects(row)) return
-            compose.onRoot().performTouchInput { swipeUp() }
-            compose.waitForIdle()
-        }
+        compose.onNodeWithTag("appearance_scroll")
+            .performScrollToNode(hasText("Navigation Style"))
+        compose.waitForIdle()
     }
 
     @Test
@@ -99,7 +95,11 @@ class AppearanceScreenTest {
         awaitNavigationCard()
 
         compose.onNodeWithText("Navigation Style").performClick()
+        // Let the dropdown finish opening before clicking the item — clicking into a
+        // mid-creation popup under Robolectric wedges the main Looper (CI hang, Nov 2026).
+        compose.waitForIdle()
         compose.onNodeWithText("Side Menu").performClick()
+        compose.waitForIdle()
 
         val app = ApplicationProvider.getApplicationContext<ToadApp>()
         runBlocking {
@@ -113,7 +113,10 @@ class AppearanceScreenTest {
         awaitNavigationCard()
 
         compose.onNodeWithText("Back Key Action").performClick()
+        // Same popup determinism guard as the Navigation Style test above.
+        compose.waitForIdle()
         compose.onNodeWithText("Exit App").performClick()
+        compose.waitForIdle()
 
         val app = ApplicationProvider.getApplicationContext<ToadApp>()
         runBlocking {
