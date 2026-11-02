@@ -77,8 +77,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,6 +132,13 @@ fun BrowseScreen(
     var sortMenuOpen by remember { mutableStateOf(false) }
     var filterMenuOpen by remember { mutableStateOf(false) }
     var moreMenuOpen by remember { mutableStateOf(false) }
+    // Overflow (⋮) of the non-selection top bar: search and the hidden-files toggle
+    // moved behind it so the toolbar stays minimal and the search field stops
+    // permanently taking a row of space. Separate state from the selection bar's
+    // moreMenuOpen — only one bar is composed at a time, but they are distinct menus.
+    var browseMenuOpen by remember { mutableStateOf(false) }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
     // v1.7.3 abortConfirm: set when the user cancels the progress overlay while the
     // confirmation setting is on; cleared by the dialog's buttons.
     var pendingAbortConfirm by remember { mutableStateOf(false) }
@@ -138,6 +149,17 @@ fun BrowseScreen(
         if (initialDir.isNotBlank()) File(initialDir) else Environment.getExternalStorageDirectory()
     }
     LaunchedEffect(rootDir) { vm.openDir(rootDir) }
+
+    // The search field only exists while it is revealed from the overflow menu;
+    // focus it as soon as it composes so typing can start immediately. Waiting one
+    // frame keeps the focus node attached, and requestFocus is guarded because it
+    // throws when its target is not in the hierarchy yet.
+    LaunchedEffect(searchOpen) {
+        if (searchOpen) {
+            withFrameNanos { }
+            runCatching { searchFocus.requestFocus() }
+        }
+    }
 
     var pendingInstallApk by remember { mutableStateOf<File?>(null) }
     var pendingActionSheet by remember { mutableStateOf<FileItem?>(null) }
@@ -196,6 +218,10 @@ fun BrowseScreen(
     // Registered last, so it wins: while a search is active, Back first clears the search
     // instead of jumping out of the folder.
     BackHandler(enabled = !selectionMode && state.query.isNotBlank()) { vm.setQuery("") }
+    // And one step further down: with the field open but the query empty, Back closes
+    // the field instead of leaving the folder. (Query non-blank keeps the handler
+    // above enabled and this one disabled — query clears first.)
+    BackHandler(enabled = !selectionMode && searchOpen && state.query.isBlank()) { searchOpen = false }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -328,13 +354,6 @@ fun BrowseScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { vm.toggleHiddenFiles() }) {
-                            Icon(
-                                if (state.settings.showHidden) Icons.Outlined.Visibility
-                                else Icons.Outlined.VisibilityOff,
-                                if (state.settings.showHidden) "Hide hidden files" else "Show hidden files",
-                            )
-                        }
                         IconButton(onClick = { vm.toggleLayout() }) {
                             Icon(
                                 if (state.settings.browseLayout == BrowseLayout.GRID)
@@ -360,6 +379,44 @@ fun BrowseScreen(
                             onSelect = { vm.setFilter(it); filterMenuOpen = false },
                             onDismiss = { filterMenuOpen = false },
                         )
+                        IconButton(onClick = { browseMenuOpen = true }) {
+                            Icon(Icons.Outlined.MoreVert, "More")
+                        }
+                        DropdownMenu(
+                            expanded = browseMenuOpen,
+                            onDismissRequest = { browseMenuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Search") },
+                                leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                                onClick = {
+                                    browseMenuOpen = false
+                                    searchOpen = !searchOpen
+                                    // Hiding the field also drops an active query — a
+                                    // stale filter must not outlive the visible field.
+                                    if (!searchOpen && state.query.isNotBlank()) vm.setQuery("")
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (state.settings.showHidden) "Hide hidden files"
+                                        else "Show hidden files"
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (state.settings.showHidden) Icons.Outlined.Visibility
+                                        else Icons.Outlined.VisibilityOff,
+                                        null,
+                                    )
+                                },
+                                onClick = {
+                                    browseMenuOpen = false
+                                    vm.toggleHiddenFiles()
+                                },
+                            )
+                        }
                     },
                 )
             }
@@ -388,27 +445,30 @@ fun BrowseScreen(
                 val visible = state.items.filter { state.filterMode.matches(it.name) }
                 Column(Modifier.fillMaxSize()) {
                     if (!selectionMode) {
-                        OutlinedTextField(
-                        value = state.query,
-                        onValueChange = { vm.setQuery(it) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        placeholder = { Text("Search in this folder tree") },
-                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                        trailingIcon = {
-                            if (state.searching) {
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            } else if (state.query.isNotEmpty()) {
-                                IconButton(onClick = { vm.setQuery("") }) {
-                                    Icon(Icons.Outlined.Close, "Clear")
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        shape = MaterialTheme.shapes.extraLarge,
-                    )
-                    Breadcrumbs(state.breadcrumbs) { vm.openDir(it) }
+                        if (searchOpen) {
+                            OutlinedTextField(
+                                value = state.query,
+                                onValueChange = { vm.setQuery(it) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                                    .focusRequester(searchFocus),
+                                placeholder = { Text("Search in this folder tree") },
+                                leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                                trailingIcon = {
+                                    if (state.searching) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else if (state.query.isNotEmpty()) {
+                                        IconButton(onClick = { vm.setQuery("") }) {
+                                            Icon(Icons.Outlined.Close, "Clear")
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = MaterialTheme.shapes.extraLarge,
+                            )
+                        }
+                        Breadcrumbs(state.breadcrumbs) { vm.openDir(it) }
                     Text(
                         buildString {
                             append(visible.size)
