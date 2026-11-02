@@ -50,6 +50,10 @@ data class CategoriesUiState(
     val selected: FileCategory? = null,
     val entries: List<MediaRepository.MediaEntry> = emptyList(),
     val entriesLoading: Boolean = false,
+    /** True while a pull-to-refresh re-query of the OPEN drill-in's entries is in
+     *  flight. Unlike [entriesLoading] it never swaps the list for a full-screen
+     *  spinner — the current rows stay put until the fresh results apply. */
+    val entriesRefreshing: Boolean = false,
     /** Multi-select inside the drill-in list, keyed by content-uri string. */
     val selection: Set<String> = emptySet(),
     /** Drill-in sort (session-local). DATE/DESC is MediaStore's own newest-first order. */
@@ -152,9 +156,59 @@ class CategoriesViewModel(
         _state.update { it.copy(loading = true) }
         summariesJob?.cancel()
         summariesJob = viewModelScope.launch(ioDispatcher) {
-            val summaries = runCatching { media.summaries() }.getOrDefault(emptyList())
+            // A transient MediaStore failure keeps the previous tiles instead of
+            // blanking the grid (the old getOrDefault(emptyList()) wiped them).
+            val summaries = runCatching { media.summaries() }.getOrNull()
             if (token != summariesSeq) return@launch // superseded by a newer refresh
-            _state.update { it.copy(summaries = summaries, loading = false) }
+            _state.update { s ->
+                if (summaries != null) s.copy(summaries = summaries, loading = false)
+                else s.copy(loading = false)
+            }
+        }
+        // Pull-to-refresh used to re-query ONLY the overview counts, so an open
+        // drill-in showed a spinner but kept stale content until the user left and
+        // re-entered. Refresh the open category's entries in place too — without
+        // [open]'s clear-then-load, which stays a navigation-only behavior. With no
+        // category open this line is skipped and refresh behaves exactly as before.
+        _state.value.selected?.let { refreshEntries(it) }
+    }
+
+    /**
+     * Re-queries [category]'s entries WITHOUT [open]'s destructive clear-then-load:
+     * the current rows stay on screen until the fresh result applies (no full-screen
+     * spinner swap, scroll position kept), which is what pull-to-refresh on an open
+     * drill-in should feel like. Shares [entriesSeq]/[entriesJob] with [open] so the
+     * two lanes cancel-and-supersede each other under the same stale-apply guard.
+     * The user's session sort re-applies to the fresh rows, and selection uris that
+     * no longer exist are pruned (RecentViewModel.refresh parity). A failed query
+     * keeps the previous entries — an empty list only ever comes from MediaStore
+     * itself, never from an error.
+     */
+    private fun refreshEntries(category: FileCategory) {
+        val token = ++entriesSeq
+        _state.update { it.copy(entriesRefreshing = true) }
+        entriesJob?.cancel()
+        entriesJob = viewModelScope.launch(ioDispatcher) {
+            val entries = runCatching { media.list(category, limit = QUERY_LIMIT) }.getOrNull()
+            _state.update { s ->
+                // Rapid open/refresh hand-offs can finish out of order — apply only
+                // when this is still the newest drill-in query for the category on
+                // screen (same discipline as open()).
+                if (token != entriesSeq || s.selected != category) return@update s
+                if (entries == null) {
+                    // Query failed: keep what the user is looking at, drop the spinner.
+                    return@update s.copy(entriesRefreshing = false, entriesLoading = false)
+                }
+                val live = entries.map { it.uri.toString() }.toSet()
+                s.copy(
+                    entries = sortEntries(entries),
+                    entriesRefreshing = false,
+                    // Safe to clear here: this lane only applies while it is the newest
+                    // drill-in request, so a superseded open() no longer owns the flag.
+                    entriesLoading = false,
+                    selection = s.selection.intersect(live),
+                )
+            }
         }
     }
 
@@ -166,6 +220,9 @@ class CategoriesViewModel(
                 entries = emptyList(),
                 selection = emptySet(),
                 entriesLoading = true,
+                // Taking over the drill-in cancels any in-flight refreshEntries, which
+                // can then no longer clear its own spinner flag — the new owner resets it.
+                entriesRefreshing = false,
                 // Visual categories open as a thumbnail grid, like before; everything
                 // else as rows. The user can flip it with the shared layout toggle.
                 layout = if (category == FileCategory.IMAGES || category == FileCategory.VIDEOS) {
@@ -187,7 +244,16 @@ class CategoriesViewModel(
 
     /** Leaves the drill-in list and returns to the category grid. */
     fun close() {
-        _state.update { it.copy(selected = null, entries = emptyList(), selection = emptySet()) }
+        // Also drops the refresh spinner: an in-flight refreshEntries apply is discarded
+        // by the stale-apply guard, so it can no longer clear the flag itself.
+        _state.update {
+            it.copy(
+                selected = null,
+                entries = emptyList(),
+                selection = emptySet(),
+                entriesRefreshing = false,
+            )
+        }
     }
 
     // ---------- sort / layout (Browse parity, session-local) ----------

@@ -136,6 +136,11 @@ fun CategoriesScreen(
     /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
 
+    // Categories data (overview counts, and an open drill-in's entries) can change
+    // while the user is in another tab — refresh every time this screen re-enters
+    // composition, exactly like Home does.
+    LaunchedEffect(Unit) { vm.refresh() }
+
     LaunchedEffect(state.toast) {
         state.toast?.let {
             snackbar.showSnackbar(it)
@@ -305,8 +310,10 @@ fun CategoriesScreen(
         },
     ) { padding ->
         // Pull-to-refresh (v1.7.3): drag down anywhere to re-query the media library.
+        // The indicator covers both lanes: the overview counts (loading) and an open
+        // drill-in's non-destructive entries re-query (entriesRefreshing).
         PullToRefreshBox(
-            isRefreshing = state.loading,
+            isRefreshing = state.loading || state.entriesRefreshing,
             onRefresh = { vm.refresh() },
             modifier = Modifier
                 .fillMaxSize()
@@ -609,7 +616,10 @@ private fun CategoryEntries(
         ) { CircularProgressIndicator() }
 
         state.entries.isEmpty() -> EmptyState(
-            "No ${state.selected!!.label.lowercase()} found in the media library",
+            // Honest MediaStore framing: only the system index feeds this list, so a
+            // file the OS has not scanned yet cannot appear here (no forced rescan).
+            "No ${state.selected!!.label.lowercase()} found in the media library yet — " +
+                "files appear here once the system indexes them",
             modifier,
         )
 
