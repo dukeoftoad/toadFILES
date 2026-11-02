@@ -4,6 +4,42 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [1.9.0] — 2026-11-02
+
+The personalization & housekeeping release — the final version of toadFILES.
+
+### Added
+- **App icon picker**: 5 new launcher icon designs (toad face, document, crowned
+  toad, pixel toad, SD card) in the app's flat toad style, each with 6
+  background colorways — 36 launcher aliases in total, all switchable from a
+  new **App icon** section in Settings → Appearance with live-preview tiles and
+  color swatches. The choice persists via DataStore and is re-applied at
+  startup; upgraders keep the classic look until they pick one.
+- **Recent filter chips**: the Home Recent section gains All / Images / Videos
+  / Audio / Docs / Archives / APKs chips mirroring the Recent page, with a
+  filter-aware empty state.
+
+### Changed
+- **Home**: compact layout — the status-bar inset is applied once (it was
+  double-stacked since v1.8.1), a unified 16 dp gutter via a shared section
+  header, and reduced card/footnote paddings.
+- **Quick Access** rebuilt as non-lazy rows: no more clipped 100 dp rows, cut-off
+  names or wasted placeholder space; editor labels are Pinned/Automatic and the
+  default quick links can no longer be starved by pins.
+- **Browse**: the search bar and the hidden-files toggle moved into a new
+  overflow menu in the top bar. The search field is hidden by default
+  (reclaiming a row of vertical space), auto-focuses when opened, and Back
+  closes it after clearing the query.
+
+### Fixed
+- **Trash**: restored/undone files are re-indexed into MediaStore so they
+  reappear in Recent, Categories and galleries; the undo snackbar is one-shot
+  (navigating away can no longer resurrect a stale offer or claim the file
+  stayed in Trash); restore is disabled for unknown-origin entries with honest
+  reason messaging; collisions, partial empty-trash failures and dangling
+  symlinks are reported truthfully; sidecar files use URL-encoded origins and
+  255-byte name truncation.
+
 ## [1.8.2] — 2026-11-01
 
 The analyzer-hardening release — final version for now. No new features; it
