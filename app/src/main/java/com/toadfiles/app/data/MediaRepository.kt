@@ -2,6 +2,8 @@ package com.toadfiles.app.data
 
 import android.content.ContentResolver
 import android.content.ContentUris
+import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.MediaStore
 import com.toadfiles.app.domain.CategorySummary
@@ -20,13 +22,22 @@ interface MediaQuerySource {
     fun recent(limit: Int): List<MediaRepository.MediaEntry>
     fun summaries(): List<CategorySummary>
     fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int
+
+    /** Re-indexes [paths] with the platform media scanner so files the OS index no
+     *  longer knows about (e.g. restored from the trash) reappear in Recent,
+     *  Categories and system galleries. Paths may be files or directories (a
+     *  directory's contained files are walked, bounded). Default no-op so test
+     *  fakes and other implementations stay untouched; the real repository scans. */
+    fun rescan(paths: List<String>) {}
 }
 
 /**
  * MediaStore-backed category and recent-file queries. Real and on-demand, the OS
  * already keeps the index so there is no manual filesystem scanning here.
  */
-class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource {
+class MediaRepository(private val context: Context) : MediaQuerySource {
+
+    private val resolver: ContentResolver = context.contentResolver
 
     data class MediaEntry(
         val id: Long,
@@ -202,6 +213,42 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
     }
 
     /**
+     * Re-indexes restored files: trashing deletes the MediaStore row ([deleteStale]),
+     * so only a media scan brings a restored file back into Recent/Categories and
+     * system galleries. A restored directory re-indexes through its contained files —
+     * the scanner ignores bare folders — bounded to [MAX_RESCAN_PATHS] paths per call
+     * so a huge tree cannot flood the scanner.
+     */
+    override fun rescan(paths: List<String>) {
+        val toScan = mutableListOf<String>()
+        val queue = ArrayDeque<File>()
+        fun offer(path: String) {
+            if (toScan.size < MAX_RESCAN_PATHS) toScan += path
+        }
+        for (p in paths) {
+            if (toScan.size >= MAX_RESCAN_PATHS) break
+            val f = File(p)
+            if (f.isDirectory) queue += f else offer(f.absolutePath)
+            while (queue.isNotEmpty() && toScan.size < MAX_RESCAN_PATHS) {
+                val dir = queue.removeFirst()
+                val children = dir.listFiles() ?: continue
+                for (c in children) {
+                    if (toScan.size >= MAX_RESCAN_PATHS) break
+                    if (c.isDirectory) queue += c else offer(c.absolutePath)
+                }
+            }
+        }
+        if (toScan.isNotEmpty()) {
+            try {
+                MediaScannerConnection.scanFile(context, toScan.toTypedArray(), null, null)
+            } catch (_: Exception) {
+                // The scan is best-effort by design — a missing provider or a
+                // stripped-down environment (unit tests) must never crash a restore.
+            }
+        }
+    }
+
+    /**
      * The row-visibility rule shared by [list], [recent] and [totalsFor] for a non-null
      * DATA path: the file lives inside the trash folder, or its backing file has
      * vanished (a ghost row). Rows without a DATA path stay visible, as in the listings.
@@ -329,22 +376,27 @@ class MediaRepository(private val resolver: ContentResolver) : MediaQuerySource 
         /** Upper bound for the automatic stale-row cleanup inside [list] and [recent]. */
         private const val MAX_STALE_DELETIONS_PER_QUERY = 50
 
+        /** Upper bound of paths handed to the media scanner per [rescan] call. */
+        private const val MAX_RESCAN_PATHS = 1000
+
+        /** Volume roots as MediaStore DATA paths see them: "/storage/emulated/0",
+         *  "/storage/0000-0001", … (see [com.toadfiles.app.data.FileRepository.roots]). */
+        private val VOLUME_ROOT_PATTERN = "^/storage/(?:emulated/\\d+|[^/]+)"
+
+        /** The trash folder of any KNOWN volume root — exactly where [Trash] creates
+         *  it. Root-scoped on purpose (D11): a user's own folder named
+         *  ".toadfiles-trash" anywhere else in the tree is ordinary user data and must
+         *  stay visible. Pure so it can be unit tested; the trash dir name must match
+         *  [com.toadfiles.app.domain.Trash.DIR_NAME]. */
+        private val TRASH_PATH_REGEX = Regex("$VOLUME_ROOT_PATTERN/${Regex.escape(Trash.DIR_NAME)}(?=/|$)")
+
         /**
-         * True when [path] lives inside the toadFILES trash folder on any volume. Pure so it
-         * can be unit tested; the trash dir name must match [com.toadfiles.app.domain.Trash.DIR_NAME].
+         * True when [path] lives inside the toadFILES trash folder at a storage
+         * volume root ("/storage/emulated/0/.toadfiles-trash/…", "/storage/0000-0001/
+         * .toadfiles-trash/…"). Paths under a same-named folder deeper in the tree are
+         * the user's own files and are NOT trash paths.
          */
-        fun isTrashPath(path: String): Boolean {
-            if (path.isBlank()) return false
-            var i = path.indexOf(Trash.DIR_NAME)
-            while (i >= 0) {
-                val before = if (i == 0) '/' else path[i - 1]
-                val afterIdx = i + Trash.DIR_NAME.length
-                val after = if (afterIdx >= path.length) '/' else path[afterIdx]
-                if (before == '/' && after == '/') return true
-                i = path.indexOf(Trash.DIR_NAME, i + 1)
-            }
-            return false
-        }
+        fun isTrashPath(path: String): Boolean = TRASH_PATH_REGEX.containsMatchIn(path)
     }
 
 }

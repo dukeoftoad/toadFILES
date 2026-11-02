@@ -64,6 +64,8 @@ import kotlin.coroutines.resume
 class BrowseViewModelTest {
 
     private val dispatcher = UnconfinedTestDispatcher()
+    /** Records rescan() calls (undo re-indexing, D1); keeps the class VM off the real media scanner. */
+    private val media = RecordingMedia()
     private lateinit var vm: BrowseViewModel
     private lateinit var container: com.toadfiles.app.AppContainer
     private lateinit var dir: File
@@ -73,7 +75,7 @@ class BrowseViewModelTest {
         Dispatchers.setMain(dispatcher)
         val context = ApplicationProvider.getApplicationContext<Context>()
         container = com.toadfiles.app.AppContainer(context)
-        vm = BrowseViewModel(container, ioDispatcher = dispatcher)
+        vm = BrowseViewModel(container, ioDispatcher = dispatcher, media = media)
         dir = File(context.cacheDir, "browse-${System.nanoTime()}").apply { mkdirs() }
         // The preferencesDataStore delegate is a process-wide singleton, so settings
         // written by an earlier test in THIS class leak into later ones (v1.7.3 added
@@ -411,10 +413,14 @@ class BrowseViewModelTest {
         val trashed = vm.state.value.lastTrashed!!
         assertEquals(1, trashed.size)
 
-        vm.undoDelete()
+        // The screen consumes the one-shot offer when the snackbar shows it (D2),
+        // then Undo restores the CAPTURED payload (D2/N5).
+        vm.consumeUndoOffer()
+        assertNull(vm.state.value.lastTrashed)
+        vm.undoDelete(trashed)
         await { f.exists() }
         assertEquals("precious", f.readText())
-        assertNull(vm.state.value.lastTrashed)
+        assertEquals("Restored 1 item(s)", vm.state.value.toast)
     }
 
     @Test
@@ -777,7 +783,7 @@ class BrowseViewModelTest {
         assertTrue(vm.state.value.lastTrashed!!.none { it == f })
         assertTrue(File(dir, "pack.zip").exists())
 
-        vm.undoDelete()
+        vm.undoDelete(vm.state.value.lastTrashed!!)
         await { f.exists() }
     }
 
@@ -1172,36 +1178,75 @@ class BrowseViewModelTest {
     }
 
     @Test
-    fun `confirmDelete bumps trashCount and undoDelete brings it back down`() = runTest {
-        // Bring trashCount to a known 0 baseline.
-        val f = File(dir, "trashme.txt").apply { writeText("x") }
+    fun `confirmDelete reports the honest failure count from the trash result`() = runTest {
+        // One deletable file plus one that cannot be trashed (it does not exist, and
+        // it is not a symlink either — D7's gate): the toast must count it as failed
+        // via TrashResult.failureCount, not by re-checking exists() on the sources.
+        val f = File(dir, "real.txt").apply { writeText("x") }
+        val ghost = File(dir, "ghost.txt")
         vm.openDir(dir)
-        await { vm.state.value.trashCount >= 0 }
+
+        vm.requestDelete(listOf(f, ghost))
+        vm.confirmDelete()
+
+        await { !f.exists() && vm.state.value.lastTrashed != null }
+        assertEquals("Moved 1 of 2 to trash (1 failed)", vm.state.value.toast)
+        assertEquals(1, vm.state.value.lastTrashed!!.size)
+    }
+
+    @Test
+    fun `undoDelete reports items already gone from the trash`() = runTest {
+        val f = File(dir, "gone-from-trash.txt").apply { writeText("x") }
+        vm.openDir(dir)
+        vm.requestDelete(listOf(f))
+        vm.confirmDelete()
+        await { !f.exists() && vm.state.value.lastTrashed != null }
+        val trashed = vm.state.value.lastTrashed!!
+        vm.consumeUndoOffer()
+
+        // The payload vanished from the trash between the delete and the undo —
+        // the honest toast says so instead of blaming the original location (N5).
+        trashed.delete()
+        vm.undoDelete(trashed)
+
+        await { vm.state.value.toast != null }
+        assertEquals("Restored 0 of 1 — 1 already gone", vm.state.value.toast)
+    }
+
+    @Test
+    fun `undoDelete counts collision renames and rescans the restored files`() = runTest {
+        val f = File(dir, "clash.txt").apply { writeText("old") }
+        vm.openDir(dir)
 
         vm.requestDelete(listOf(f))
         vm.confirmDelete()
         await { !f.exists() && vm.state.value.lastTrashed != null }
-        await { vm.state.value.trashCount >= 1 }
+        val trashed = vm.state.value.lastTrashed!!
+        vm.consumeUndoOffer()
 
-        vm.undoDelete()
-        await { f.exists() }
-        await { vm.state.value.trashCount == 0 }
+        // A same-named item reappeared at the origin: the restore lands as "clash (1).txt".
+        File(dir, "clash.txt").writeText("new occupant")
+        vm.undoDelete(trashed)
+
+        await { File(dir, "clash (1).txt").exists() }
+        assertEquals("Restored 1 item(s), 1 renamed", vm.state.value.toast)
+        // The restored destination was re-scanned into the media index (D1).
+        assertEquals(listOf(File(dir, "clash (1).txt").absolutePath), media.rescans.flatten())
     }
 
-    @Test
-    fun `refreshTrashCount updates the state with the current in-trash count`() = runTest {
-        // Directly drop two files into the trash folder so the next refresh picks them up.
-        val roots = container.fileRepo.roots().map { it.dir }
-        val trashDir = com.toadfiles.app.domain.Trash.dirFor(roots.first())
-        trashDir.mkdirs()
-        File(trashDir, "manually-trashed.txt").writeText("x")
-        File(trashDir, "another.txt").writeText("y")
-
-        vm.refreshTrashCount()
-
-        await { vm.state.value.trashCount >= 2 }
-        assertTrue("trashCount should be >= 2 (got ${vm.state.value.trashCount})",
-            vm.state.value.trashCount >= 2)
+    /** Media-source double that only records rescan() calls (undo re-indexing, D1). */
+    private class RecordingMedia : com.toadfiles.app.data.MediaQuerySource {
+        val rescans = mutableListOf<List<String>>()
+        override fun rescan(paths: List<String>) {
+            rescans += paths
+        }
+        override fun list(
+            category: com.toadfiles.app.domain.FileCategory,
+            limit: Int,
+        ): List<com.toadfiles.app.data.MediaRepository.MediaEntry> = emptyList()
+        override fun recent(limit: Int): List<com.toadfiles.app.data.MediaRepository.MediaEntry> = emptyList()
+        override fun summaries(): List<com.toadfiles.app.domain.CategorySummary> = emptyList()
+        override fun deleteStale(entries: List<com.toadfiles.app.data.MediaRepository.MediaEntry>): Int = 0
     }
 
     // -------------------------------------------------------------------------

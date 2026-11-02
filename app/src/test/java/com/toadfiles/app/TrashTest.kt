@@ -516,4 +516,134 @@ class TrashTest {
             Trash.onAfterPendingWrite = null
         }
     }
+
+    // ---------- D7: dangling symlinks are real payloads ----------
+
+    /** exists() follows links, so a dangling symlink used to be untrashable; its path
+     *  still names a restorable link (renameTo moves the link itself). */
+    @Test
+    fun `a dangling symlink can be trashed and restore puts the link back`() {
+        val vol = volume()
+        val target = File(vol, "gone-target.txt") // never created — the link dangles
+        val link = File(vol, "dangling-link.txt")
+        try {
+            java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath())
+        } catch (_: Exception) {
+            org.junit.Assume.assumeTrue("filesystem does not support symbolic links", false)
+        }
+
+        val result = Trash.trash(listOf(link), listOf(vol))
+
+        assertEquals(1, result.moved.size)
+        assertEquals(0, result.failureCount)
+        assertTrue(
+            "the link itself must now be inside the trash",
+            java.nio.file.Files.exists(result.moved[0].toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS),
+        )
+
+        // A dangling-link payload is still a payload: listed…
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(1, entries.size)
+        // …and restorable as the LINK, not its (nonexistent) target.
+        val restored = Trash.restore(result.moved[0])
+        assertNotNull(restored)
+        assertTrue(java.nio.file.Files.isSymbolicLink(restored!!.toPath()))
+        assertEquals(target.toPath(), java.nio.file.Files.readSymbolicLink(restored.toPath()))
+    }
+
+    // ---------- D8: sidecar schema survives hostile filenames ----------
+
+    @Test
+    fun `a filename with a newline survives the sidecar round-trip`() {
+        val vol = volume()
+        val src = File(vol, "line\nbreak.txt").apply { writeText("data") }
+
+        val trashed = Trash.trash(listOf(src), listOf(vol))
+
+        assertEquals(1, trashed.moved.size)
+        // The origin is stored URL-encoded: no raw newline may leak into the schema.
+        val sidecar = sidecarOf(trashed.moved[0])
+        assertFalse(sidecar.readText().contains("line\nbreak"))
+        assertTrue(sidecar.readText().contains(java.net.URLEncoder.encode(src.absolutePath, "UTF-8")))
+
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(1, entries.size)
+        assertEquals(src.absolutePath, entries[0].originPath)
+
+        val restored = Trash.restore(trashed.moved[0])
+        assertNotNull(restored)
+        assertEquals(src.absolutePath, restored!!.absolutePath)
+        assertEquals("data", src.readText())
+    }
+
+    /** Legacy sidecars (written before the encoding) store the raw path — a literal
+     *  '+' or '%' in an old origin must not be decoded into something else. */
+    @Test
+    fun `legacy sidecars with raw paths still restore, including plus signs`() {
+        val vol = volume()
+        val origin = File(vol, "plus + space.txt").apply { writeText("old") }
+        val dir = trashDir(vol).apply { mkdirs() }
+        metaDir(vol).mkdirs()
+        val payload = File(dir, "555_plus.txt").apply { writeText("data") }
+        File(metaDir(vol), "555_plus.txt.tfmeta")
+            .writeText("origin=${origin.absolutePath}\ntrashedAt=555")
+
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(origin.absolutePath, entries[0].originPath)
+
+        val restored = Trash.restore(payload)
+        assertNotNull(restored)
+        assertEquals(origin.absolutePath, restored!!.absolutePath)
+        assertEquals("old", origin.readText())
+    }
+
+    // ---------- D9: near-limit filename lengths ----------
+
+    @Test
+    fun `a file with a near-limit 250-character name can be trashed and restored`() {
+        val vol = volume()
+        val longName = "x".repeat(246) + ".txt" // 250 bytes, just under the 255-byte cap
+        val src = File(vol, longName).apply { writeText("long") }
+
+        val result = Trash.trash(listOf(src), listOf(vol))
+
+        assertEquals(1, result.moved.size)
+        assertFalse(src.exists())
+        // The payload name was truncated (with the stamp and sidecar suffixes kept
+        // inside the 255-byte filesystem cap), but that is invisible to users…
+        val payloadName = result.moved[0].name
+        assertTrue(payloadName.toByteArray(Charsets.UTF_8).size <= 240)
+        assertTrue(payloadName.length < longName.length)
+        // …because the display name and restore destination come from the sidecar origin.
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(1, entries.size)
+        assertEquals(src.absolutePath, entries[0].originPath)
+        val restored = Trash.restore(result.moved[0])
+        assertNotNull(restored)
+        assertEquals(longName, restored!!.name)
+        assertEquals("long", restored.readText())
+    }
+
+    // ---------- D10: unknown trashed-at is never treated as "30 days old" ----------
+
+    @Test
+    fun `meta-less payload with an old mtime is listed but never auto-purged`() {
+        val vol = volume()
+        val dir = trashDir(vol).apply { mkdirs() }
+        metaDir(vol).mkdirs()
+        // A payload that lost its sidecar; rename preserved its ancient mtime.
+        val payload = File(dir, "123_lost-meta.txt").apply { writeText("precious") }
+        payload.setLastModified(System.currentTimeMillis() - 40L * 24 * 60 * 60 * 1000)
+
+        assertEquals("purge must skip unknown-age items", 0, Trash.purge(listOf(vol)))
+
+        val entries = Trash.entries(listOf(vol))
+        assertEquals(1, entries.size)
+        assertEquals("", entries[0].originPath)
+        assertEquals(0L, entries[0].trashedAt)
+
+        // Still manually deletable.
+        assertTrue(Trash.deleteForever(payload))
+        assertTrue(Trash.entries(listOf(vol)).isEmpty())
+    }
 }
