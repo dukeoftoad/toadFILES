@@ -1,10 +1,13 @@
 package com.toadfiles.app
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -61,11 +64,13 @@ class AppearanceScreenTest {
         }
     }
 
-    /** Waits until the Navigation card's rows are on screen. */
+    /** Waits for the Navigation card, then scrolls it into view (it sits below the fold
+     *  of the screen's scrollable column — the accent LazyRow is the other scrollable). */
     private fun awaitNavigationCard() {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Navigation Style").fetchSemanticsNodes().isNotEmpty()
         }
+        compose.onAllNodes(hasScrollAction())[0].performScrollToNode(hasText("Navigation Style"))
     }
 
     @Test
