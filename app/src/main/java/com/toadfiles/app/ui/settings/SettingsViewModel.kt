@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppIconColor
+import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
@@ -14,6 +16,7 @@ import com.toadfiles.app.domain.ZipOpenAction
 import com.toadfiles.app.data.ThemeMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -55,4 +58,20 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.settingsRepo.setArchiveFolder(path) }
 
     fun removeFavorite(path: String) = viewModelScope.launch { container.settingsRepo.toggleFavorite(path) }
+
+    // ---- v1.9: app icon ----
+
+    /** Persists the design, then re-applies the launcher alias so the home screen picks it up. */
+    fun setAppIconDesign(design: AppIconDesign) = viewModelScope.launch {
+        container.settingsRepo.setAppIconDesign(design)
+        val s = container.settingsRepo.settings.first()
+        container.iconSwitcher.apply(s.appIconDesign, s.appIconColor)
+    }
+
+    /** Persists the background tint, then re-applies the launcher alias. */
+    fun setAppIconColor(color: AppIconColor) = viewModelScope.launch {
+        container.settingsRepo.setAppIconColor(color)
+        val s = container.settingsRepo.settings.first()
+        container.iconSwitcher.apply(s.appIconDesign, s.appIconColor)
+    }
 }

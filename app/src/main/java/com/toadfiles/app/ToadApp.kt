@@ -9,10 +9,13 @@ import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.SettingsRepository
+import com.toadfiles.app.domain.AppIconSwitcher
+import com.toadfiles.app.domain.PackageManagerAppIconSwitcher
 import com.toadfiles.app.domain.Trash
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Tiny hand-rolled DI container. No framework, no reflection. */
@@ -21,6 +24,8 @@ class AppContainer(context: Context) {
     val fileRepo = FileRepository(context)
     val mediaRepo = MediaRepository(context)
     val settingsRepo = SettingsRepository(context)
+    /** Applies the saved launcher-icon choice to the manifest activity-aliases. */
+    val iconSwitcher: AppIconSwitcher = PackageManagerAppIconSwitcher(context)
     val clipboard = Clipboard()
 }
 
@@ -35,6 +40,13 @@ class ToadApp : Application() {
         container.appScope.launch(Dispatchers.IO) {
             val roots = container.fileRepo.roots().map { it.dir }
             Trash.purge(roots)
+        }
+        // Re-apply the saved launcher icon: enable the saved (design, color) alias and
+        // disable the other 35, so a fresh install or restored backup shows the right
+        // icon even before the user opens Appearance.
+        container.appScope.launch(Dispatchers.IO) {
+            val s = container.settingsRepo.settings.first()
+            container.iconSwitcher.apply(s.appIconDesign, s.appIconColor)
         }
     }
 }

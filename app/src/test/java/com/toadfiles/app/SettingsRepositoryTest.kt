@@ -8,6 +8,8 @@ import com.toadfiles.app.data.SettingsRepository
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppIconColor
+import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.NavStyle
@@ -654,5 +656,40 @@ class SettingsRepositoryTest {
         }
 
         assertEquals(mapOf("/vol/A2" to 3, "/vol/B" to 1), repo.folderUses.value)
+    }
+
+    // ---- v1.9: app icon ----
+
+    @Test
+    fun `app icon defaults to CLASSIC and GREEN on first launch`() = runTest {
+        val s = newRepo().settings.first()
+        assertEquals(AppIconDesign.CLASSIC, s.appIconDesign)
+        assertEquals(AppIconColor.GREEN, s.appIconColor)
+    }
+
+    @Test
+    fun `setAppIconDesign and setAppIconColor round-trip over all entries`() = runTest {
+        val repo = newRepo()
+        AppIconDesign.entries.forEach { d ->
+            repo.setAppIconDesign(d)
+            assertEquals(d, repo.settings.first().appIconDesign)
+        }
+        AppIconColor.entries.forEach { c ->
+            repo.setAppIconColor(c)
+            assertEquals(c, repo.settings.first().appIconColor)
+        }
+    }
+
+    @Test
+    fun `corrupt app icon values fall back to CLASSIC and GREEN`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit {
+            it[stringPreferencesKey("app_icon_design")] = "NOPE"
+            it[stringPreferencesKey("app_icon_color")] = "ALSO_NOT_REAL"
+        }
+        val s = repo.settings.first()
+        assertEquals(AppIconDesign.CLASSIC, s.appIconDesign)
+        assertEquals(AppIconColor.GREEN, s.appIconColor)
     }
 }
