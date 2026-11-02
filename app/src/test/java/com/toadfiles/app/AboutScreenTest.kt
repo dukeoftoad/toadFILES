@@ -21,11 +21,13 @@ import org.robolectric.annotation.Config
  *
  * Coverage:
  *  - the screen renders with the app name and version label
- *  - the updates, changelog and credits sections appear
- *  - the storage / files-on-device data cards are GONE (v1.8.1: they live on Home
- *    and the Storage page instead) and the changelog is cut to the last 2 updates
+ *  - the Capabilities, Permissions and Source & project cards appear, with the repo link
+ *  - the storage / files-on-device data cards are GONE (v1.8.1: they live on Home and the
+ *    Storage page instead)
+ *  - the What's new card renders the changelog parsed from the bundled CHANGELOG.md asset
+ *    (the "See all changes" action only exists once the parse succeeded) — no version
+ *    strings are pinned here, so the test survives every release bump
  *  - the update panel shows its "Check for updates" action in the Idle state
- *  - the changelog "What's new" heading renders
  *  - the OSS credits "Open-source credits" heading renders
  */
 @RunWith(AndroidJUnit4::class)
@@ -65,14 +67,29 @@ class AboutScreenTest {
         }
         assert(compose.onAllNodesWithText("Storage on this device").fetchSemanticsNodes().isEmpty())
         assert(compose.onAllNodesWithText("Files on this device").fetchSemanticsNodes().isEmpty())
-        // The changelog shows the latest TWO updates only (v1.8.1, v1.8.0), not the
-        // full history.
+        // The What's new card previews the bundled changelog: "See all changes" renders
+        // only after the asset was parsed, so this doubles as an asset-bundling check.
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("v1.8.1").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("See all changes").fetchSemanticsNodes().isNotEmpty()
         }
-        assert(compose.onAllNodesWithText("v1.8.0").fetchSemanticsNodes().isNotEmpty())
-        assert(compose.onAllNodesWithText("v1.7.5").fetchSemanticsNodes().isEmpty())
-        assert(compose.onAllNodesWithText("v1.6.0").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `About shows the Capabilities, Permissions and Source cards`() {
+        render()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Capabilities").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Permissions").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Source & project").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Source code · github.com/dukeoftoad/toadFILES")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test
