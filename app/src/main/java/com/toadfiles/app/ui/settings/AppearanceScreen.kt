@@ -24,8 +24,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,6 +42,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +59,8 @@ import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
+import com.toadfiles.app.domain.BackKeyAction
+import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.theme.AccentPalettes
 import com.toadfiles.app.ui.theme.AppIconPalettes
 
@@ -60,6 +68,11 @@ import com.toadfiles.app.ui.theme.AppIconPalettes
  * Dedicated Appearance subpage (v1.7.3): theme mode, dynamic color and accent color
  * moved out of the main Settings list. The main Settings screen keeps a single
  * "Appearance" card that navigates here.
+ *
+ * The Back Key Action and Navigation Style preferences joined from the main Settings
+ * "General" section: they shape how the app looks and moves, so they live with the
+ * other look-and-feel choices. They reuse the same SettingsViewModel setters, so the
+ * DataStore keys (nav_style, back_key_action) and all behavior are unchanged.
  *
  * Route "appearance" is registered in ToadNavHost; Settings navigates here via its
  * onOpenAppearance callback (v1.7.3 integration).
@@ -168,6 +181,32 @@ fun AppearanceScreen(
                             )
                         }
                     }
+                }
+            }
+            Spacer(Modifier.height(32.dp))
+
+            Text("Navigation", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    ChoiceRow(
+                        title = "Back Key Action",
+                        subtitle = "What the system back key does while browsing folders",
+                        choices = BackKeyAction.entries,
+                        selected = settings.backKeyAction,
+                        label = ::backKeyLabel,
+                        onSelect = { vm.setBackKeyAction(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    ChoiceRow(
+                        title = "Navigation Style",
+                        subtitle = "Bottom bar tabs or a side menu for moving between screens",
+                        choices = NavStyle.entries,
+                        selected = settings.navStyle,
+                        label = ::navStyleLabel,
+                        onSelect = { vm.setNavStyle(it) },
+                    )
                 }
             }
             Spacer(Modifier.height(32.dp))
@@ -294,6 +333,67 @@ private fun IconDesignTile(
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * Label + explanatory subtitle + current value + dropdown, opened by tapping the row.
+ * The Appearance-tab twin of the ChoiceRow used on the main Settings list, restyled to
+ * this page's card idiom (no tonal icon chip).
+ */
+@Composable
+private fun <T> ChoiceRow(
+    title: String,
+    subtitle: String,
+    choices: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { open = true }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            label(selected),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Icon(
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            choices.forEach { c ->
+                DropdownMenuItem(
+                    text = { Text(label(c)) },
+                    onClick = { onSelect(c); open = false },
+                )
+            }
+        }
+    }
+}
+
+private fun backKeyLabel(action: BackKeyAction) = when (action) {
+    BackKeyAction.PARENT -> "Back To Parent Folder"
+    BackKeyAction.EXIT -> "Exit App"
+}
+
+private fun navStyleLabel(style: NavStyle) = when (style) {
+    NavStyle.BOTTOM_BAR -> "Bottom Bar"
+    NavStyle.SIDE_MENU -> "Side Menu"
 }
 
 /** One background-tint swatch; mirrors [AccentSwatch]'s selection treatment. */
