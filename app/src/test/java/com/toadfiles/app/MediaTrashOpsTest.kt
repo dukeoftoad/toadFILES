@@ -75,7 +75,7 @@ class MediaTrashOpsTest {
 
         assertEquals(1, result.noPathCount)
         // Only the file with a real path reaches the trash pipeline.
-        assertEquals(listOf(live.absolutePath), double.calls.single())
+        assertEquals(listOf(live.absolutePath), double.calls.single().map { it.absolutePath })
         assertTrue(result.staleEntries.isEmpty())
         assertTrue(result.failedEntries.isEmpty())
     }
@@ -92,7 +92,7 @@ class MediaTrashOpsTest {
 
         // Only the real file was offered to the trash. The stale entry (moved or renamed
         // outside the app) landed in NO outcome bucket that would trash or row-drop it.
-        assertEquals(listOf(live.absolutePath), double.calls.single())
+        assertEquals(listOf(live.absolutePath), double.calls.single().map { it.absolutePath })
         assertEquals(listOf(staleEntry), result.staleEntries)
         assertEquals(listOf(liveEntry), result.movedEntries)
         assertTrue(result.failedEntries.isEmpty())
@@ -114,7 +114,7 @@ class MediaTrashOpsTest {
             double,
         )
 
-        assertEquals(listOf(link.absolutePath), double.calls.single())
+        assertEquals(listOf(link.absolutePath), double.calls.single().map { it.absolutePath })
         assertTrue(result.staleEntries.isEmpty())
         assertEquals(listOf("file1.txt"), result.movedEntries.map { it.name })
     }
