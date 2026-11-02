@@ -156,6 +156,31 @@ class CategoriesViewModel(
             if (token != summariesSeq) return@launch // superseded by a newer refresh
             _state.update { it.copy(summaries = summaries, loading = false) }
         }
+        // Pull-to-refresh with a category open must also re-query the visible drill-in
+        // list in place — the same shared entriesSeq/entriesJob race guard as open(),
+        // but without clearing the rows or raising entriesLoading: the current entries
+        // stay on screen until the fresh list lands.
+        val selected = _state.value.selected
+        if (selected != null) {
+            val entriesToken = ++entriesSeq
+            entriesJob?.cancel()
+            entriesJob = viewModelScope.launch(ioDispatcher) {
+                val entries = runCatching { media.list(selected, limit = QUERY_LIMIT) }.getOrDefault(emptyList())
+                _state.update { s ->
+                    // Rapid category switches can finish out of order — apply only when
+                    // this is still the newest query for the category still on screen
+                    // (a newer open() bumps entriesSeq and discards this result, and
+                    // this leg's bump discards a still-in-flight open() query).
+                    if (entriesToken != entriesSeq || s.selected != selected) return@update s
+                    s.copy(
+                        entries = sortEntries(entries),
+                        entriesLoading = false,
+                        // Recent's selection prune: keep only uris that survived the refresh.
+                        selection = s.selection.intersect(entries.map { it.uri.toString() }.toSet()),
+                    )
+                }
+            }
+        }
     }
 
     fun open(category: FileCategory) {
