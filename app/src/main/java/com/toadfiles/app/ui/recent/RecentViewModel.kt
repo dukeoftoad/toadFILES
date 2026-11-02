@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.nio.file.Files
 
 data class RecentUiState(
     /** Active type filter; null = All. */
@@ -152,7 +153,8 @@ class RecentViewModel(
             val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
             val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            val result = withPath.filter { (_, f) -> f.exists() }
+            // exists() follows symlinks — a dangling link is still trashable (D7).
+            val result = withPath.filter { (_, f) -> f.exists() || Files.isSymbolicLink(f.toPath()) }
                 .map { (_, f) -> f }
                 .let { Trash.trash(it, roots) }
             container.mediaRepo.deleteStale(entries)

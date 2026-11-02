@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val fileRepo = FileRepository(context)
-    val mediaRepo = MediaRepository(context.contentResolver)
+    val mediaRepo = MediaRepository(context)
     val settingsRepo = SettingsRepository(context)
     /** Applies the saved launcher-icon choice to the manifest activity-aliases. */
     val iconSwitcher: AppIconSwitcher = PackageManagerAppIconSwitcher(context)
