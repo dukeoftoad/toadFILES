@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bold friendly toad face (toadFILES app icon option). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M43,46 m-8,0 a8,8 0 1 1 16,0 a8,8 0 1 1 -16,0" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M65,46 m-8,0 a8,8 0 1 1 16,0 a8,8 0 1 1 -16,0" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M54,61 m-19,0 a19,19 0 1 1 38,0 a19,19 0 1 1 -38,0" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M43,46 m-3,0 a3,3 0 1 1 6,0 a3,3 0 1 1 -6,0" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M65,46 m-3,0 a3,3 0 1 1 6,0 a3,3 0 1 1 -6,0" />
+    <path
+        android:strokeColor="#2E4D2B"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M45,66 Q54,72 63,66" />
+    <path
+        android:fillColor="#6FAF63"
+        android:pathData="M36,63 m-2,0 a2,2 0 1 1 4,0 a2,2 0 1 1 -4,0" />
+    <path
+        android:fillColor="#6FAF63"
+        android:pathData="M72,63 m-2,0 a2,2 0 1 1 4,0 a2,2 0 1 1 -4,0" />
+</vector>

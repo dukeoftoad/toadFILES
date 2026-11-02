@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Crowned toad (toadFILES app icon option). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F2C94C"
+        android:pathData="M42,42 L42,30 L49,35 L54,24 L59,35 L66,30 L66,42 Z" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M43,48 m-7.5,0 a7.5,7.5 0 1 1 15.0,0 a7.5,7.5 0 1 1 -15.0,0" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M65,48 m-7.5,0 a7.5,7.5 0 1 1 15.0,0 a7.5,7.5 0 1 1 -15.0,0" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M54,62 m-18,0 a18,18 0 1 1 36,0 a18,18 0 1 1 -36,0" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M43,48 m-2.8,0 a2.8,2.8 0 1 1 5.6,0 a2.8,2.8 0 1 1 -5.6,0" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M65,48 m-2.8,0 a2.8,2.8 0 1 1 5.6,0 a2.8,2.8 0 1 1 -5.6,0" />
+    <path
+        android:strokeColor="#2E4D2B"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M46,67 Q54,72 62,67" />
+    <path
+        android:fillColor="#6FAF63"
+        android:pathData="M37,65 m-2,0 a2,2 0 1 1 4,0 a2,2 0 1 1 -4,0" />
+    <path
+        android:fillColor="#6FAF63"
+        android:pathData="M71,65 m-2,0 a2,2 0 1 1 4,0 a2,2 0 1 1 -4,0" />
+</vector>

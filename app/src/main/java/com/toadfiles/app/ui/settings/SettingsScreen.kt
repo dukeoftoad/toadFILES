@@ -126,7 +126,7 @@ fun SettingsScreen(
                 NavigationRow(
                     icon = Icons.Outlined.Palette,
                     title = "Appearance",
-                    subtitle = "Theme, Dynamic Color, Accent Color",
+                    subtitle = "Theme, colors, app icon",
                     onClick = { onOpenAppearance?.invoke() },
                 )
             }

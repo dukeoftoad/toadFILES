@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="icon_bg_green">#EAF4E4</color>
+    <color name="icon_bg_teal">#D8EFEB</color>
+    <color name="icon_bg_blue">#DCE9F9</color>
+    <color name="icon_bg_lilac">#E7E0F6</color>
+    <color name="icon_bg_amber">#FAEED2</color>
+    <color name="icon_bg_rose">#F9E0E6</color>
+</resources>
