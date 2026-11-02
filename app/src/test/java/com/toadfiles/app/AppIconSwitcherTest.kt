@@ -66,7 +66,7 @@ class AppIconSwitcherTest {
                 assertTrue(cn.className.startsWith("${context.packageName}.Launcher"))
                 // Every mapped component must be a real activity-alias in the merged
                 // manifest — this is what keeps the rule in sync with AndroidManifest.
-                assertNotNull("no manifest alias for ${cn.className}", pm.getActivity(cn))
+                assertNotNull("no manifest alias for ${cn.className}", pm.getActivity(cn, 0))
                 classNames += cn.className
             }
         }
