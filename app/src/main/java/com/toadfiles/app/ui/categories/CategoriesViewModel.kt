@@ -14,6 +14,7 @@ import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileOps
+import com.toadfiles.app.domain.MediaTrashOps
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.PathSafety
@@ -248,34 +249,26 @@ class CategoriesViewModel(
     fun dismissDelete() = _state.update { it.copy(pendingDelete = null) }
 
     /**
-     * Moves the chosen media entries into the real toadFILES trash using their on-disk
-     * paths, then drops the now-stale MediaStore rows so they disappear immediately
-     * instead of waiting for the next media scan. Entries without a path are reported,
-     * never silently dropped. Full success is reported by the screen's Undo snackbar
-     * (like Browse) instead of a plain toast.
+     * Moves the chosen media entries into the real toadFILES trash through the shared
+     * [MediaTrashOps] pipeline, then drops the rows of exactly the entries that moved
+     * so they disappear immediately instead of waiting for the next media scan.
+     * Entries without a path, and entries whose cached path is stale (moved or renamed
+     * outside the app), are skipped and reported — never trashed, never row-dropped
+     * (the row's current DATA may point at a real file). Full success is reported by
+     * the screen's Undo snackbar (like Browse) instead of a plain toast.
      */
     fun confirmDelete() {
         val entries = _state.value.pendingDelete ?: return
         _state.update { it.copy(pendingDelete = null, selection = emptySet()) }
         viewModelScope.launch(ioDispatcher) {
-            val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
-            val noPath = entries.size - withPath.size
             val roots = container.fileRepo.roots().map { it.dir }
-            // exists() follows symlinks — a dangling link is still trashable (D7).
-            val result = withPath.filter { (_, f) -> f.exists() || Files.isSymbolicLink(f.toPath()) }
-                .map { (_, f) -> f }
-                .let { Trash.trash(it, roots) }
-            container.mediaRepo.deleteStale(entries)
-            val ok = result.moved.size
+            val result = MediaTrashOps.deleteToTrash(entries, roots)
+            media.deleteStale(result.movedEntries)
             _state.update {
                 it.copy(
-                    lastTrashed = result.moved.takeIf { t -> t.isNotEmpty() },
+                    lastTrashed = result.movedFiles.takeIf { t -> t.isNotEmpty() },
                     undoOfferSeq = ++undoOfferId,
-                    toast = when {
-                        ok == entries.size -> null // the undo snackbar reports success
-                        noPath > 0 -> "Moved $ok to trash · $noPath had no on-disk path"
-                        else -> "Moved $ok of ${entries.size} to trash"
-                    },
+                    toast = MediaTrashOps.toastFor(result),
                 )
             }
             _state.value.selected?.let { open(it) }
