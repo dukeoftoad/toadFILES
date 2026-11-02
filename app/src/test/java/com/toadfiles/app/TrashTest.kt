@@ -587,6 +587,8 @@ class TrashTest {
         val payload = File(dir, "555_plus.txt").apply { writeText("data") }
         File(metaDir(vol), "555_plus.txt.tfmeta")
             .writeText("origin=${origin.absolutePath}\ntrashedAt=555")
+        // The original was "moved into the trash" — only the payload copy remains.
+        origin.delete()
 
         val entries = Trash.entries(listOf(vol))
         assertEquals(origin.absolutePath, entries[0].originPath)
@@ -594,7 +596,7 @@ class TrashTest {
         val restored = Trash.restore(payload)
         assertNotNull(restored)
         assertEquals(origin.absolutePath, restored!!.absolutePath)
-        assertEquals("old", origin.readText())
+        assertEquals("data", origin.readText())
     }
 
     // ---------- D9: near-limit filename lengths ----------
