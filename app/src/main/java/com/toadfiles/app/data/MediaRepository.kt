@@ -192,8 +192,20 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
     }
 
     /**
-     * Removes MediaStore rows whose on-disk file no longer exists (e.g. after toadFILES
-     * moved them to the trash — the index only catches up on the next media scan).
+     * Drops MediaStore rows whose backing file is really gone — row hygiene after a
+     * trash batch and the capped ghost cleanup in [list]/[recent].
+     *
+     * Two-path guard (trash-reliability fix): a row is only deleted when BOTH the
+     * entry's cached DATA path AND the row's CURRENT DATA value (re-queried per row,
+     * one projection query, best-effort) name missing files. The cached path can be
+     * stale — e.g. this app renamed the file via the File API and the provider updated
+     * the row — so deleting on the cached path alone used to remove rows pointing at
+     * real, live files (and with all-files access, `resolver.delete` destroyed that
+     * file: data loss). When the re-query fails, the row is gone or its DATA is unset,
+     * the outcome is inconclusive and the row is KEPT — the media scanner reconciles
+     * it eventually. Rows whose file lives inside the trash folder always survive:
+     * that file still exists.
+     *
      * Best-effort: rows we are not allowed to touch are skipped, never crash.
      * Returns how many rows were dropped.
      */
@@ -202,6 +214,13 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
         for (e in entries) {
             val path = e.data ?: continue
             if (File(path).exists()) continue
+            // Re-check the row's CURRENT path before touching it (see KDoc): deleting a
+            // row makes the provider drop the file it currently points at.
+            val current = runCatching {
+                resolver.query(e.uri, arrayOf(MediaStore.Files.FileColumns.DATA), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            }.getOrNull()
+            if (current == null || File(current).exists()) continue // inconclusive or live: keep the row
             try {
                 if (resolver.delete(e.uri, null, null) > 0) dropped++
             } catch (_: Exception) {
