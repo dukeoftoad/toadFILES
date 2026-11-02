@@ -7,7 +7,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollBy
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
@@ -101,7 +100,8 @@ class HomeScreenTest {
         // Home's Recent section sits below the fold of the LazyColumn — scroll the
         // list (the first scrollable; the chips row is a second, composed off-screen
         // via prefetch) all the way down so the section is actually composed.
-        compose.onAllNodes(hasScrollAction())[0].performScrollBy(10_000f)
+        compose.onAllNodes(hasScrollAction())[0]
+            .performScrollToNode(hasText("notes.txt"))
         // The settled feed shows its two docs — "All" + every category chip render.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
