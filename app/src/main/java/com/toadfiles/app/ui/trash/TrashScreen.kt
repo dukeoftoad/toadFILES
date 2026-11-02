@@ -165,6 +165,7 @@ fun TrashScreen(
                         e = e,
                         selected = e.file.absolutePath in state.selection,
                         selectionMode = state.selection.isNotEmpty(),
+                        canRestore = e.originPath.isNotEmpty(),
                         onRestore = { vm.restore(e) },
                         onDelete = { vm.requestDeleteForever(e) },
                         onToggle = { vm.toggleSelection(e) },
@@ -220,6 +221,10 @@ private fun TrashRow(
     e: TrashEntry,
     selected: Boolean,
     selectionMode: Boolean,
+    /** False when the entry lost its metadata: restore can never succeed (there is
+     *  no origin to return to), so the affordance is not even offered (D6). Delete
+     *  forever stays available. */
+    canRestore: Boolean,
     onRestore: () -> Unit,
     onDelete: () -> Unit,
     onToggle: () -> Unit,
@@ -230,7 +235,7 @@ private fun TrashRow(
             .combinedClickable(
                 // Long-press enters selection mode (same affordance as Browse/Recent).
                 onLongClick = onToggle,
-                onClick = { if (selectionMode) onToggle() else onRestore() },
+                onClick = { if (selectionMode) onToggle() else if (canRestore) onRestore() },
             )
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -270,7 +275,9 @@ private fun TrashRow(
             )
         }
         if (!selectionMode) {
-            IconButton(onClick = onRestore) { Icon(Icons.Outlined.Restore, "Restore") }
+            if (canRestore) {
+                IconButton(onClick = onRestore) { Icon(Icons.Outlined.Restore, "Restore") }
+            }
             IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteForever, "Delete forever") }
         } else if (selected) {
             Icon(

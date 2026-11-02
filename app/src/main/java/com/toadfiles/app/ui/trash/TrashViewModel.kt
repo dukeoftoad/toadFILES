@@ -3,6 +3,7 @@ package com.toadfiles.app.ui.trash
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
+import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -31,6 +32,9 @@ data class TrashUiState(
 class TrashViewModel(
     private val container: AppContainer,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Injectable for tests; production uses the container's MediaStore-backed repository
+     *  (a restore re-scans the restored files back into the media index). */
+    private val media: MediaQuerySource = container.mediaRepo,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TrashUiState())
@@ -61,15 +65,47 @@ class TrashViewModel(
 
     fun restore(entry: TrashEntry) {
         viewModelScope.launch(ioDispatcher) {
-            val ok = Trash.restore(entry.file) != null
+            val dest = Trash.restore(entry.file)
             _state.update {
                 it.copy(
-                    toast = if (ok) "Restored \"${entry.originPath.substringAfterLast('/')}\""
-                    else "Could not restore — the original location is unavailable",
+                    toast = if (dest == null) {
+                        "Could not restore — the original location is unavailable"
+                    } else {
+                        restoreToast(
+                            dest = dest,
+                            originalName = entry.originPath.substringAfterLast('/'),
+                            originParent = entry.originPath.substringBeforeLast('/', ""),
+                        )
+                    },
                 )
             }
+            // A trashed file's MediaStore row is long gone — only a scan brings the
+            // restored file back into Recent/Categories and galleries (D1).
+            if (dest != null) media.rescan(listOf(dest.absolutePath))
             refresh()
         }
+    }
+
+    /** Honest restore copy (D3/D4): names a collision rename ("name (1).ext") and/or
+     *  the volume-root fallback when the original folder could not be recreated. */
+    private fun restoreToast(dest: File, originalName: String, originParent: String): String {
+        val renamed = dest.name != originalName
+        val fellBack = dest.parentFile?.absolutePath != originParent.ifEmpty { "/" }
+        return when {
+            renamed && fellBack ->
+                "Restored as \"${dest.name}\" — original folder unavailable, saved to ${shortPath(dest.parent)}"
+            renamed -> "Restored as \"${dest.name}\""
+            fellBack ->
+                "Restored \"$originalName\" — original folder unavailable, saved to ${shortPath(dest.parent)}"
+            else -> "Restored \"$originalName\""
+        }
+    }
+
+    /** Short display form of a path for toasts: the last two segments when it is long. */
+    private fun shortPath(path: String?): String {
+        if (path == null) return ""
+        val segments = path.split('/').filter { it.isNotEmpty() }
+        return if (segments.size <= 2) path else "…/${segments.takeLast(2).joinToString("/")}"
     }
 
     /** Permanent deletion must be confirmed first — there is no undo for this. */
@@ -109,16 +145,30 @@ class TrashViewModel(
         it.copy(selection = it.entries.mapTo(mutableSetOf()) { e -> e.file.absolutePath })
     }
 
+    /** Batch restore never destroys data — no confirmation needed. The selection is
+     *  cleared synchronously BEFORE the work launches (like [confirmBatchDeleteForever])
+     *  so a double-tap can never relaunch the same batch (N2). Renames and rescans are
+     *  surfaced per D4/D1. */
     fun requestBatchRestore() {
         val selected = selectedEntries()
         if (selected.isEmpty()) return
+        _state.update { it.copy(selection = emptySet()) }
         viewModelScope.launch(ioDispatcher) {
-            val restored = selected.count { Trash.restore(it.file) != null }
+            var restored = 0
+            var renamed = 0
+            val restoredPaths = mutableListOf<String>()
+            for (e in selected) {
+                val dest = Trash.restore(e.file) ?: continue
+                restored++
+                if (dest.name != e.originPath.substringAfterLast('/')) renamed++
+                restoredPaths += dest.absolutePath
+            }
+            media.rescan(restoredPaths)
+            val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
             _state.update {
                 it.copy(
-                    selection = emptySet(),
-                    toast = if (restored == selected.size) "Restored $restored item(s)"
-                    else "Restored $restored of ${selected.size} — some original locations are unavailable",
+                    toast = if (restored == selected.size) "Restored $restored item(s)$renamedNote"
+                    else "Restored $restored of ${selected.size} — some original locations are unavailable$renamedNote",
                 )
             }
             refresh()
@@ -157,7 +207,15 @@ class TrashViewModel(
         _state.update { it.copy(confirmingEmpty = false) }
         viewModelScope.launch(ioDispatcher) {
             val removed = Trash.empty(volumeRoots)
-            _state.update { it.copy(toast = "Trash emptied — $removed item(s) removed forever") }
+            // "Empty" can fail per item (a payload the filesystem refuses to delete);
+            // report what is actually left instead of claiming success (D5).
+            val remaining = Trash.entries(volumeRoots).size
+            _state.update {
+                it.copy(
+                    toast = if (remaining > 0) "Couldn't empty trash — $remaining item(s) couldn't be deleted"
+                    else "Trash emptied — $removed item(s) removed forever",
+                )
+            }
             refresh()
         }
     }

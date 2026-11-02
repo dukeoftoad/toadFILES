@@ -147,8 +147,12 @@ class CategoriesViewModelTest {
             )
             assertTrue(trashDir.listFiles()?.any { it.name.endsWith(src.name) } == true)
 
-            // Undo puts it right back where it was.
-            vm.undoDelete()
+            // Undo puts it right back where it was: the screen consumes the one-shot
+            // offer when the snackbar shows it, then restores the captured payload (D2/N5).
+            val trashed = vm.state.value.lastTrashed!!
+            vm.consumeUndoOffer()
+            assertNull(vm.state.value.lastTrashed)
+            vm.undoDelete(trashed)
             await { vm.state.value.toast == "Restored 1 item(s)" }
             assertTrue(src.exists())
         } finally {
