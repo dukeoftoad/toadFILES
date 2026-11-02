@@ -6,6 +6,13 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-11-03
+
+The final release of toadFILES — the app now ships an in-app What's New
+changelog, a rebuilt About page and relocated navigation settings, plus
+trash and pull-to-refresh reliability fixes. Supersedes v1.9.0 as the
+latest version.
+
 ### Added
 - **What's New page**: a full in-app changelog fed by this file, which is now bundled
   into every APK at build time (Gradle `syncChangelog` copies the repo-root
@@ -48,9 +55,18 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
   bullets) with a "See all changes" jump to the full page; the duplicated hand-written
   changelog list was deleted.
 
+### Fixed
+- **Trash & Recent**: deletes route through one shared MediaTrashOps pipeline, and
+  a `CURRENT-DATA` guard in `deleteStale` stops a stale maintenance pass from
+  clobbering live data; Recent reaches undo parity with Browse, reports honest
+  delete buckets, and refreshes with a single query.
+- **Categories**: pull-to-refresh with a category open re-queries the open drill-in
+  in place — removed entries are pruned without a spinner swap, and the refresh
+  survives hiccup/stale-result races.
+
 ## [1.9.0] — 2026-11-02
 
-The personalization & housekeeping release — the final version of toadFILES.
+The personalization & housekeeping release.
 
 ### Added
 - **App icon picker**: 5 new launcher icon designs (toad face, document, crowned
