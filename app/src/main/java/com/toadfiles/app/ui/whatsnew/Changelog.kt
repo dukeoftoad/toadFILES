@@ -91,7 +91,7 @@ object Changelog {
             if (item.isEmpty()) return
             if (sectionTitles.isEmpty()) {
                 sectionTitles += "Changes"
-                sectionItems += mutableListOf()
+                sectionItems.add(mutableListOf()) // += resolves to plus() on a list-of-lists
             }
             sectionItems.last() += item
         }
@@ -123,7 +123,7 @@ object Changelog {
                     val title = SECTION_HEADING.matchEntire(line.trim())?.groupValues?.get(1)?.trim()
                     if (!title.isNullOrBlank()) {
                         sectionTitles += title
-                        sectionItems += mutableListOf()
+                        sectionItems.add(mutableListOf()) // += resolves to plus() on a list-of-lists
                     }
                 }
 
