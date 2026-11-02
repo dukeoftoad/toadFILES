@@ -30,7 +30,6 @@ import androidx.compose.material.icons.outlined.ManageSearch
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Card
@@ -61,8 +60,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.ToadViewModelFactory
-import com.toadfiles.app.domain.BackKeyAction
-import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.ZipOpenAction
@@ -126,7 +123,7 @@ fun SettingsScreen(
                 NavigationRow(
                     icon = Icons.Outlined.Palette,
                     title = "Appearance",
-                    subtitle = "Theme, colors, app icon",
+                    subtitle = "Theme, colors, navigation, app icon",
                     onClick = { onOpenAppearance?.invoke() },
                 )
             }
@@ -186,24 +183,6 @@ fun SettingsScreen(
                     selected = settings.sevenZipOpenAction,
                     label = ::sevenZipOpenLabel,
                     onSelect = { vm.setSevenZipOpenAction(it) },
-                )
-                RowDivider()
-                ChoiceRow(
-                    icon = Icons.Outlined.Undo,
-                    title = "Back Key Action",
-                    choices = BackKeyAction.entries,
-                    selected = settings.backKeyAction,
-                    label = ::backKeyLabel,
-                    onSelect = { vm.setBackKeyAction(it) },
-                )
-                RowDivider()
-                ChoiceRow(
-                    icon = Icons.Outlined.Menu,
-                    title = "Navigation Style",
-                    choices = NavStyle.entries,
-                    selected = settings.navStyle,
-                    label = ::navStyleLabel,
-                    onSelect = { vm.setNavStyle(it) },
                 )
                 RowDivider()
                 SwitchRow(
@@ -501,12 +480,3 @@ private fun sevenZipOpenLabel(action: SevenZipOpenAction) = when (action) {
     SevenZipOpenAction.OPEN_WITH -> "Open With"
 }
 
-private fun backKeyLabel(action: BackKeyAction) = when (action) {
-    BackKeyAction.PARENT -> "Back To Parent Folder"
-    BackKeyAction.EXIT -> "Exit App"
-}
-
-private fun navStyleLabel(style: NavStyle) = when (style) {
-    NavStyle.BOTTOM_BAR -> "Bottom Bar"
-    NavStyle.SIDE_MENU -> "Side Menu"
-}
