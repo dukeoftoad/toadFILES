@@ -97,11 +97,18 @@ class AppearanceScreenTest {
         compose.onNodeWithText("Navigation Style").performClick()
         // Let the dropdown finish opening before clicking the item — clicking into a
         // mid-creation popup under Robolectric wedges the main Looper (CI hang, Nov 2026).
-        compose.waitForIdle()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Side Menu").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithText("Side Menu").performClick()
         compose.waitForIdle()
 
         val app = ApplicationProvider.getApplicationContext<ToadApp>()
+        // Poll instead of asserting immediately: the write crosses the ViewModel scope
+        // and DataStore's IO actor, so the first read can legitimately race it.
+        compose.waitUntil(5_000) {
+            runBlocking { app.container.settingsRepo.settings.first().navStyle == NavStyle.SIDE_MENU }
+        }
         runBlocking {
             assertEquals(NavStyle.SIDE_MENU, app.container.settingsRepo.settings.first().navStyle)
         }
@@ -114,11 +121,16 @@ class AppearanceScreenTest {
 
         compose.onNodeWithText("Back Key Action").performClick()
         // Same popup determinism guard as the Navigation Style test above.
-        compose.waitForIdle()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Exit App").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithText("Exit App").performClick()
         compose.waitForIdle()
 
         val app = ApplicationProvider.getApplicationContext<ToadApp>()
+        compose.waitUntil(5_000) {
+            runBlocking { app.container.settingsRepo.settings.first().backKeyAction == BackKeyAction.EXIT }
+        }
         runBlocking {
             assertEquals(
                 BackKeyAction.EXIT,
