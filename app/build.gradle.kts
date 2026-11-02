@@ -16,6 +16,11 @@ android {
         versionCode = 19
         versionName = "1.9.0"
 
+        // Exposed to the About page so the Android-compatibility rows can never drift
+        // from the values the build actually uses.
+        buildConfigField("int", "MIN_SDK_VERSION", "34")
+        buildConfigField("int", "TARGET_SDK_VERSION", "36")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -85,6 +90,18 @@ android {
 }
 
 // AGP 9 built-in Kotlin auto-aligns jvmTarget with compileOptions (Java 17).
+
+// Bundle the repo changelog into the APK: the in-app What's New page parses this asset
+// at runtime (com.toadfiles.app.ui.whatsnew.Changelog), so release notes live in exactly
+// one place — CHANGELOG.md at the repo root — and can never drift from the app copy.
+// The generated file is gitignored; never edit it by hand.
+val syncChangelog = tasks.register<Copy>("syncChangelog") {
+    from(rootProject.file("CHANGELOG.md")) {
+        rename { "changelog.md" }
+    }
+    into("src/main/assets")
+}
+tasks.named("preBuild") { dependsOn(syncChangelog) }
 
 // Robolectric requires a JDK whose FileDescriptor internals it knows — JDK 17 LTS is the
 // safe runtime for unit tests (JDK 21.0.13+ changed internals and crashes the shadows).
