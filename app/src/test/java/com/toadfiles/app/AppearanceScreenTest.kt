@@ -76,7 +76,8 @@ class AppearanceScreenTest {
             val viewport = compose.onRoot().fetchSemanticsNode().boundsInRoot
             val row = compose.onAllNodesWithText("Navigation Style")
                 .fetchSemanticsNodes().firstOrNull()?.boundsInRoot
-            if (row != null && viewport.intersects(row)) return
+            if (row != null && row.left < viewport.right && row.right > viewport.left &&
+                row.top < viewport.bottom && row.bottom > viewport.top) return
             compose.onRoot().performTouchInput { swipeUp() }
             compose.waitForIdle()
         }
