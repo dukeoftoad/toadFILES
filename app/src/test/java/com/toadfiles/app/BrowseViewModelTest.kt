@@ -1206,7 +1206,7 @@ class BrowseViewModelTest {
 
         // The payload vanished from the trash between the delete and the undo —
         // the honest toast says so instead of blaming the original location (N5).
-        trashed.delete()
+        trashed.forEach { it.delete() }
         vm.undoDelete(trashed)
 
         await { vm.state.value.toast != null }
