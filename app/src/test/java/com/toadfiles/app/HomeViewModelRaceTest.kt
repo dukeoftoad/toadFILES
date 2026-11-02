@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,11 +72,28 @@ class HomeViewModelRaceTest {
         val olderEntry = entry(1, "older.jpg")
         val newerEntry = entry(2, "newer.jpg")
 
-        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+        // ---- filter lane (v1.8.x recent chips): a list() for Images parks; Videos answers. ----
+        val imagesParked = CountDownLatch(1)
+        val imagesGate = CountDownLatch(1)
+        val imagesReturned = AtomicInteger()
+        val videosEntry = entry(3, "video.mp4", FileCategory.VIDEOS)
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> =
+            when (category) {
+                FileCategory.IMAGES -> {
+                    // Park like recent()'s first call — the test supersedes it.
+                    imagesParked.countDown()
+                    imagesGate.await()
+                    imagesReturned.incrementAndGet()
+                    listOf(olderEntry)
+                }
+                FileCategory.VIDEOS -> listOf(videosEntry)
+                else -> emptyList()
+            }
 
         override fun recent(limit: Int): List<MediaRepository.MediaEntry> =
             if (recentCalls.incrementAndGet() == 1) {
-                // First (init) refresh parks forever — the test supersede it.
+                // First (init) refresh parks forever — the test supersedes it.
                 firstGate.await()
                 listOf(olderEntry)
             } else {
@@ -87,14 +105,18 @@ class HomeViewModelRaceTest {
 
         override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int = 0
 
-        private fun entry(id: Long, name: String) = MediaRepository.MediaEntry(
+        private fun entry(
+            id: Long,
+            name: String,
+            category: FileCategory = FileCategory.IMAGES,
+        ) = MediaRepository.MediaEntry(
             id = id,
             uri = android.net.Uri.parse("content://test/$id"),
             name = name,
             size = 5L,
             dateModified = 0L,
             mime = "image/jpeg",
-            category = FileCategory.IMAGES,
+            category = category,
             data = null,
         )
     }
@@ -123,6 +145,32 @@ class HomeViewModelRaceTest {
         Thread.sleep(250)
 
         assertEquals(listOf("newer.jpg"), vm.state.value.recentFiles.map { it.name })
+        assertFalse(vm.state.value.loadingRecent)
+    }
+
+    @Test
+    fun `a slow older filtered recent query cannot overwrite a newer one`() = runTest {
+        // Let init's "All" query settle first — it parks on the latch until released.
+        await { media.recentCalls.get() >= 1 }
+        media.firstGate.countDown()
+        await { !vm.state.value.loadingRecent }
+
+        // User picks Images — that query parks on the latch.
+        vm.setRecentFilter(FileCategory.IMAGES)
+        assertTrue(media.imagesParked.await(10, TimeUnit.SECONDS))
+
+        // User gives up and switches to Videos — the fast query lands while Images is pending.
+        vm.setRecentFilter(FileCategory.VIDEOS)
+        await { vm.state.value.recentFiles.map { it.name } == listOf("video.mp4") }
+        assertEquals(FileCategory.VIDEOS, vm.state.value.recentFilter)
+
+        // The parked Images query finishes late — its result must be discarded.
+        media.imagesGate.countDown()
+        await { media.imagesReturned.get() == 1 }
+        Thread.sleep(250)
+
+        assertEquals(listOf("video.mp4"), vm.state.value.recentFiles.map { it.name })
+        assertEquals(FileCategory.VIDEOS, vm.state.value.recentFilter)
         assertFalse(vm.state.value.loadingRecent)
     }
 }

@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -59,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -86,7 +86,6 @@ import java.io.File
 @Composable
 fun HomeScreen(
     bottomPadding: Dp,
-    topPadding: Dp = 0.dp,
     onOpenFolder: (String) -> Unit,
     onOpenStorage: () -> Unit,
     onOpenRecent: () -> Unit,
@@ -107,8 +106,8 @@ fun HomeScreen(
     LazyColumn(
         Modifier
             .fillMaxSize()
-            .padding(top = topPadding, bottom = bottomPadding),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+            .padding(bottom = bottomPadding),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
     ) {
         // ---- Compact action row (drawer mode only) ----
         // v1.8.1: the top-right Trash shortcut is GONE — Trash is now a permanent tile
@@ -137,7 +136,7 @@ fun HomeScreen(
             Card(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
                     .clickable { onOpenStorage() },
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(
@@ -163,7 +162,7 @@ fun HomeScreen(
                                 null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             Text(
                                 "Internal storage",
                                 style = MaterialTheme.typography.titleMedium,
@@ -176,7 +175,7 @@ fun HomeScreen(
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                         }
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(8.dp))
                         if (stats == null) {
                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         } else {
@@ -185,14 +184,14 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.headlineSmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(6.dp))
                             LinearProgressIndicator(
                                 progress = { stats.usedFraction },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(10.dp),
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(6.dp))
                             Text(
                                 "${Format.size(stats.usedBytes)} used of ${Format.size(stats.totalBytes)}",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -206,54 +205,43 @@ fun HomeScreen(
 
         // ---- Quick access (user pins + most used + standard folders, all editable) ----
         item {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Quick access",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { editorOpen = true }) {
-                    Icon(Icons.Outlined.Add, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Edit")
-                }
-            }
+            HomeSectionHeader(
+                icon = null,
+                title = "Quick access",
+                trailing = {
+                    TextButton(onClick = { editorOpen = true }) {
+                        Icon(Icons.Outlined.Add, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Edit")
+                    }
+                },
+            )
         }
         // The grid always renders: the permanent Trash tile leads it even when the user
-        // has no quick folders pinned yet.
+        // has no quick folders pinned yet. v1.8.x: plain Rows instead of a fixed-height
+        // grid — the old 100dp-per-row budget clipped taller tile stacks, so each Row now
+        // wraps to its tallest tile and nothing is cut off at any font scale.
         item {
-            // +1 for the permanent Trash tile that always leads the grid.
-            val tileCount = state.quickAccess.size + 1
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(((tileCount + 2) / 3 * 100).dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    userScrollEnabled = false,
-                ) {
-                    // v1.8.1: Trash leads Quick access — a first-class destination tile
-                    // instead of the old top-right toolbar icon (which crowded the
-                    // status bar / storage card on some devices).
-                    item(key = "trash-tile", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(1) }) {
-                        QuickTile(
-                            name = "Trash",
-                            icon = Icons.Outlined.Delete,
-                            pinned = false,
-                            mostUsed = false,
-                            onClick = onOpenTrash,
-                            onLongClick = onOpenTrash,
-                        )
-                    }
-                    gridItems(state.quickAccess, key = { it.dir.path }) { q ->
-                        QuickTile(
+            // Trash + the quick folders, chunked into rows of three. A short last row
+            // pads with weight(1f) spacers, matching the old Fixed(3) geometry: tiles
+            // keep their 1/3 width instead of stretching to fill the row.
+            val slots = buildList {
+                // v1.8.1: Trash leads Quick access — a first-class destination tile
+                // instead of the old top-right toolbar icon (which crowded the
+                // status bar / storage card on some devices).
+                add(
+                    QuickTileSlot(
+                        name = "Trash",
+                        icon = Icons.Outlined.Delete,
+                        pinned = false,
+                        mostUsed = false,
+                        onClick = onOpenTrash,
+                        onLongClick = onOpenTrash,
+                    )
+                )
+                state.quickAccess.forEach { q ->
+                    add(
+                        QuickTileSlot(
                             name = q.label,
                             icon = quickIconFor(q.label),
                             pinned = q.pinned,
@@ -261,22 +249,44 @@ fun HomeScreen(
                             onClick = { onOpenFolder(q.dir.path) },
                             onLongClick = { removeTarget = q },
                         )
+                    )
+                }
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                slots.chunked(3).forEach { rowSlots ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        rowSlots.forEach { slot ->
+                            QuickTile(
+                                name = slot.name,
+                                icon = slot.icon,
+                                pinned = slot.pinned,
+                                mostUsed = slot.mostUsed,
+                                onClick = slot.onClick,
+                                onLongClick = slot.onLongClick,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(3 - rowSlots.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
+            }
         }
 
         // ---- Favorites ----
         item {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.Star, null, tint = MaterialTheme.colorScheme.tertiary)
-                Spacer(Modifier.width(6.dp))
-                Text("Favorites", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            }
+            HomeSectionHeader(
+                icon = Icons.Outlined.Star,
+                title = "Favorites",
+                tint = MaterialTheme.colorScheme.tertiary,
+            )
         }
         if (state.favorites.isEmpty()) {
             item {
@@ -284,7 +294,7 @@ fun HomeScreen(
                     "Long-press files in Browse and choose \"Add favorite\".",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }
         } else {
@@ -304,16 +314,39 @@ fun HomeScreen(
 
         // ---- Recent ----
         item {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.History, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(6.dp))
-                Text("Recent", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onOpenRecent) { Text("See all") }
+            HomeSectionHeader(
+                icon = Icons.Outlined.History,
+                title = "Recent",
+                trailing = { TextButton(onClick = onOpenRecent) { Text("See all") } },
+            )
+        }
+        // Type filter chips, the same row the Recent screen carries: All + every
+        // category, rendered outside the loading/empty/list branches so picking a
+        // filter with no results never hides the only way back to "All". Shown only
+        // once the feed can be filtered — a fresh install with an empty media library
+        // gets no dead chip row.
+        if (!state.loadingRecent && (state.recentFiles.isNotEmpty() || state.recentFilter != null)) {
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    item {
+                        FilterChip(
+                            selected = state.recentFilter == null,
+                            onClick = { vm.setRecentFilter(null) },
+                            label = { Text("All") },
+                        )
+                    }
+                    items(FileCategory.entries) { c ->
+                        FilterChip(
+                            selected = state.recentFilter == c,
+                            onClick = { vm.setRecentFilter(c) },
+                            label = { Text(c.label) },
+                        )
+                    }
+                }
             }
         }
         item {
@@ -321,12 +354,16 @@ fun HomeScreen(
                 state.loadingRecent && state.recentFiles.isEmpty() -> Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(20.dp),
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.Center,
                 ) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }
 
                 state.recentFiles.isEmpty() -> EmptyState(
-                    "No recent files reported by the system media library",
+                    if (state.recentFilter == null) {
+                        "No recent files reported by the system media library"
+                    } else {
+                        "No recent ${state.recentFilter!!.label.lowercase()} found"
+                    },
                 )
 
                 else -> Column(Modifier.padding(horizontal = 16.dp)) {
@@ -339,7 +376,7 @@ fun HomeScreen(
                                 }
                             },
                         )
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(4.dp))
                     }
                 }
             }
@@ -352,7 +389,7 @@ fun HomeScreen(
                     "Recent files come straight from the OS media library on demand.",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
     }
@@ -420,6 +457,14 @@ private fun QuickAccessEditorDialog(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                // Honesty: checking an entry toggles a PIN, so say which
+                                // ones already are — checking an "Automatic" entry pins
+                                // (and promotes) it, which used to be silent.
+                                Text(
+                                    if (c.pinned) "Pinned" else "Automatic",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                             Checkbox(
                                 checked = c.shown,
@@ -433,6 +478,43 @@ private fun QuickAccessEditorDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
+
+/**
+ * One of Home's section headers (Quick access / Favorites / Recent). Unified so the
+ * rhythm is identical everywhere and headers align with the 16dp content gutter —
+ * they used to start at 20dp while every list below them starts at 16dp.
+ */
+@Composable
+private fun HomeSectionHeader(
+    icon: ImageVector?,
+    title: String,
+    tint: Color = MaterialTheme.colorScheme.primary,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, null, tint = tint)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        trailing?.invoke()
+    }
+}
+
+/** One cell in Home's quick-access rows: the permanent Trash tile or a quick folder. */
+private data class QuickTileSlot(
+    val name: String,
+    val icon: ImageVector,
+    val pinned: Boolean,
+    val mostUsed: Boolean,
+    val onClick: () -> Unit,
+    val onLongClick: () -> Unit,
+)
 
 /** Icon per standard quick-link folder; unknown folders fall back to a folder glyph. */
 private fun quickIconFor(name: String): ImageVector = when (name.lowercase()) {
@@ -454,15 +536,16 @@ private fun QuickTile(
     mostUsed: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Card(
         shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp),
+                .padding(vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box {
@@ -495,14 +578,23 @@ private fun QuickTile(
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(name, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Spacer(Modifier.height(6.dp))
             Text(
-                if (mostUsed) "most used" else " ",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
+                name,
+                style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            // Only most-used tiles carry a caption; the old " " placeholder wasted a
+            // 16dp line on every other tile.
+            if (mostUsed) {
+                Text(
+                    "most used",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -516,7 +608,7 @@ private fun FavoriteRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 3.dp),
+            .padding(horizontal = 16.dp, vertical = 2.dp),
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(
