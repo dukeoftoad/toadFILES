@@ -8,19 +8,21 @@ import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.PackageManagerAppIconSwitcher
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
- * PackageManagerAppIconSwitcher against Robolectric's real PackageManager and the
- * merged manifest (all 36 activity-aliases are parsed from it). The component-name
- * rule must match the manifest alias names exactly — otherwise the switcher would
- * flip the state of components that don't exist and the launcher icon would never
- * change.
+ * PackageManagerAppIconSwitcher: the component-name rule must match the 36
+ * activity-alias names in AndroidManifest exactly — otherwise the switcher would flip
+ * the state of components that don't exist and the launcher icon would never change.
+ * Manifest sync is verified against the raw manifest source (Robolectric's
+ * PackageManager does not resolve activity-aliases), and the switch sequence via the
+ * pure [PackageManagerAppIconSwitcher.plan].
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -29,6 +31,13 @@ class AppIconSwitcherTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     private fun newSwitcher() = PackageManagerAppIconSwitcher(context)
+
+    /** The app's manifest source — unit tests run with the module directory as CWD. */
+    private val manifestText: String by lazy {
+        listOf(File("src/main/AndroidManifest.xml"), File("app/src/main/AndroidManifest.xml"))
+            .first { it.exists() }
+            .readText()
+    }
 
     @Test
     fun `componentNameFor maps CLASSIC GREEN to the shipped default alias`() {
@@ -57,50 +66,47 @@ class AppIconSwitcherTest {
     @Test
     fun `all 36 combos produce distinct names that resolve to manifest aliases`() {
         val switcher = newSwitcher()
-        val pm = context.packageManager
         val classNames = mutableSetOf<String>()
         for (d in AppIconDesign.entries) {
             for (c in AppIconColor.entries) {
                 val cn = switcher.componentNameFor(d, c)
                 assertEquals(context.packageName, cn.packageName)
                 assertTrue(cn.className.startsWith("${context.packageName}.Launcher"))
-                // Every mapped component must be a real activity-alias in the merged
-                // manifest — this is what keeps the rule in sync with AndroidManifest.
-                assertNotNull("no manifest alias for ${cn.className}", pm.getActivityInfo(cn, 0))
+                // Every mapped component must be declared as an activity-alias in the
+                // manifest source — this is what keeps the rule in sync with it.
+                assertTrue(
+                    "manifest must declare alias ${cn.className}",
+                    manifestText.contains("android:name=\".${cn.className.substringAfterLast('.')}\""),
+                )
                 classNames += cn.className
             }
         }
         assertEquals(36, AppIconDesign.entries.size * AppIconColor.entries.size)
         assertEquals(36, classNames.size)
+        assertEquals(36, Regex("<activity-alias").findAll(manifestText).count())
     }
 
     @Test
-    fun `apply enables the chosen alias and disables the shipped default`() {
+    fun `apply plan enables the chosen alias first and disables the other 35`() {
         // The component names embed the app's real package name; make that assumption
         // explicit so a harness with a different packageName fails loudly here.
         assertEquals("com.toadfiles.app", context.packageName)
 
-        newSwitcher().apply(AppIconDesign.FACE, AppIconColor.TEAL)
+        val plan = newSwitcher().plan(AppIconDesign.FACE, AppIconColor.TEAL)
 
-        val pm = context.packageManager
+        // Exactly 36 component changes; the target is FIRST and the only ENABLED one.
+        assertEquals(36, plan.size)
         assertEquals(
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-            pm.getComponentEnabledSetting(
-                ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherFaceTeal"),
-            ),
+            ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherFaceTeal"),
+            plan.first().first,
         )
-        // The v1.8.2 default alias must be turned off, and so must a random other combo.
-        assertEquals(
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            pm.getComponentEnabledSetting(
-                ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherClassicGreen"),
-            ),
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, plan.first().second)
+        assertEquals(35, plan.drop(1).map { it.first }.toSet().size)
+        assertTrue(
+            plan.drop(1).all { it.second == PackageManager.COMPONENT_ENABLED_STATE_DISABLED },
         )
-        assertEquals(
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            pm.getComponentEnabledSetting(
-                ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherSdRose"),
-            ),
-        )
+        // The shipped default is among the disabled ones, and the target never repeats.
+        assertTrue(plan.drop(1).any { it.first.className.endsWith("LauncherClassicGreen") })
+        assertFalse(plan.drop(1).any { it.first.className.endsWith("LauncherFaceTeal") })
     }
 }

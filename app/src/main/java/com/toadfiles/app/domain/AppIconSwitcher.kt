@@ -34,22 +34,26 @@ class PackageManagerAppIconSwitcher(private val context: Context) : AppIconSwitc
     override fun apply(design: AppIconDesign, color: AppIconColor) {
         runCatching {
             val pm = context.packageManager
-            pm.setComponentEnabledSetting(
-                componentNameFor(design, color),
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                PackageManager.DONT_KILL_APP,
-            )
-            for (d in AppIconDesign.entries) {
-                for (c in AppIconColor.entries) {
-                    if (d == design && c == color) continue
-                    pm.setComponentEnabledSetting(
-                        componentNameFor(d, c),
-                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                        PackageManager.DONT_KILL_APP,
-                    )
-                }
+            for ((component, state) in plan(design, color)) {
+                pm.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
             }
         }.onFailure { Log.w(TAG, "could not switch launcher alias to $design/$color", it) }
+    }
+
+    /**
+     * The exact sequence of component changes [apply] performs: the target alias
+     * FIRST (enabled), then the other 35 (disabled) — at no point is the app left
+     * without a launcher entry. Pure and unit-testable; [apply] only adds the
+     * PackageManager call (Robolectric cannot observe alias component state).
+     */
+    fun plan(design: AppIconDesign, color: AppIconColor): List<Pair<ComponentName, Int>> {
+        val target = componentNameFor(design, color)
+        val disable = AppIconDesign.entries.asSequence()
+            .flatMap { d -> AppIconColor.entries.asSequence().map { c -> d to c } }
+            .filter { it.first != design || it.second != color }
+            .map { componentNameFor(it.first, it.second) to PackageManager.COMPONENT_ENABLED_STATE_DISABLED }
+            .toList()
+        return listOf(target to PackageManager.COMPONENT_ENABLED_STATE_ENABLED) + disable
     }
 
     /**
