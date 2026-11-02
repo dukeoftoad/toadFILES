@@ -1,6 +1,7 @@
 package com.toadfiles.app
 
 import android.content.Context
+import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.FileRepository
 import com.toadfiles.app.domain.Trash
@@ -62,14 +63,34 @@ class FileRepositoryTest {
     }
 
     @Test
-    fun `list keeps the app trash folder out of browse results`() {
+    fun `list keeps the trash folder out of a volume root`() {
+        // The real trash dir lives directly at a volume root (see roots()); Browse
+        // must not offer it even with hidden files shown (D11).
+        val root = Environment.getExternalStorageDirectory()
+        File(root, "normal.txt").writeText("x")
+        File(root, Trash.DIR_NAME).mkdirs()
+        File(root, Trash.DIR_NAME + "/payload.txt").writeText("x")
+        File(root, "user_file.txt").writeText("x")
+
+        val names = repo.list(root, showHidden = true).map { it.name }
+
+        assertFalse("the app's trash dir must not appear at a volume root", names.contains(Trash.DIR_NAME))
+        assertTrue(names.contains("normal.txt"))
+        assertTrue(names.contains("user_file.txt"))
+    }
+
+    @Test
+    fun `a user folder named like the trash dir stays visible below the root`() {
+        // D11: a same-named folder that is NOT at a volume root is the user's own
+        // data — hiding it anywhere in the tree made it vanish from Browse entirely.
         File(base, "normal.txt").writeText("x")
         File(base, Trash.DIR_NAME).mkdirs()
-        File(base, "user_file.txt").writeText("x")
+        File(base, Trash.DIR_NAME + "/user_file.txt").writeText("x")
 
-        val names = repo.list(base, showHidden = false).map { it.name }
-        assertFalse("trash dir must not appear in Browse", names.contains(Trash.DIR_NAME))
-        assertEquals(2, names.size)
+        val names = repo.list(base, showHidden = true).map { it.name }
+
+        assertTrue("a user's own folder with the trash name must stay listed", names.contains(Trash.DIR_NAME))
+        assertTrue(names.contains("normal.txt"))
     }
 
     @Test
