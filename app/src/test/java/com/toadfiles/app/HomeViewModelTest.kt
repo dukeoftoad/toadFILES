@@ -2,9 +2,9 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.toadfiles.app.data.CategorySummary
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.ui.home.HomeViewModel
 import com.toadfiles.app.ui.home.QuickAccessEntry
