@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Retro pixel toad (toadFILES app icon option). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M48,42 h18 v6 h-18 z" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M42,48 h30 v6 h-30 z" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M36,54 h42 v6 h-42 z" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M36,60 h42 v6 h-42 z" />
+    <path
+        android:fillColor="#8FC77E"
+        android:pathData="M42,66 h30 v6 h-30 z" />
+    <path
+        android:fillColor="#6FAF63"
+        android:pathData="M48,72 h18 v6 h-18 z" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M48,48 h6 v6 h-6 z" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M60,48 h6 v6 h-6 z" />
+    <path
+        android:fillColor="#2E4D2B"
+        android:pathData="M48,66 h18 v6 h-18 z" />
+</vector>
