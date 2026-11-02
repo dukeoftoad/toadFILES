@@ -195,7 +195,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             composable(Routes.HOME) {
                 HomeScreen(
                     bottomPadding = padding.calculateBottomPadding(),
-                    topPadding = padding.calculateTopPadding(),
                     onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
                     onOpenStorage = { navController.navigateSingleTop(Routes.STORAGE) },
                     onOpenRecent = { navController.navigateSingleTop(Routes.RECENT) },

@@ -2,7 +2,12 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.MediaQuerySource
+import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.CategorySummary
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.ui.home.HomeViewModel
+import com.toadfiles.app.ui.home.QuickAccessEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -10,7 +15,9 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -155,5 +162,83 @@ class HomeViewModelTest {
         await { !vm.state.value.loadingRecent }
         // All sub-refreshes set their respective flags false on completion.
         assertFalse(vm.state.value.loadingRecent)
+    }
+
+    // ---- v1.8.x: recent filter chips + quick access cap guard ----
+
+    /** Counts every call per lane so filter switching can be asserted precisely. */
+    private class RecordingMedia : MediaQuerySource {
+        val recentCalls = mutableListOf<Int>()
+        val listCalls = mutableListOf<Pair<FileCategory, Int>>()
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> {
+            listCalls += category to limit
+            return emptyList()
+        }
+
+        override fun recent(limit: Int): List<MediaRepository.MediaEntry> {
+            recentCalls += limit
+            return emptyList()
+        }
+
+        override fun summaries(): List<CategorySummary> =
+            FileCategory.entries.map { CategorySummary(it, 0, 0L) }
+
+        override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int = 0
+    }
+
+    @Test
+    fun `recent filter switches the query lane and same-filter re-sets are no-ops`() = runTest {
+        val media = RecordingMedia()
+        val filtered = HomeViewModel(container, ioDispatcher = dispatcher, media = media)
+        await { !filtered.state.value.loadingRecent }
+        assertNull(filtered.state.value.recentFilter)
+        val recentBaseline = media.recentCalls.size
+
+        filtered.setRecentFilter(FileCategory.IMAGES)
+        await { !filtered.state.value.loadingRecent }
+        assertEquals(FileCategory.IMAGES, filtered.state.value.recentFilter)
+        // The filter routes the query through list(IMAGES, RECENT_LIMIT)…
+        assertTrue(media.listCalls.contains(FileCategory.IMAGES to HomeViewModel.RECENT_LIMIT))
+        val listsAfterFirstSet = media.listCalls.size
+
+        // …setting the same filter again is a no-op — no reload churn.
+        filtered.setRecentFilter(FileCategory.IMAGES)
+        assertEquals(listsAfterFirstSet, media.listCalls.size)
+
+        // …and back to All the unfiltered recent() lane answers again.
+        filtered.setRecentFilter(null)
+        await { !filtered.state.value.loadingRecent }
+        assertNull(filtered.state.value.recentFilter)
+        assertEquals(recentBaseline + 1, media.recentCalls.size)
+    }
+
+    @Test
+    fun `a wall of pins never starves the default quick links`() = runTest {
+        // Standard folders must exist for quickLinks() to offer them.
+        listOf("Download", "DCIM", "Documents", "Pictures", "Music", "Movies").forEach {
+            File(externalDir, it).mkdirs()
+        }
+        val pins = (1..10).map { File(externalDir, "pin-$it-${System.nanoTime()}").apply { mkdirs() } }
+        val pinPaths = pins.map { it.path }.toSet()
+        pins.forEach { container.settingsRepo.toggleQuickPin(it.path) }
+
+        // The cap keeps at least two standard folders on the grid…
+        await {
+            val qa = vm.state.value.quickAccess
+            qa.size <= HomeViewModel.QUICK_CAP &&
+                qa.count { it.source == QuickAccessEntry.Source.DEFAULT } >= HomeViewModel.QUICK_MIN_DEFAULTS
+        }
+        val qa = vm.state.value.quickAccess
+        assertTrue(qa.size <= HomeViewModel.QUICK_CAP)
+        assertTrue(qa.count { it.source == QuickAccessEntry.Source.DEFAULT } >= HomeViewModel.QUICK_MIN_DEFAULTS)
+        // …and the pins → defaults ordering survives the trim.
+        val lastPin = qa.indexOfLast { it.pinned }
+        val firstNonPin = qa.indexOfFirst { !it.pinned }
+        assertTrue(firstNonPin == -1 || lastPin < firstNonPin)
+
+        // Leave the shared class-wide DataStore clean for the other tests.
+        pins.forEach { container.settingsRepo.toggleQuickPin(it.path) }
+        await { vm.state.value.quickAccess.none { it.dir.path in pinPaths } }
     }
 }

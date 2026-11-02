@@ -6,6 +6,7 @@ import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.ToadSettings
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.StorageStats
 import com.toadfiles.app.domain.Trash
@@ -35,6 +36,8 @@ data class QuickCandidate(
     val path: String,
     val shown: Boolean,
     val isDefault: Boolean,
+    /** True while the folder sits in the pins set — the editor labels it "Pinned". */
+    val pinned: Boolean,
 )
 
 data class HomeUiState(
@@ -48,6 +51,8 @@ data class HomeUiState(
     /** Candidates for the Quick access editor. */
     val quickCandidates: List<QuickCandidate> = emptyList(),
     val favorites: List<FileItem> = emptyList(),
+    /** Active type filter for the recent feed; null = All. Same chips row as the Recent screen. */
+    val recentFilter: FileCategory? = null,
     /**
      * Smart-recent feed on Home. Replaces the old Categories section + the standalone Recent
      * tab: the user wanted one unified home. We list files the OS media library reports as
@@ -157,7 +162,7 @@ class HomeViewModel(
             }
             _state.update { s ->
                 if (token != quickAccessSeq) s // a newer settings snapshot took over
-                else s.copy(quickAccess = out.take(10))
+                else s.copy(quickAccess = capQuickAccess(out))
             }
 
             // Editor candidates: pins + defaults + most used + top-level folders.
@@ -177,6 +182,7 @@ class HomeViewModel(
                         path = f.path,
                         shown = f.path !in s.quickHidden,
                         isDefault = f.path in defaultPaths,
+                        pinned = f.path in s.quickPins,
                     )
                 }
             _state.update { s ->
@@ -184,6 +190,26 @@ class HomeViewModel(
                 else s.copy(quickCandidates = candidates)
             }
         }
+    }
+
+    /**
+     * The [QUICK_CAP] trim with a default-starvation guard: plain `take(10)` let ten pins
+     * elbow every standard folder off the grid. When the list overflows, the last
+     * [QUICK_MIN_DEFAULTS] slots are reserved for DEFAULT entries (when any exist); the
+     * excess is dropped from the tail, so the lowest-ranked most-used folders go first
+     * and only defaults beyond the reserve follow. The pins → most used → defaults order
+     * is preserved.
+     */
+    private fun capQuickAccess(entries: List<QuickAccessEntry>): List<QuickAccessEntry> {
+        if (entries.size <= QUICK_CAP) return entries
+        val defaultsAvailable = entries.count { it.source == QuickAccessEntry.Source.DEFAULT }
+        if (defaultsAvailable == 0) return entries.take(QUICK_CAP)
+        val reserve = minOf(defaultsAvailable, QUICK_MIN_DEFAULTS)
+        val head = entries.take(QUICK_CAP - reserve)
+        val tail = entries.drop(QUICK_CAP - reserve)
+            .filter { it.source == QuickAccessEntry.Source.DEFAULT }
+            .take(reserve)
+        return head + tail
     }
 
     // ---------- quick access editing ----------
@@ -207,13 +233,25 @@ class HomeViewModel(
     /** Smart-recent files from the OS media library, newest first. Bounded to keep the list cheap. */
     fun refreshRecent() {
         val token = ++recentSeq
+        val filter = _state.value.recentFilter
         _state.update { it.copy(loadingRecent = true) }
         recentJob?.cancel()
         recentJob = viewModelScope.launch(ioDispatcher) {
-            val recents = media.recent(limit = RECENT_LIMIT)
+            val recents = if (filter == null) {
+                media.recent(limit = RECENT_LIMIT)
+            } else {
+                media.list(filter, limit = RECENT_LIMIT)
+            }
             if (token != recentSeq) return@launch // superseded by a newer refresh
             _state.update { it.copy(recentFiles = recents, loadingRecent = false) }
         }
+    }
+
+    /** Switches the recent feed's type filter (All / Images / Videos / …) and reloads. */
+    fun setRecentFilter(filter: FileCategory?) {
+        if (_state.value.recentFilter == filter) return
+        _state.update { it.copy(recentFilter = filter) }
+        refreshRecent()
     }
 
     private fun refreshFavorites(paths: Set<String>) {
@@ -245,5 +283,11 @@ class HomeViewModel(
     companion object {
         /** Bounded recent list — matches the original Recent tab's cap. */
         const val RECENT_LIMIT = 60
+
+        /** Upper bound for Quick access entries (the permanent Trash tile renders on top). */
+        const val QUICK_CAP = 10
+
+        /** When [QUICK_CAP] trims, at least this many standard folders stay on the grid. */
+        const val QUICK_MIN_DEFAULTS = 2
     }
 }
