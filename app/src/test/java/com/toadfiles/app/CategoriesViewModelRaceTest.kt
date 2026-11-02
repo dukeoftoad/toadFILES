@@ -70,7 +70,11 @@ class CategoriesViewModelRaceTest {
         val docsParked = CountDownLatch(1)
         val docsGate = CountDownLatch(1)
         val docsReturned = AtomicInteger()
+        val apksParked = CountDownLatch(1)
+        val apksGate = CountDownLatch(1)
         val apksEntry = entry(3, "app.apk", FileCategory.APKS)
+        /** Set to park only the NEXT APKs query (refresh's content leg), not open()'s. */
+        @Volatile var parkApksList = false
 
         override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> =
             when (category) {
@@ -82,7 +86,14 @@ class CategoriesViewModelRaceTest {
                     docsReturned.incrementAndGet()
                     listOf(entry(1, "slow-doc.pdf", FileCategory.DOCS))
                 }
-                FileCategory.APKS -> listOf(apksEntry)
+                FileCategory.APKS -> {
+                    if (parkApksList) {
+                        // Same reach-the-gate proof as the DOCS lane above.
+                        apksParked.countDown()
+                        apksGate.await()
+                    }
+                    listOf(apksEntry)
+                }
                 else -> emptyList()
             }
 
@@ -150,5 +161,36 @@ class CategoriesViewModelRaceTest {
         await { !vm.state.value.loading }
         // The grid always ends consistent: one tile per category, newest refresh applied.
         assertEquals(FileCategory.entries.size, vm.state.value.summaries.size)
+    }
+
+    @Test
+    fun `refresh's stale content result must not clobber a newer open`() = runTest {
+        await { !vm.state.value.loading } // grid summaries settle
+
+        // APKs is open and its rows are on screen.
+        vm.open(FileCategory.APKS)
+        await { vm.state.value.entries.map { it.name } == listOf("app.apk") }
+
+        // Pull-to-refresh while APKs is open — its content re-query parks on the gate.
+        media.parkApksList = true
+        vm.refresh()
+        assertTrue(media.apksParked.await(10, TimeUnit.SECONDS))
+
+        // While the refresh re-query is parked the user opens Documents: open() bumps
+        // entriesSeq, so the stale APK refresh result must be discarded when released —
+        // both legs share the one entriesSeq/entriesJob race mechanism.
+        vm.open(FileCategory.DOCS)
+        assertTrue(media.docsParked.await(10, TimeUnit.SECONDS))
+
+        media.apksGate.countDown() // the stale APK re-query finishes — it must NOT land
+        media.docsGate.countDown() // Documents lands
+        await { media.docsReturned.get() == 1 }
+        await { vm.state.value.entries.map { it.name } == listOf("slow-doc.pdf") }
+        // Give a wrongly-applied stale result a beat to land.
+        Thread.sleep(250)
+
+        assertEquals(FileCategory.DOCS, vm.state.value.selected)
+        assertEquals(listOf("slow-doc.pdf"), vm.state.value.entries.map { it.name })
+        assertTrue(!vm.state.value.entriesLoading)
     }
 }

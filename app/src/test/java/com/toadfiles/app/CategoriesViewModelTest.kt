@@ -12,6 +12,7 @@ import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.ui.categories.CategoriesViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -30,6 +31,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -44,6 +49,11 @@ import java.util.zip.ZipOutputStream
 class CategoriesViewModelTest {
 
     private val dispatcher = UnconfinedTestDispatcher()
+    /** Daemon threads: a parked latch must never keep the test JVM alive after a
+     *  failure (same pattern as CategoriesViewModelRaceTest). */
+    private val ioExecutor = Executors.newFixedThreadPool(2) { r ->
+        Thread(r, "categories-refresh-io").apply { isDaemon = true }
+    }
     private lateinit var vm: CategoriesViewModel
     private lateinit var container: AppContainer
 
@@ -58,6 +68,8 @@ class CategoriesViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+        ioExecutor.shutdownNow()
+        ioExecutor.awaitTermination(5, TimeUnit.SECONDS)
     }
 
     private fun await(block: () -> Boolean) {
@@ -116,6 +128,108 @@ class CategoriesViewModelTest {
         assertFalse(vm.state.value.loading)
         // Whatever happened underneath, the tab must end in a usable state.
         assertTrue(vm.state.value.summaries.size == FileCategory.entries.size || vm.state.value.summaries.isEmpty())
+    }
+
+    @Test
+    fun `pull-to-refresh while a category is open re-queries its contents`() = runTest {
+        val media = RefreshGatedMedia()
+        media.apksEntries = listOf(apksEntry(1, "app-one.apk"), apksEntry(2, "app-two.apk"))
+        val gated = gatedVm(media)
+        gated.open(FileCategory.APKS)
+        await { !gated.state.value.entriesLoading }
+        assertEquals(listOf("app-one.apk", "app-two.apk"), gated.state.value.entries.map { it.name })
+
+        // Session sort set by the user, then two more APKs land in the media library:
+        // a plain pull-to-refresh must re-query the visible drill-in list in place —
+        // previously only the grid re-queried and the user had to leave and reopen.
+        gated.setSort(SortMode.NAME)
+        gated.setSortOrder(SortOrder.ASC)
+        media.apksEntries = listOf(
+            apksEntry(1, "app-one.apk"), apksEntry(2, "app-two.apk"),
+            apksEntry(3, "app-three.apk"), apksEntry(4, "app-four.apk"),
+        )
+        gated.refresh()
+
+        await {
+            gated.state.value.entries.map { it.name } == // NAME ASC, the session sort
+                listOf("app-four.apk", "app-one.apk", "app-three.apk", "app-two.apk")
+        }
+        // The list lane really was re-queried: open + refresh = exactly two queries.
+        assertEquals(2, media.apksReturned.get())
+        assertEquals(FileCategory.APKS, gated.state.value.selected)
+        assertEquals(SortMode.NAME, gated.state.value.sortMode)
+        assertEquals(SortOrder.ASC, gated.state.value.sortOrder)
+        assertEquals(com.toadfiles.app.domain.BrowseLayout.LIST, gated.state.value.layout)
+        assertTrue(!gated.state.value.entriesLoading)
+    }
+
+    @Test
+    fun `refresh preserves surviving selection and prunes deleted uris`() = runTest {
+        val media = RefreshGatedMedia()
+        val keep = apksEntry(1, "keep.apk")
+        val gone = apksEntry(2, "gone.apk")
+        media.apksEntries = listOf(keep, gone)
+        val gated = gatedVm(media)
+        gated.open(FileCategory.APKS)
+        await { !gated.state.value.entriesLoading }
+        gated.toggleSelection(keep)
+        gated.toggleSelection(gone)
+        assertEquals(setOf(keep.uri.toString(), gone.uri.toString()), gated.state.value.selection)
+
+        // "gone.apk" left the media library; the surviving selection must survive and
+        // the dead uri must be pruned (Recent's selection.intersect pattern).
+        media.apksEntries = listOf(keep)
+        gated.refresh()
+        await { gated.state.value.entries.map { it.name } == listOf("keep.apk") }
+        assertEquals(setOf(keep.uri.toString()), gated.state.value.selection)
+        assertEquals(FileCategory.APKS, gated.state.value.selected)
+    }
+
+    @Test
+    fun `refresh keeps entries visible while re-querying`() = runTest {
+        val media = RefreshGatedMedia()
+        media.apksEntries = listOf(apksEntry(1, "app-one.apk"))
+        val gated = gatedVm(media)
+        gated.open(FileCategory.APKS)
+        await { !gated.state.value.entriesLoading }
+
+        // Park the refresh's content re-query mid-flight: the old rows must stay on
+        // screen — no clearing, no full-screen spinner swap (entriesLoading stays false).
+        media.parkApksList = true
+        media.apksEntries = listOf(apksEntry(1, "app-one.apk"), apksEntry(2, "app-two.apk"))
+        gated.refresh()
+        assertTrue(media.apksParked.await(10, TimeUnit.SECONDS))
+        await { !gated.state.value.loading } // summaries lane settles; content still parked
+        assertTrue(!gated.state.value.entriesLoading)
+        assertEquals(listOf("app-one.apk"), gated.state.value.entries.map { it.name })
+
+        // Releasing the gate lands the fresh list in place.
+        media.apksGate.countDown()
+        await { gated.state.value.entries.map { it.name } == listOf("app-one.apk", "app-two.apk") }
+        assertTrue(!gated.state.value.entriesLoading)
+    }
+
+    @Test
+    fun `refresh content-leg survives a media store hiccup`() = runTest {
+        val media = RefreshGatedMedia()
+        val only = apksEntry(1, "app-one.apk")
+        media.apksEntries = listOf(only)
+        val gated = gatedVm(media)
+        gated.open(FileCategory.APKS)
+        await { !gated.state.value.entriesLoading }
+        gated.toggleSelection(only)
+
+        // The store blows up exactly when the refresh content leg re-queries: the
+        // runCatching fallback applies an empty list instead of crashing, the drill-in
+        // stays consistent (no stuck spinner) and the dead selection is pruned.
+        media.failNextApksList = true
+        gated.refresh()
+        await { !gated.state.value.loading }
+        await { gated.state.value.entries.isEmpty() }
+        assertTrue(!gated.state.value.entriesLoading)
+        assertTrue(gated.state.value.selection.isEmpty())
+        assertEquals(FileCategory.APKS, gated.state.value.selected)
+        assertEquals(FileCategory.entries.size, gated.state.value.summaries.size)
     }
 
     @Test
@@ -715,6 +829,66 @@ class CategoriesViewModelTest {
         sorted.setSort(SortMode.NAME)
         sorted.setSortOrder(SortOrder.ASC)
         assertEquals(listOf("a.pdf", "b.pdf"), sorted.state.value.entries.map { it.name })
+    }
+
+    /** APKS rows for the gated refresh tests (visual category defaults don't apply —
+     *  APKs always opens as a list, which keeps layout preservation assertable). */
+    private fun apksEntry(id: Long, name: String) = MediaRepository.MediaEntry(
+        id = id,
+        uri = android.net.Uri.parse("content://test/$id"),
+        name = name,
+        size = 10L,
+        dateModified = 0L,
+        mime = "application/vnd.android.package-archive",
+        category = FileCategory.APKS,
+        data = null,
+    )
+
+    /** A VM on real IO threads (like CategoriesViewModelRaceTest) so parked or failing
+     *  queries can be observed mid-flight without blocking the unconfined test main. */
+    private fun gatedVm(media: RefreshGatedMedia) = CategoriesViewModel(
+        container,
+        ioDispatcher = ioExecutor.asCoroutineDispatcher(),
+        media = media,
+    )
+
+    /**
+     * Gated media source for the pull-to-refresh content-leg tests: the APKS lane
+     * serves a mutable entry list and can park a query on a latch (same pattern as
+     * CategoriesViewModelRaceTest.GatedMedia) or throw, so mid-refresh state and the
+     * runCatching fallback can be observed deterministically.
+     */
+    private class RefreshGatedMedia : MediaQuerySource {
+        val apksParked = CountDownLatch(1)
+        val apksGate = CountDownLatch(1)
+        val apksReturned = AtomicInteger()
+
+        @Volatile var apksEntries: List<MediaRepository.MediaEntry> = emptyList()
+        @Volatile var parkApksList = false
+        @Volatile var failNextApksList = false
+
+        override fun list(category: FileCategory, limit: Int): List<MediaRepository.MediaEntry> =
+            when (category) {
+                FileCategory.APKS -> {
+                    if (failNextApksList) throw IllegalStateException("media store hiccup")
+                    if (parkApksList) {
+                        // Prove the query really reached the gate before the test moves on,
+                        // otherwise cancel-before-start makes the release below never happen.
+                        apksParked.countDown()
+                        apksGate.await()
+                    }
+                    apksReturned.incrementAndGet()
+                    apksEntries
+                }
+                else -> emptyList()
+            }
+
+        override fun recent(limit: Int): List<MediaRepository.MediaEntry> = emptyList()
+
+        override fun summaries(): List<CategorySummary> =
+            FileCategory.entries.map { CategorySummary(it, 0, 0L) }
+
+        override fun deleteStale(entries: List<MediaRepository.MediaEntry>): Int = 0
     }
 
     /** Deterministic two-row media source so sorting can be asserted without MediaStore. */
