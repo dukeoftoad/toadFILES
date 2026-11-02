@@ -116,7 +116,7 @@ class MediaTrashOpsTest {
 
         assertEquals(listOf(link.absolutePath), double.calls.single().map { it.absolutePath })
         assertTrue(result.staleEntries.isEmpty())
-        assertEquals(listOf("file1.txt"), result.movedEntries.map { it.name })
+        assertEquals(listOf("link.txt"), result.movedEntries.map { it.name })
     }
 
     // ---------- real trash round-trip ----------
