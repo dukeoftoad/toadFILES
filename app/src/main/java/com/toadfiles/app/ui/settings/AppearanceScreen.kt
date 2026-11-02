@@ -1,7 +1,9 @@
 package com.toadfiles.app.ui.settings
 
 import android.os.Build
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,7 +51,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppIconColor
+import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.ui.theme.AccentPalettes
+import com.toadfiles.app.ui.theme.AppIconPalettes
 
 /**
  * Dedicated Appearance subpage (v1.7.3): theme mode, dynamic color and accent color
@@ -165,6 +171,52 @@ fun AppearanceScreen(
                 }
             }
             Spacer(Modifier.height(32.dp))
+
+            Text("App icon", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Design", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "The drawing inside the icon. Classic is the original.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(AppIconDesign.entries) { d ->
+                            IconDesignTile(
+                                design = d,
+                                // Live preview: every design is rendered on the CURRENT
+                                // background tint, so picking a color re-tints all tiles.
+                                previewColor = settings.appIconColor,
+                                selected = settings.appIconDesign == d,
+                                onClick = { vm.setAppIconDesign(d) },
+                            )
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Text("Background", style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(AppIconColor.entries) { c ->
+                            IconColorSwatch(
+                                color = c,
+                                selected = settings.appIconColor == c,
+                                onClick = { vm.setAppIconColor(c) },
+                            )
+                        }
+                    }
+                    Text(
+                        "The launcher may take a moment to show the new icon.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -197,6 +249,80 @@ private fun AccentSwatch(
         Spacer(Modifier.height(4.dp))
         Text(
             accent.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** One launcher-icon design tile: the design's foreground on the CURRENT background tint. */
+@Composable
+private fun IconDesignTile(
+    design: AppIconDesign,
+    previewColor: AppIconColor,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(AppIconPalettes.background(previewColor))
+                .then(
+                    if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+                    else Modifier
+                )
+                .padding(10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(AppIconPalettes.foregroundRes(design)),
+                contentDescription = design.label,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            design.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** One background-tint swatch; mirrors [AccentSwatch]'s selection treatment. */
+@Composable
+private fun IconColorSwatch(
+    color: AppIconColor,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = if (selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f) else Color.Transparent,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(4.dp)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(AppIconPalettes.background(color)),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            color.label,
             style = MaterialTheme.typography.labelSmall,
             color = if (selected) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant,
