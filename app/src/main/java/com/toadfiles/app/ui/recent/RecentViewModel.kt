@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.data.MediaUndo
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.OpProgress
@@ -36,6 +37,14 @@ data class RecentUiState(
     val pendingDelete: List<MediaRepository.MediaEntry>? = null,
     val detailsOf: MediaRepository.MediaEntry? = null,
     val toast: String? = null,
+    /** True while a delete-to-trash batch is running (drives the progress overlay). */
+    val deleting: Boolean = false,
+    /** Last delete batch (trash payload files), for the snackbar's Undo action.
+     *  One-shot (D2): the screen consumes it the moment the snackbar shows it. */
+    val lastTrashed: List<File>? = null,
+    /** Bumped whenever a new undo offer is made; the snackbar effect keys on this id
+     *  so consuming the offer (nulling [lastTrashed]) cannot cancel the showing snackbar. */
+    val undoOfferSeq: Long = 0,
     /** Encrypted archive whose extraction is waiting for a password (drives PasswordPromptDialog). */
     val pendingPasswordFor: File? = null,
     /** Retry context for [pendingPasswordFor]: same target dir / replace semantics as the original call. */
@@ -67,6 +76,9 @@ class RecentViewModel(
 
     /** Shared op plumbing (audit 7.3): launches the extract, owns cancel/dispose. */
     private val ops = OpRunner(viewModelScope, ioDispatcher)
+
+    /** Monotonic id of the current undo offer; see [RecentUiState.undoOfferSeq]. */
+    private var undoOfferId = 0L
 
     init {
         refresh()
@@ -145,31 +157,80 @@ class RecentViewModel(
 
     fun dismissDelete() = _state.update { it.copy(pendingDelete = null) }
 
-    /** Same trash flow as Categories: real paths into the 30-day trash, stale rows dropped. */
+    /**
+     * Same trash flow as Categories: real paths into the 30-day trash, stale rows
+     * dropped (fresh-DATA safe — a row the index re-pointed at the trash payload is
+     * never unlinked). The moved payloads are staged for the screen's Undo snackbar,
+     * and entries without a usable path are reported, never silently dropped.
+     */
     fun confirmDelete() {
         val entries = _state.value.pendingDelete ?: return
-        _state.update { it.copy(pendingDelete = null, selection = emptySet()) }
+        _state.update { it.copy(pendingDelete = null, selection = emptySet(), deleting = true) }
         viewModelScope.launch(ioDispatcher) {
-            val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
-            val noPath = entries.size - withPath.size
-            val roots = container.fileRepo.roots().map { it.dir }
-            // exists() follows symlinks — a dangling link is still trashable (D7).
-            val result = withPath.filter { (_, f) -> f.exists() || Files.isSymbolicLink(f.toPath()) }
-                .map { (_, f) -> f }
-                .let { Trash.trash(it, roots) }
-            container.mediaRepo.deleteStale(entries)
+            try {
+                val withPath = entries.mapNotNull { e -> e.data?.let { e to File(it) } }
+                val noPath = entries.size - withPath.size
+                val roots = container.fileRepo.roots().map { it.dir }
+                // exists() follows symlinks — a dangling link is still trashable (D7);
+                // files that vanished outright are skipped and counted (honest summary).
+                val trashable = withPath.filter { (_, f) -> f.exists() || Files.isSymbolicLink(f.toPath()) }
+                val result = trashable.map { (_, f) -> f }.let { Trash.trash(it, roots) }
+                container.mediaRepo.deleteStale(entries)
+                _state.update {
+                    it.copy(
+                        deleting = false,
+                        lastTrashed = result.moved.takeIf { t -> t.isNotEmpty() },
+                        undoOfferSeq = ++undoOfferId,
+                        toast = MediaUndo.deleteSummary(
+                            moved = result.moved.size,
+                            total = entries.size,
+                            skipped = noPath + withPath.size - trashable.size,
+                            failed = result.failureCount,
+                        ),
+                    )
+                }
+            } finally {
+                _state.update { it.copy(deleting = false) }
+            }
+            refresh()
+        }
+    }
+
+    /**
+     * Restores a delete batch (snackbar "Undo") from the captured payload list through
+     * the shared [MediaUndo] engine — the same honest flow Categories/Browse run:
+     * already-gone payloads are reported (N5), collision renames are counted (D4), and
+     * restored files are re-scanned into the media index (D1) so they reappear here.
+     */
+    fun undoDelete(trashed: List<File>) {
+        if (trashed.isEmpty()) return
+        viewModelScope.launch(ioDispatcher) {
+            val outcome = MediaUndo.restore(trashed, media)
+            val renamedNote = if (outcome.renamed > 0) ", ${outcome.renamed} renamed" else ""
             _state.update {
                 it.copy(
                     toast = when {
-                        result.moved.size == entries.size -> "Moved ${result.moved.size} item(s) to trash"
-                        noPath > 0 -> "Moved ${result.moved.size} to trash · $noPath had no on-disk path"
-                        else -> "Moved ${result.moved.size} of ${entries.size} to trash"
+                        outcome.gone > 0 ->
+                            "Restored ${outcome.restored} of ${trashed.size} — ${outcome.gone} already gone$renamedNote"
+                        outcome.restored < trashed.size ->
+                            "Restored ${outcome.restored} of ${trashed.size} — the rest stays in Trash$renamedNote"
+                        else -> "Restored ${outcome.restored} item(s)$renamedNote"
                     },
                 )
             }
             refresh()
         }
     }
+
+    /**
+     * One-shot undo offer (D2): consumed the moment the snackbar shows it, so a
+     * navigation mid-window can never leave a stale offer that resurrects later.
+     */
+    fun consumeUndoOffer() = _state.update { it.copy(lastTrashed = null) }
+
+    /** Hides the delete progress overlay early ("Cancel"); the trash batch itself keeps
+     *  running and still reports its outcome (toast / undo snackbar) when it lands. */
+    fun dismissDeleteProgress() = _state.update { it.copy(deleting = false) }
 
     // ---------- zip extract ----------
 

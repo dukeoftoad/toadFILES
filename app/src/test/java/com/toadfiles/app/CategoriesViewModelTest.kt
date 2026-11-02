@@ -169,6 +169,70 @@ class CategoriesViewModelTest {
     }
 
     @Test
+    fun `multi-select delete moves every payload into the trash and stages one undo offer`() = runTest {
+        val dir = java.io.File(container.fileRepo.primaryRoot(), "cat-multi-${System.nanoTime()}")
+        dir.mkdirs()
+        try {
+            val a = java.io.File(dir, "cat-multi-a.txt").apply { writeText("a") }
+            val b = java.io.File(dir, "cat-multi-b.txt").apply { writeText("b") }
+
+            vm.requestDelete(
+                listOf(entry(1, a.name, data = a.absolutePath), entry(2, b.name, data = b.absolutePath)),
+            )
+            assertEquals(2, vm.state.value.pendingDelete?.size)
+            vm.confirmDelete()
+
+            // Full success: no toast — the screen's Undo snackbar reports it (Browse parity).
+            await { vm.state.value.lastTrashed?.size == 2 }
+            assertNull(vm.state.value.toast)
+            assertFalse(a.exists())
+            assertFalse(b.exists())
+
+            // Every payload is alive inside the per-volume trash dir, in batch order.
+            val trashDir = java.io.File(
+                container.fileRepo.primaryRoot(),
+                com.toadfiles.app.domain.Trash.DIR_NAME,
+            )
+            val payloads = vm.state.value.lastTrashed!!
+            assertEquals(listOf("a", "b"), payloads.map { it.readText() })
+            assertTrue(payloads.all { it.absolutePath.startsWith(trashDir.absolutePath) && it.exists() })
+
+            // One undo restores the whole batch.
+            vm.consumeUndoOffer()
+            vm.undoDelete(payloads)
+            await { vm.state.value.toast == "Restored 2 item(s)" }
+            assertTrue(a.exists() && b.exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `undoDelete reports a mixed batch honestly`() = runTest {
+        val dir = java.io.File(container.fileRepo.primaryRoot(), "cat-mixed-undo-${System.nanoTime()}")
+        dir.mkdirs()
+        try {
+            val keep = java.io.File(dir, "keep.txt").apply { writeText("k") }
+            val vanished = java.io.File(dir, "vanished.txt").apply { writeText("v") }
+            val moved = com.toadfiles.app.domain.Trash.trash(
+                listOf(keep, vanished),
+                listOf(container.fileRepo.primaryRoot()),
+            ).moved
+            assertEquals(2, moved.size)
+            moved[1].delete() // one payload disappears from the trash before the undo
+
+            vm.undoDelete(moved)
+            await { vm.state.value.toast != null }
+            // Honest accounting (N5): the already-gone payload is reported, not hidden.
+            assertEquals("Restored 1 of 2 — 1 already gone", vm.state.value.toast)
+            assertTrue(keep.exists())
+            assertFalse(moved[1].exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `requestDelete with nothing is a no-op`() = runTest {
         vm.requestDelete(emptyList())
         assertNull(vm.state.value.pendingDelete)

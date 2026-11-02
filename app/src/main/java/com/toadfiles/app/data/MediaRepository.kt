@@ -196,12 +196,22 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
      * moved them to the trash — the index only catches up on the next media scan).
      * Best-effort: rows we are not allowed to touch are skipped, never crash.
      * Returns how many rows were dropped.
+     *
+     * The row's DATA column is re-read FRESH at delete time (v1.9.1 race fix): the
+     * captured [MediaEntry.data] path can be stale by the time we get here — right
+     * after a delete-to-trash, the provider's async re-scan may already have re-pointed
+     * the row's DATA at the trash payload. Deciding on the captured path would then
+     * unlink the only surviving copy of the file (lost from the origin AND the trash,
+     * with undo finding nothing to restore). So a row is only dropped when its CURRENT
+     * DATA is missing or names a nonexistent file; a row that still points at a live
+     * file — at the origin OR inside the trash — is kept (the listing rules hide trash
+     * paths, and a later scan or trash emptying reconciles the rest).
      */
     override fun deleteStale(entries: List<MediaEntry>): Int {
         var dropped = 0
         for (e in entries) {
-            val path = e.data ?: continue
-            if (File(path).exists()) continue
+            val current = currentDataPath(e.uri) ?: continue
+            if (File(current).exists()) continue // alive at ANY path (origin or trash) → keep the row
             try {
                 if (resolver.delete(e.uri, null, null) > 0) dropped++
             } catch (_: Exception) {
@@ -210,6 +220,22 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
             }
         }
         return dropped
+    }
+
+    /**
+     * The row's CURRENT DATA path as the index holds it right now, or null when the
+     * row is gone, has no readable DATA, or the provider query failed — anything we
+     * cannot verify is never deleted (the scanner reconciles those instead).
+     */
+    @Suppress("DEPRECATION") // DATA is deprecated but is the only way back to a real path
+    private fun currentDataPath(uri: Uri): String? = try {
+        resolver.query(
+            uri,
+            arrayOf(MediaStore.Files.FileColumns.DATA),
+            null, null, null,
+        )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (_: Exception) {
+        null
     }
 
     /**

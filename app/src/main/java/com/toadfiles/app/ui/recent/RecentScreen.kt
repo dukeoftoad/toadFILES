@@ -48,8 +48,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,6 +83,7 @@ import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
 import com.toadfiles.app.ui.components.PasswordPromptDialog
+import com.toadfiles.app.ui.components.ProgressOverlay
 import com.toadfiles.app.util.Intents
 
 /**
@@ -111,6 +114,21 @@ fun RecentScreen(
             snackbar.showSnackbar(it)
             vm.consumeToast()
         }
+    }
+
+    // Undo for deletes, exactly like Categories/Browse: trashed items go straight back.
+    // The offer is consumed the moment it is shown (D2) so navigating away mid-window
+    // can never resurrect an ancient undo later; keyed on the offer sequence so
+    // consuming cannot cancel the snackbar that is still showing.
+    LaunchedEffect(state.undoOfferSeq) {
+        val trashed = state.lastTrashed ?: return@LaunchedEffect
+        vm.consumeUndoOffer()
+        val result = snackbar.showSnackbar(
+            message = "Moved ${trashed.size} item(s) to trash",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) vm.undoDelete(trashed)
     }
 
     val inSelection = state.selection.isNotEmpty()
@@ -315,7 +333,7 @@ fun RecentScreen(
             title = { Text("Move ${entries.size} item(s) to trash?") },
             text = {
                 Text("Items are moved to the toadFILES trash and kept for 30 days. " +
-                    "You can restore them from the Trash page.")
+                    "You can undo right away or restore them from the Trash page.")
             },
             confirmButton = {
                 TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }
@@ -348,6 +366,14 @@ fun RecentScreen(
         onCancel = { vm.cancelOp() },
         onDismissResult = { vm.dismissResult() },
     )
+
+    // Multi-delete progress (Browse parity): the trash batch runs inline, so the
+    // shared overlay shows while it works. "Cancel" only dismisses the overlay —
+    // the move is already in flight and still reports its outcome (undo snackbar
+    // or honest partial toast) when it lands.
+    if (state.deleting) {
+        ProgressOverlay(text = "Deleting", fraction = null, onCancel = { vm.dismissDeleteProgress() })
+    }
 
     // Encrypted archive: the extract came back passwordRequired — ask, then retry
     // with the same target dir / replace semantics (v1.8.0).

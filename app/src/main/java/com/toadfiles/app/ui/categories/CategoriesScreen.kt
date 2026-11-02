@@ -91,6 +91,7 @@ import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
 import com.toadfiles.app.ui.components.CompressDialog
 import com.toadfiles.app.ui.components.PasswordPromptDialog
+import com.toadfiles.app.ui.components.ProgressOverlay
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.NameInputDialog
 import com.toadfiles.app.ui.components.PropertiesSheet
@@ -461,6 +462,14 @@ fun CategoriesScreen(
         onCancel = { vm.cancelOp() },
         onDismissResult = { vm.dismissResult() },
     )
+
+    // Multi-delete progress (Browse parity): the trash batch runs inline, so the
+    // shared overlay shows while it works. "Cancel" only dismisses the overlay —
+    // the move is already in flight and still reports its outcome (undo snackbar
+    // or honest partial toast) when it lands.
+    if (state.deleting) {
+        ProgressOverlay(text = "Deleting", fraction = null, onCancel = { vm.dismissDeleteProgress() })
+    }
 
     // Encrypted archive: the extract came back passwordRequired — ask, then retry
     // with the same target dir / overwrite semantics (v1.8.0).

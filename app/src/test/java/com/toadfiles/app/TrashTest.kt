@@ -181,6 +181,46 @@ class TrashTest {
     }
 
     @Test
+    fun `a file on a secondary volume trashes and restores through that volume's trash dir`() {
+        // Two-volume round trip (v1.9.1 regression guard): the origin lives under a
+        // non-primary volume root, and the roots list has the primary first — the
+        // per-volume trash machinery must still pick the ORIGIN's own volume for the
+        // payload (same-volume rename, never a copy) and restore it back there.
+        val primary = volume()
+        val secondary = volume()
+        val dir = File(secondary, "sdcard-music").apply { mkdirs() }
+        val src = File(dir, "song.mp3").apply { writeText("audio") }
+
+        val trashed = Trash.trash(listOf(src), listOf(primary, secondary))
+        assertEquals(1, trashed.moved.size)
+        assertFalse(src.exists())
+
+        val payload = trashed.moved[0]
+        assertTrue(
+            "payload must sit in the secondary volume's trash dir",
+            payload.absolutePath.startsWith(trashDir(secondary).absolutePath + "/"),
+        )
+        assertFalse(
+            "the primary volume's trash must not hold another volume's payload",
+            payload.absolutePath.startsWith(trashDir(primary).absolutePath),
+        )
+        assertEquals("audio", payload.readText())
+
+        // A listing across both volumes reports the payload with its origin on the
+        // secondary volume…
+        val entries = Trash.entries(listOf(primary, secondary))
+        assertEquals(1, entries.size)
+        assertEquals(src.absolutePath, entries[0].originPath)
+
+        // …and the restore puts the file back under the secondary volume's tree.
+        val restored = Trash.restore(payload)
+        assertNotNull(restored)
+        assertEquals(src.absolutePath, restored!!.absolutePath)
+        assertEquals("audio", src.readText())
+        assertTrue(Trash.entries(listOf(primary, secondary)).isEmpty())
+    }
+
+    @Test
     fun `a user file named like metadata stays visible in the trash`() {
         val vol = volume()
         val src = File(vol, "notes.tfmeta").apply { writeText("payload") }
