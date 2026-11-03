@@ -381,6 +381,12 @@ fun BrowseScreen(
                                         pendingExtractTo = single
                                         vm.clearSelection()
                                         selectingExtractFolder = true
+                    searchOpen = false
+                    vm.setQuery("")
+                    vm.setFilter(FilterMode.ALL)
+                                        searchOpen = false
+                                        vm.setQuery("")
+                                        vm.setFilter(FilterMode.ALL)
                                     },
                                     leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) },
                                 )
