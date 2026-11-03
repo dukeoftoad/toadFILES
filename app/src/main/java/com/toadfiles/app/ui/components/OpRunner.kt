@@ -73,9 +73,9 @@ class OpRunner(
 
 /**
  * Progress overlay + result dialog for a running/finished op — the exact wiring both
- * media screens rendered inline. Shows the overlay while [progress] is set (fraction
- * only when [OpProgress.total] is positive, indeterminate otherwise) and the result
- * dialog once [result] arrives.
+ * media screens rendered inline. Shows the overlay while [progress] is set (percent,
+ * "N of M items" and the live entry name when [OpProgress.total] is positive,
+ * "Working…" plus the entry name otherwise) and the result dialog once [result] arrives.
  */
 @Composable
 fun MediaOpOverlays(
@@ -88,7 +88,9 @@ fun MediaOpOverlays(
     progress?.let { (title, p) ->
         ProgressOverlay(
             text = title,
-            fraction = if (p.total > 0) p.done.toFloat() / p.total else null,
+            done = p.done,
+            total = p.total,
+            currentItem = p.currentItem,
             onCancel = onCancel,
         )
     }

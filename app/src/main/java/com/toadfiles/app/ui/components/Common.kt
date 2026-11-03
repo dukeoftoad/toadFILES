@@ -1,6 +1,8 @@
 package com.toadfiles.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -475,22 +477,63 @@ fun ConflictDialog(
 }
 
 @Composable
-fun ProgressOverlay(text: String, fraction: Float?, onCancel: () -> Unit) {
+fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text(text) },
         text = {
             Column {
-                if (fraction != null && fraction >= 0f) {
-                    LinearProgressIndicator(
-                        progress = { fraction.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
+                if (total > 0) {
+                    // Determinate: a smooth bar plus the two signals a bare bar withholds
+                    // — how far along (percent) and what is happening ("2 of 4 items",
+                    // with the entry name when the pipeline reports one).
+                    val target = (done.toFloat() / total).coerceIn(0f, 1f)
+                    val animated by animateFloatAsState(
+                        targetValue = target,
+                        animationSpec = tween(durationMillis = 250),
+                        label = "progress_fraction",
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LinearProgressIndicator(
+                            progress = { animated },
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${(target * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    val item = currentItem?.takeIf { it.isNotBlank() }
+                    Text(
+                        buildString {
+                            append(done).append(" of ").append(total)
+                            append(if (total == 1) " item" else " items")
+                            if (item != null) append(" — ").append(item)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 } else {
+                    // Unknown total (zip-volume merge, listing-driven ops): indeterminate.
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(12.dp))
                         Text("Working…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    currentItem?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }

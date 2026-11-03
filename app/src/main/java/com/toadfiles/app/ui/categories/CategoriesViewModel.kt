@@ -638,7 +638,9 @@ class CategoriesViewModel(
             }
             val target = File(dir, file.nameWithoutExtension)
             if (target.exists()) {
-                requestToast("A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
+                // Same collision flow as "Extract to…" — the user picks the strategy in
+                // the shared dialog instead of a dead-end "rename it first" toast.
+                _state.update { it.copy(pendingExtractConflict = PendingExtractConflict(file, target)) }
                 return
             }
             startExtract(file, target)
@@ -685,10 +687,11 @@ class CategoriesViewModel(
     fun dismissExtractConflict() = _state.update { it.copy(pendingExtractConflict = null) }
 
     private fun startExtract(file: File, target: File, overwrite: Boolean = false, password: CharArray? = null) {
-        _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
+        val progressTitle = "Extracting ${file.name}"
+        _state.update { it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
             op = { onP -> ArchiveOps.extract(file, target, overwrite, password = password, onProgress = onP) },
-            onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
+            onProgress = { p -> _state.update { it.copy(progress = progressTitle to p) } },
             onDone = { r ->
                 if (r.passwordRequired) {
                     // Encrypted archive: ask for the password, don't report a failure.

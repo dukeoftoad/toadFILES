@@ -253,10 +253,11 @@ class RecentViewModel(
     }
 
     private fun runExtract(file: File, target: File, replace: Boolean = false, password: CharArray? = null) {
-        _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
+        val progressTitle = "Extracting ${file.name}"
+        _state.update { it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
             op = { onP -> ArchiveOps.extract(file, target, replace, password = password, onProgress = onP) },
-            onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
+            onProgress = { p -> _state.update { it.copy(progress = progressTitle to p) } },
             onDone = { r ->
                 if (r.passwordRequired) {
                     // Encrypted archive: ask for the password, don't report a failure.
