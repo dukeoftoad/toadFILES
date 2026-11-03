@@ -489,6 +489,61 @@ class BrowseViewModelTest {
         assertFalse(srcFile.exists()) // MOVE removes the source
     }
 
+    // ---------- transferBlockedReason (move/copy TransferBar guardrail) ----------
+
+    @Test
+    fun `transferBlockedReason - copy is never blocked, even in the source folder`() = runTest {
+        val src = File(dir, "a.txt").apply { writeText("x") }
+        vm.openDir(dir)
+        await { vm.state.value.dir?.absolutePath == dir.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.COPY, listOf(src))
+        await { vm.state.value.clipboard != null }
+        assertNull(vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - move to a sibling folder is allowed`() = runTest {
+        val sub = File(dir, "sub").apply { mkdirs() }
+        val other = File(dir, "other").apply { mkdirs() }
+        val src = File(sub, "a.txt").apply { writeText("x") }
+        vm.openDir(other)
+        await { vm.state.value.dir?.absolutePath == other.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(src))
+        await { vm.state.value.clipboard != null }
+        assertNull(vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - moving a folder into itself is blocked`() = runTest {
+        val inner = File(dir, "inner").apply { mkdirs() }
+        vm.openDir(inner)
+        await { vm.state.value.dir?.absolutePath == inner.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(inner))
+        await { vm.state.value.clipboard != null }
+        assertEquals("You can't move a folder into itself", vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - moving into a descendant of the selection is blocked`() = runTest {
+        val inner = File(dir, "inner").apply { mkdirs() }
+        val deep = File(inner, "deep").apply { mkdirs() }
+        vm.openDir(deep)
+        await { vm.state.value.dir?.absolutePath == deep.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(inner))
+        await { vm.state.value.clipboard != null }
+        assertEquals("You can't move a folder into itself", vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - moving up to an ancestor of the selection is allowed`() = runTest {
+        val inner = File(dir, "inner").apply { mkdirs() }
+        vm.openDir(dir)
+        await { vm.state.value.dir?.absolutePath == dir.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(inner))
+        await { vm.state.value.clipboard != null }
+        assertNull(vm.transferBlockedReason())
+    }
+
     @Test
     fun `zipSelected writes a real archive into the current folder`() = runTest {
         val f = File(dir, "text.txt").apply { writeText("zip me") }
