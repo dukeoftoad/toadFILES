@@ -321,9 +321,11 @@ fun CategoriesScreen(
         } else {
             CategoryEntries(
                 state = state,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                // No second .padding(padding): the PullToRefreshBox above already
+                // consumed the Scaffold insets — applying them again pushed the whole
+                // drill-in a full top-bar height down, leaving a dead band between
+                // the bar and the first row (owner report). Browse pads exactly once.
+                modifier = Modifier.fillMaxSize(),
                 onEntryTap = { e ->
                     when {
                         inSelection -> vm.toggleSelection(e)

@@ -433,7 +433,11 @@ fun BrowseScreen(
             }
         },
         floatingActionButton = {
-            if (!selectionMode) {
+            // The armed-transfer bar docks across this same bottom edge, and Scaffold
+            // draws the FAB on top of content — while a move/copy is armed the bar's
+            // Paste/Cancel buttons and item count must stay visible and reachable, so
+            // the FAB steps aside (owner report: it overlaid the transfer actions).
+            if (!selectionMode && state.clipboard == null) {
                 FloatingActionButton(onClick = { vm.requestNewFolder() }) {
                     Icon(Icons.Outlined.CreateNewFolder, "New folder")
                 }
