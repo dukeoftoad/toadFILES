@@ -99,6 +99,7 @@ fun MediaOpOverlays(
             summary = "$resultTitle: ${r.summary}",
             failures = r.failures,
             onDismiss = onDismissResult,
+            resultTitle = resultTitle,
         )
     }
 }

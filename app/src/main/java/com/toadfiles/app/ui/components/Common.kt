@@ -542,15 +542,28 @@ fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, o
     )
 }
 
+/** Finished-dialog title derived from the op's short word ("Copying" → "Copy finished"):
+ *  the dialog used to say "Operation finished" for everything, which never told you
+ *  WHAT finished. Unknown/blank titles keep the old generic text. */
+fun resultDoneTitle(resultTitle: String): String = when (resultTitle.trim()) {
+    "Copying" -> "Copy finished"
+    "Moving" -> "Move finished"
+    "Extracting" -> "Extract finished"
+    "Zipping" -> "Zip finished"
+    "Compressing" -> "Compression finished"
+    else -> "Operation finished"
+}
+
 @Composable
 fun ResultDialog(
     summary: String,
     failures: List<String>,
     onDismiss: () -> Unit,
+    resultTitle: String = "",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Operation finished") },
+        title = { Text(resultDoneTitle(resultTitle)) },
         text = {
             Column {
                 Text(summary, style = MaterialTheme.typography.bodyLarge)

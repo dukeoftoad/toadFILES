@@ -795,6 +795,7 @@ fun BrowseScreen(
             summary = "${state.resultTitle}: ${r.summary}",
             failures = r.failures,
             onDismiss = { vm.dismissResult() },
+            resultTitle = state.resultTitle,
         )
     }
     state.pendingProperties?.let { file ->
