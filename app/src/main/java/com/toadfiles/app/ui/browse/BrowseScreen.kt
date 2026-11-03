@@ -231,10 +231,13 @@ fun BrowseScreen(
     LaunchedEffect(revealTarget, state.loading, state.items) {
         val name = revealTarget ?: return@LaunchedEffect
         if (state.loading || state.items.isEmpty()) return@LaunchedEffect
-        consumedReveal = name
         val index = state.items.filter { state.filterMode.matches(it.name) }
             .indexOfFirst { it.file.name == name }
-        if (index < 0) return@LaunchedEffect // vanished or filtered out — nothing to point at
+        if (index < 0) {
+            // Vanished or filtered out — consume without acting, nothing to point at.
+            consumedReveal = name
+            return@LaunchedEffect
+        }
         try {
             activeReveal = name
             if (state.settings.browseLayout == BrowseLayout.GRID) {
@@ -243,6 +246,9 @@ fun BrowseScreen(
                 listState.animateScrollToItem(index)
             }
             blinkTwice { on -> blinkOn = on }
+            // Consume only AFTER the pinpoint finished: writing it earlier would
+            // re-key this very effect mid-scroll and cancel the work (CI-caught).
+            consumedReveal = name
         } finally {
             // Cancellation-safe settle: a mid-blink re-list must never strand the row lit.
             activeReveal = null
