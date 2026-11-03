@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Info
@@ -387,11 +388,33 @@ private fun <T> ChoiceRow(
             null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 3.dp,
+        ) {
             choices.forEach { c ->
+                val isSelected = c == selected
                 DropdownMenuItem(
-                    text = { Text(label(c)) },
+                    text = {
+                        Text(
+                            label(c),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    },
                     onClick = { onSelect(c); open = false },
+                    trailingIcon = {
+                        if (isSelected) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    },
                 )
             }
         }

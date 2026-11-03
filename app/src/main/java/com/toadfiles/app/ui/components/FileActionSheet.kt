@@ -1,6 +1,8 @@
 package com.toadfiles.app.ui.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -174,7 +176,35 @@ fun FileActionSheet(
                 SheetRow(Icons.Outlined.FolderOpen, "Show in folder", onClick = onShowInFolder)
             }
             if (!item.isDir && onCopyPath != null) {
-                SheetRow(Icons.Outlined.ContentPaste, "Copy path", onClick = onCopyPath)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onCopyPath)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.ContentPaste,
+                        contentDescription = "Copy full path",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Path", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            item.file.absolutePath,
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            softWrap = false,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text("Copy", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary)
+                }
             }
             if (!item.isDir && onOpenWith != null) {
                 SheetRow(Icons.Outlined.MoreHoriz, "Open with…", onClick = onOpenWith)

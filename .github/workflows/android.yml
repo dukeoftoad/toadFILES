@@ -1,6 +1,7 @@
 name: Android CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
@@ -63,4 +64,3 @@ jobs:
         with:
           name: toadFILES-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-
