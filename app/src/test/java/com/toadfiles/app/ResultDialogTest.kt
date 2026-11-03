@@ -2,6 +2,7 @@ package com.toadfiles.app
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.ui.components.ResultDialog
 import com.toadfiles.app.ui.components.resultDoneTitle
 import com.toadfiles.app.ui.theme.ToadTheme
