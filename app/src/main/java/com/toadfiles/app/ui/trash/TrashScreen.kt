@@ -54,6 +54,7 @@ import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.ProgressOverlay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -211,6 +212,19 @@ fun TrashScreen(
             destructive = true,
             onConfirm = { vm.confirmBatchDeleteForever() },
             onDismiss = { vm.dismissBatchDeleteForever() },
+        )
+    }
+
+    // Shared progress overlay (owner report): the multi-item trash flows used to run
+    // blind — no bar, no count, no way out. Same overlay Browse shows for its ops;
+    // Cancel stops at the next item boundary, keeping what is already done.
+    state.progress?.let { (title, p) ->
+        ProgressOverlay(
+            text = title,
+            done = p.done,
+            total = p.total,
+            currentItem = p.currentItem,
+            onCancel = { vm.cancelBatch() },
         )
     }
 }
