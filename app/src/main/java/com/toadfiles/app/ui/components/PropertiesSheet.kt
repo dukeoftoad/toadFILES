@@ -181,7 +181,9 @@ fun fileTypeLabel(name: String, isDir: Boolean): String {
     return TYPE_LABELS[ext] ?: ext.uppercase()
 }
 
-private val TYPE_LABELS = mapOf(
+// internal (not private) so FileTypeIconsTest can pin iconFor() to the same extension
+// set: a friendly label here must never come with a generic file icon in the lists.
+internal val TYPE_LABELS = mapOf(
     "zip" to "ZIP archive",
     "rar" to "RAR archive",
     "7z" to "7z archive",

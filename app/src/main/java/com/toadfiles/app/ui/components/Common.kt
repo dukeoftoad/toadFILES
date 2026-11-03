@@ -169,12 +169,12 @@ fun iconFor(item: FileItem): ImageVector = if (item.isDir) {
     Icons.Outlined.Folder
 } else {
     when (item.name.substringAfterLast('.', "").lowercase()) {
-        in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "svg") -> Icons.Outlined.Image
+        in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg") -> Icons.Outlined.Image
         in setOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v") -> Icons.Outlined.Videocam
         in setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "amr") -> Icons.Outlined.Audiotrack
         in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> Icons.Outlined.FolderZip
         "apk" -> Icons.Outlined.InstallMobile
-        in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv") ->
+        in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "htm", "html") ->
             Icons.Outlined.Description
         else -> Icons.AutoMirrored.Outlined.InsertDriveFile
     }
