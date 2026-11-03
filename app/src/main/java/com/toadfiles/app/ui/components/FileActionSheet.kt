@@ -131,12 +131,12 @@ fun FileActionSheet(
                 SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
             }
 
-            // Organize: Delete / Compress / Extract. Archives toadFILES can extract (.zip,
+            // Organize: Move to trash / Compress / Extract. Archives toadFILES can extract (.zip,
             // .7z) get Extract actions instead of "Compress this file" — both formats are
             // also creatable since v1.7.3 via the compress dialog's format chooser, but an
             // existing archive is far more often extracted.
             if (onDelete != null) {
-                SheetRow(Icons.Outlined.Delete, "Delete", destructive = true, onClick = onDelete)
+                SheetRow(Icons.Outlined.Delete, "Move to trash", destructive = true, onClick = onDelete)
             }
             when {
                 item.isDir && onZip != null ->

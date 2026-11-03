@@ -153,8 +153,8 @@ class CategoriesScreenTest {
         }
         compose.onAllNodesWithContentDescription("More actions")[0].performClick()
 
-        // Extract (here + to…), Rename, Delete and Properties — the exact rows Browse
-        // renders for the same file, now shared.
+        // Extract (here + to…), Rename, Move to trash and Properties — the exact rows
+        // Browse renders for the same file, now shared.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Extract here").fetchSemanticsNodes().isNotEmpty()
         }
@@ -168,7 +168,7 @@ class CategoriesScreenTest {
             compose.onAllNodesWithText("Properties").fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Delete").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Move to trash").fetchSemanticsNodes().isNotEmpty()
         }
     }
 

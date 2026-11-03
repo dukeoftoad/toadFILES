@@ -265,7 +265,7 @@ fun BrowseScreen(
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(state.selection.toList()) }) {
-                            Icon(Icons.Outlined.Delete, "Delete")
+                            Icon(Icons.Outlined.Delete, "Move to trash")
                         }
                         IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                         DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
@@ -749,7 +749,7 @@ fun BrowseScreen(
             title = "Move ${files.size} ${Format.itemWord(files.size)} to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
                 "You can undo right away or restore them from the Trash page.",
-            confirmLabel = "Delete",
+            confirmLabel = "Move to trash",
             destructive = true,
             onConfirm = { vm.confirmDelete() },
             onDismiss = { vm.dismissDelete() },

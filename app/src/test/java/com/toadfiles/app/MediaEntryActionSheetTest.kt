@@ -106,7 +106,7 @@ class MediaEntryActionSheetTest {
         assertRowHidden("Extract to…")
         assertRowHidden("Rename")
         assertRowHidden("Compress this file")
-        assertRowHidden("Delete")
+        assertRowHidden("Move to trash")
         assertRowHidden("Copy path")
         assertRowHidden("Show in folder")
     }

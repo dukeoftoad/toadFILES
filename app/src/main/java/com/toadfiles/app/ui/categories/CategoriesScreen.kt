@@ -200,7 +200,7 @@ fun CategoriesScreen(
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(vm.selectedEntries()) }) {
-                            Icon(Icons.Outlined.Delete, "Delete")
+                            Icon(Icons.Outlined.Delete, "Move to trash")
                         }
                         // Bulk menu, like Browse's: the batch ops that make sense for
                         // media rows (zip, single-archive extract, properties, rename).
@@ -365,7 +365,7 @@ fun CategoriesScreen(
             title = "Move ${entries.size} ${Format.itemWord(entries.size)} to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
                 "You can undo right away or restore them from the Trash page.",
-            confirmLabel = "Delete",
+            confirmLabel = "Move to trash",
             destructive = true,
             onConfirm = { vm.confirmDelete() },
             onDismiss = { vm.dismissDelete() },
