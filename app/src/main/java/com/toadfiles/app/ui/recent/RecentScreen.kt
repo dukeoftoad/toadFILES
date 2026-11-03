@@ -165,7 +165,7 @@ fun RecentScreen(
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(vm.selectedEntries()) }) {
-                            Icon(Icons.Outlined.Delete, "Delete")
+                            Icon(Icons.Outlined.Delete, "Move to trash")
                         }
                     },
                 )
@@ -336,7 +336,7 @@ fun RecentScreen(
                     "You can restore them from the Trash page.")
             },
             confirmButton = {
-                TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }
+                TextButton(onClick = { vm.confirmDelete() }) { Text("Move to trash") }
             },
             dismissButton = { TextButton(onClick = { vm.dismissDelete() }) { Text("Cancel") } },
         )
