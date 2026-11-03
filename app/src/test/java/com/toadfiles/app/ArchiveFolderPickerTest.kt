@@ -64,24 +64,22 @@ class ArchiveFolderPickerTest {
     }
 
     @Test
-    fun `actions fire the callbacks with the right values`() {
+    fun `use this folder fires with the picked path`() {
         val tmp = File("/tmp/toadfiles-test-picker2/parent/here").apply { mkdirs() }
         val picked = mutableListOf<String>()
         render(initial = tmp.absolutePath, onSelect = { picked += it })
 
         compose.onNodeWithText("Use this folder").performClick()
         assertEquals(listOf(tmp.absolutePath), picked)
+    }
 
-        compose.setContent {
-            ToadTheme {
-                ArchiveFolderPicker(
-                    initial = tmp.absolutePath,
-                    onSelect = { picked += it },
-                    onDismiss = {},
-                )
-            }
-        }
+    @Test
+    fun `same folder as source resets to blank`() {
+        val tmp = File("/tmp/toadfiles-test-picker3/parent/here").apply { mkdirs() }
+        val picked = mutableListOf<String>()
+        render(initial = tmp.absolutePath, onSelect = { picked += it })
+
         compose.onNodeWithText("Same folder as source").performClick()
-        assertEquals(listOf(tmp.absolutePath, ""), picked)
+        assertEquals(listOf(""), picked)
     }
 }
