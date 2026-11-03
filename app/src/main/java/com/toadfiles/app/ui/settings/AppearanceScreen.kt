@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -380,11 +381,33 @@ private fun <T> ChoiceRow(
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            choices.forEach { c ->
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 3.dp,
+        ) {
+            choices.forEach { choice ->
+                val isSelected = choice == selected
                 DropdownMenuItem(
-                    text = { Text(label(c)) },
-                    onClick = { onSelect(c); open = false },
+                    text = {
+                        Text(
+                            label(choice),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    },
+                    onClick = { onSelect(choice); open = false },
+                    trailingIcon = {
+                        if (isSelected) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    },
                 )
             }
         }
