@@ -50,7 +50,7 @@ class FileActionSheetTest {
                 FileActionSheet(
                     item = item,
                     isFavorite = isFavorite,
-                    onOpen = {}, onShare = {}, onDelete = if (wired) ({}) else null, onDetails = {},
+                    onOpen = {}, onShare = {}, onDelete = {}, onDetails = {},
                     onRename = if (wired) ({}) else null,
                     onCopy = if (wired) ({}) else null,
                     onMove = if (wired) ({}) else null,
