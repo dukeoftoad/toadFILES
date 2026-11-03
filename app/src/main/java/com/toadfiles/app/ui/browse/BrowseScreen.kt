@@ -177,7 +177,7 @@ fun BrowseScreen(
      *  ACTION_VIEW). v1.7.3: the dialog only shows for tap action MENU — EXTRACT and
      *  OPEN_WITH (Settings → Archive actions) are dispatched directly in openItem. */
     var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
-    /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
+    /** Archive being routed through Browse so the user can choose its destination folder. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(state.toast) {
@@ -214,7 +214,8 @@ fun BrowseScreen(
     }
 
     val selectionMode = state.selection.isNotEmpty()
-    BackHandler(enabled = selectionMode) { vm.clearSelection() }
+    BackHandler(enabled = pendingExtractTo != null) { pendingExtractTo = null }
+    BackHandler(enabled = selectionMode && pendingExtractTo == null) { vm.clearSelection() }
 
     // ---- "Show in folder" pinpoint (owner report) ----
     // A bare folder jump left the user hunting for the file themselves; now the
@@ -255,7 +256,7 @@ fun BrowseScreen(
             blinkOn = false
         }
     }
-    BackHandler(enabled = !selectionMode) {
+    BackHandler(enabled = !selectionMode && pendingExtractTo == null) {
         // v1.7.3 back-key setting: EXIT leaves Browse from any depth — the same thing
         // the old back-at-root behavior did (onNavigateUp → popBackStack; Browse is a
         // bottom-bar tab, so popping with an empty stack stays put, matching the
@@ -271,11 +272,11 @@ fun BrowseScreen(
     }
     // Registered last, so it wins: while a search is active, Back first clears the search
     // instead of jumping out of the folder.
-    BackHandler(enabled = !selectionMode && state.query.isNotBlank()) { vm.setQuery("") }
+    BackHandler(enabled = !selectionMode && pendingExtractTo == null && state.query.isNotBlank()) { vm.setQuery("") }
     // And one step further down: with the field open but the query empty, Back closes
     // the field instead of leaving the folder. (Query non-blank keeps the handler
     // above enabled and this one disabled — query clears first.)
-    BackHandler(enabled = !selectionMode && searchOpen && state.query.isBlank()) { searchOpen = false }
+    BackHandler(enabled = !selectionMode && pendingExtractTo == null && searchOpen && state.query.isBlank()) { searchOpen = false }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -284,7 +285,28 @@ fun BrowseScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
-            if (selectionMode) {
+            if (pendingExtractTo != null) {
+                TopAppBar(
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    title = { Text("Choose destination", maxLines = 1) },
+                    navigationIcon = {
+                        IconButton(onClick = { pendingExtractTo = null }) {
+                            Icon(Icons.Outlined.Close, "Cancel destination selection")
+                        }
+                    },
+                    actions = {
+                        TextButton(
+                            enabled = state.dir?.isDirectory == true && state.dir?.canWrite() == true,
+                            onClick = {
+                                val archive = pendingExtractTo ?: return@TextButton
+                                val destination = state.dir ?: return@TextButton
+                                pendingExtractTo = null
+                                vm.extractZipInto(archive, destination)
+                            },
+                        ) { Text("Choose this folder") }
+                    },
+                )
+            } else if (selectionMode) {
                 TopAppBar(
             windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text("${state.selection.size} selected") },
@@ -351,6 +373,9 @@ fun BrowseScreen(
                                     text = { Text("Extract to…") },
                                     onClick = {
                                         moreMenuOpen = false
+                                        vm.clearSelection()
+                                        searchOpen = false
+                                        if (state.query.isNotBlank()) vm.setQuery("")
                                         pendingExtractTo = single
                                     },
                                     leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) },
@@ -527,6 +552,16 @@ fun BrowseScreen(
                             )
                         }
                         Breadcrumbs(state.breadcrumbs) { vm.openDir(it) }
+                        if (pendingExtractTo != null) {
+                            Text(
+                                "Navigate to the folder where you want the archive extracted, then tap “Choose this folder”.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                            )
+                        }
                     Text(
                         buildString {
                             append(visible.size)
@@ -557,6 +592,8 @@ fun BrowseScreen(
 
                 val openItem: (FileItem) -> Unit = { item ->
                     when {
+                        pendingExtractTo != null && item.isDir -> vm.openDir(item.file)
+                        pendingExtractTo != null -> vm.requestToast("Choose a folder as the extraction destination")
                         selectionMode -> vm.toggleSelection(item)
                         item.isDir -> vm.openDir(item.file)
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
@@ -742,21 +779,6 @@ fun BrowseScreen(
                 }
             },
             dismissButton = { TextButton(onClick = { pendingArchiveTap = null }) { Text("Cancel") } },
-        )
-    }
-    // "Extract to…": the user names the destination folder — under the default
-    // destination (archive folder when set, v1.7.3), else the current directory.
-    pendingExtractTo?.let { archive ->
-        NameInputDialog(
-            title = "Extract to…",
-            initialValue = archive.nameWithoutExtension,
-            destination = vm.archiveFolderOr(state.dir)?.path,
-            confirmLabel = "Extract",
-            onConfirm = {
-                pendingExtractTo = null
-                vm.extractZip(archive, targetName = it)
-            },
-            onDismiss = { pendingExtractTo = null },
         )
     }
     // Encrypted archive: the extract came back passwordRequired — ask, then retry
