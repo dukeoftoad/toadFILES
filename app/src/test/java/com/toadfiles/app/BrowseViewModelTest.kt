@@ -420,7 +420,7 @@ class BrowseViewModelTest {
         vm.undoDelete(trashed)
         await { f.exists() }
         assertEquals("precious", f.readText())
-        assertEquals("Restored 1 item(s)", vm.state.value.toast)
+        assertEquals("Restored 1 item", vm.state.value.toast)
     }
 
     @Test
@@ -487,6 +487,61 @@ class BrowseViewModelTest {
         assertTrue(File(dstDir, "clean.txt").exists())
         assertEquals("data", File(dstDir, "clean.txt").readText())
         assertFalse(srcFile.exists()) // MOVE removes the source
+    }
+
+    // ---------- transferBlockedReason (move/copy TransferBar guardrail) ----------
+
+    @Test
+    fun `transferBlockedReason - copy is never blocked, even in the source folder`() = runTest {
+        val src = File(dir, "a.txt").apply { writeText("x") }
+        vm.openDir(dir)
+        await { vm.state.value.dir?.absolutePath == dir.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.COPY, listOf(src))
+        await { vm.state.value.clipboard != null }
+        assertNull(vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - move to a sibling folder is allowed`() = runTest {
+        val sub = File(dir, "sub").apply { mkdirs() }
+        val other = File(dir, "other").apply { mkdirs() }
+        val src = File(sub, "a.txt").apply { writeText("x") }
+        vm.openDir(other)
+        await { vm.state.value.dir?.absolutePath == other.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(src))
+        await { vm.state.value.clipboard != null }
+        assertNull(vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - moving a folder into itself is blocked`() = runTest {
+        val inner = File(dir, "inner").apply { mkdirs() }
+        vm.openDir(inner)
+        await { vm.state.value.dir?.absolutePath == inner.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(inner))
+        await { vm.state.value.clipboard != null }
+        assertEquals("You can't move a folder into itself", vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - moving into a descendant of the selection is blocked`() = runTest {
+        val inner = File(dir, "inner").apply { mkdirs() }
+        val deep = File(inner, "deep").apply { mkdirs() }
+        vm.openDir(deep)
+        await { vm.state.value.dir?.absolutePath == deep.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(inner))
+        await { vm.state.value.clipboard != null }
+        assertEquals("You can't move a folder into itself", vm.transferBlockedReason())
+    }
+
+    @Test
+    fun `transferBlockedReason - moving up to an ancestor of the selection is allowed`() = runTest {
+        val inner = File(dir, "inner").apply { mkdirs() }
+        vm.openDir(dir)
+        await { vm.state.value.dir?.absolutePath == dir.absolutePath }
+        vm.copyToClipboard(Clipboard.Mode.MOVE, listOf(inner))
+        await { vm.state.value.clipboard != null }
+        assertNull(vm.transferBlockedReason())
     }
 
     @Test
@@ -604,21 +659,31 @@ class BrowseViewModelTest {
     }
 
     @Test
-    fun `extractZip default still refuses when the sibling folder exists`() = runTest {
+    fun `extractZip to an existing sibling folder asks via the conflict dialog, not a dead-end toast`() = runTest {
         val zip = File(dir, "plain.zip")
         makeZip(zip, mapOf("a.txt" to "A".toByteArray()))
-        File(dir, "plain").mkdirs()
+        File(dir, "plain").apply { mkdirs() }.resolve("old.txt").writeText("OLD")
         vm.openDir(dir)
 
         vm.extractZip(zip)
 
-        assertEquals(
-            "A folder named \"plain\" already exists. Rename or move it before extracting.",
-            vm.state.value.toast,
-        )
+        // Same collision flow as paste and "Extract to…": the dialog decides, nothing
+        // is written yet and no toast tells the user to go rename things by hand.
+        val pc = vm.state.value.pendingConflict
+        assertNotNull(pc)
+        assertEquals(OpKind.ZIP_EXTRACT, pc!!.op)
+        assertEquals(listOf("plain"), pc.conflicts)
         assertNull(vm.state.value.result)
         assertNull(vm.state.value.progress)
-        assertFalse("nothing may be extracted on refusal", File(dir, "plain/a.txt").exists())
+        assertNull(vm.state.value.toast)
+        assertFalse("nothing may be extracted before the user decides", File(dir, "plain (1)").exists())
+
+        vm.resolveConflict(ConflictStrategy.RENAME)
+
+        await { vm.state.value.result != null && vm.state.value.items.isNotEmpty() }
+        assertEquals("A", File(dir, "plain (1)/a.txt").readText())
+        // Keep both leaves the pre-existing folder untouched.
+        assertEquals("OLD", File(dir, "plain/old.txt").readText())
     }
 
     @Test
@@ -1229,7 +1294,7 @@ class BrowseViewModelTest {
         vm.undoDelete(trashed)
 
         await { File(dir, "clash (1).txt").exists() }
-        assertEquals("Restored 1 item(s), 1 renamed", vm.state.value.toast)
+        assertEquals("Restored 1 item, 1 renamed", vm.state.value.toast)
         // The restored destination was re-scanned into the media index (D1).
         assertEquals(listOf(File(dir, "clash (1).txt").absolutePath), media.rescans.flatten())
     }

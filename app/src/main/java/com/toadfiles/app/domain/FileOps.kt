@@ -114,7 +114,10 @@ object FileOps {
                 currentCoroutineContext().ensureActive()
                 onProgress(OpProgress(index, sources.size, src.name))
                 if (!src.exists()) {
-                    skip++; continue
+                    // The source vanished (deleted elsewhere since it was cut/copied):
+                    // that's a failure the user must see in Details, not a "skip" that
+                    // reads like their own conflict-skip choice.
+                    fail++; failures += "${src.name}: source not found"; continue
                 }
                 val destName = if (File(targetDir, src.name).exists() && strategy == ConflictStrategy.RENAME) {
                     PathSafety.uniqueName(targetDir, src.name)
@@ -171,7 +174,10 @@ object FileOps {
             try {
                 currentCoroutineContext().ensureActive()
                 onProgress(OpProgress(index, sources.size, src.name))
-                if (!src.exists()) { skip++; continue }
+                if (!src.exists()) {
+                    // Mirror copy(): a vanished source is a reported failure, not a skip.
+                    fail++; failures += "${src.name}: source not found"; continue
+                }
                 val destName = if (File(targetDir, src.name).exists() && strategy == ConflictStrategy.RENAME) {
                     PathSafety.uniqueName(targetDir, src.name)
                 } else src.name

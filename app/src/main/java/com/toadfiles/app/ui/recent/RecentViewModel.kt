@@ -12,6 +12,9 @@ import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.ConflictStrategy
+import com.toadfiles.app.domain.PathSafety
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.OpRunner
 import com.toadfiles.app.ui.components.PendingPasswordRetry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -51,7 +54,12 @@ data class RecentUiState(
     val progress: Pair<String, OpProgress>? = null,
     val result: OpResult? = null,
     val resultTitle: String = "",
+    /** "Extract here" collision waiting for the user's strategy in the shared ConflictDialog. */
+    val pendingExtractConflict: PendingExtractConflict? = null,
 )
+
+/** Archive + destination whose name already exists — same shape as Categories' flow. */
+data class PendingExtractConflict(val archive: File, val target: File)
 
 /**
  * Recent files straight from the OS media library, newest first. Entries sitting in the
@@ -216,7 +224,7 @@ class RecentViewModel(
                         gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
                         restored < trashed.size ->
                             "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored item(s)$renamedNote"
+                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     },
                 )
             }
@@ -246,17 +254,37 @@ class RecentViewModel(
         }
         val target = File(dir, file.nameWithoutExtension)
         if (target.exists()) {
-            requestToast("A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
+            // Same collision flow as Browse/Categories: the user picks the strategy in
+            // the shared dialog instead of a dead-end "rename it first" toast.
+            _state.update { it.copy(pendingExtractConflict = PendingExtractConflict(file, target)) }
             return
         }
         runExtract(file, target)
     }
 
+    /**
+     * Resolves an "Extract here" collision with the shared ConflictDialog semantics:
+     * Keep both extracts into a uniquely named sibling, Replace overwrites colliding
+     * entries, Skip merges into the existing folder without overwriting.
+     */
+    fun resolveExtractConflict(strategy: ConflictStrategy) {
+        val pc = _state.value.pendingExtractConflict ?: return
+        _state.update { it.copy(pendingExtractConflict = null) }
+        val parent = pc.target.parentFile ?: return
+        val target = if (strategy == ConflictStrategy.RENAME) {
+            File(parent, PathSafety.uniqueName(parent, pc.target.name))
+        } else pc.target
+        runExtract(pc.archive, target, replace = strategy == ConflictStrategy.REPLACE)
+    }
+
+    fun dismissExtractConflict() = _state.update { it.copy(pendingExtractConflict = null) }
+
     private fun runExtract(file: File, target: File, replace: Boolean = false, password: CharArray? = null) {
-        _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
+        val progressTitle = "Extracting ${file.name}"
+        _state.update { it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
             op = { onP -> ArchiveOps.extract(file, target, replace, password = password, onProgress = onP) },
-            onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
+            onProgress = { p -> _state.update { it.copy(progress = progressTitle to p) } },
             onDone = { r ->
                 if (r.passwordRequired) {
                     // Encrypted archive: ask for the password, don't report a failure.

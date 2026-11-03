@@ -79,6 +79,7 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
@@ -123,7 +124,7 @@ fun RecentScreen(
         val trashed = state.lastTrashed ?: return@LaunchedEffect
         vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
-            message = "Moved ${trashed.size} item(s) to trash",
+            message = "Moved ${trashed.size} ${Format.itemWord(trashed.size)} to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
@@ -164,7 +165,7 @@ fun RecentScreen(
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(vm.selectedEntries()) }) {
-                            Icon(Icons.Outlined.Delete, "Delete")
+                            Icon(Icons.Outlined.Delete, "Move to trash")
                         }
                     },
                 )
@@ -329,13 +330,13 @@ fun RecentScreen(
     state.pendingDelete?.let { entries ->
         AlertDialog(
             onDismissRequest = { vm.dismissDelete() },
-            title = { Text("Move ${entries.size} item(s) to trash?") },
+            title = { Text("Move ${entries.size} ${Format.itemWord(entries.size)} to trash?") },
             text = {
                 Text("Items are moved to the toadFILES trash and kept for 30 days. " +
                     "You can restore them from the Trash page.")
             },
             confirmButton = {
-                TextButton(onClick = { vm.confirmDelete() }) { Text("Delete") }
+                TextButton(onClick = { vm.confirmDelete() }) { Text("Move to trash") }
             },
             dismissButton = { TextButton(onClick = { vm.dismissDelete() }) { Text("Cancel") } },
         )
@@ -365,6 +366,17 @@ fun RecentScreen(
         onCancel = { vm.cancelOp() },
         onDismissResult = { vm.dismissResult() },
     )
+
+    // "Extract here" collision: the shared conflict dialog with Browse/Categories
+    // semantics (keep both / replace / skip) — no more dead-end refusal toast.
+    state.pendingExtractConflict?.let { pc ->
+        ConflictDialog(
+            conflicts = listOf(pc.target.name),
+            targetName = pc.target.name,
+            onDecide = { vm.resolveExtractConflict(it) },
+            onDismiss = { vm.dismissExtractConflict() },
+        )
+    }
 
     // Encrypted archive: the extract came back passwordRequired — ask, then retry
     // with the same target dir / replace semantics (v1.8.0).

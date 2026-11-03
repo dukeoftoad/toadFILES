@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import coil3.ImageLoader
@@ -153,8 +154,8 @@ class CategoriesScreenTest {
         }
         compose.onAllNodesWithContentDescription("More actions")[0].performClick()
 
-        // Extract (here + to…), Rename, Delete and Properties — the exact rows Browse
-        // renders for the same file, now shared.
+        // Extract (here + to…), Rename, Move to trash and Properties — the exact rows
+        // Browse renders for the same file, now shared.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Extract here").fetchSemanticsNodes().isNotEmpty()
         }
@@ -168,7 +169,28 @@ class CategoriesScreenTest {
             compose.onAllNodesWithText("Properties").fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Delete").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Move to trash").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun `drill-in list starts right under the top bar, not a bar-height lower`() {
+        openDrillIn("Documents")
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("quarterly-report.pdf").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // The Scaffold insets are consumed exactly once (by the PullToRefreshBox).
+        // The old bug applied them a second time on the entries, pushing the whole
+        // drill-in a full TopAppBar height down: the first row sat ~144dp from the
+        // top instead of ~80dp, leaving a dead band under the bar. 110dp separates
+        // the two states with margin on both sides, in any density.
+        val firstRowTopPx = compose.onNodeWithText("quarterly-report.pdf")
+            .fetchSemanticsNode().positionInRoot.y
+        val limitPx = with(compose.density) { 110.dp.toPx() }
+        assert(firstRowTopPx < limitPx) {
+            "first row top is $firstRowTopPx px but must be under $limitPx px — " +
+                "the drill-in looks double-padded again"
         }
     }
 

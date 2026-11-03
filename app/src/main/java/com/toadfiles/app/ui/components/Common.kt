@@ -1,6 +1,9 @@
 package com.toadfiles.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -65,8 +68,28 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.util.VideoThumbs
+import kotlinx.coroutines.delay
 import java.io.File
 import coil3.compose.AsyncImage
+
+/**
+ * Pulses [onPulse] twice — the "Show in folder" pinpoint flash (owner report: a bare
+ * folder jump left the user hunting for the file themselves). on → off → on → off,
+ * always settling on "off", ~1s total with the default timings so the flash reads as
+ * two deliberate blinks, not a strobe.
+ */
+internal suspend fun blinkTwice(
+    pulseMs: Long = 300,
+    gapMs: Long = 200,
+    onPulse: (Boolean) -> Unit,
+) {
+    repeat(2) {
+        onPulse(true)
+        delay(pulseMs)
+        onPulse(false)
+        delay(gapMs)
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -78,9 +101,16 @@ fun FileRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMore: (() -> Unit)? = null,
+    highlight: Boolean = false,
 ) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
-    else Color.Transparent
+    // The pinpoint flash uses the tertiary container so it reads as its own signal,
+    // never as "selected" (which stays secondaryContainer).
+    val bgTarget = when {
+        highlight -> MaterialTheme.colorScheme.tertiaryContainer
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val bg by animateColorAsState(bgTarget, tween(150), label = "fileRowBg")
     Surface(color = bg, shape = RoundedCornerShape(12.dp)) {
         Row(
             modifier = Modifier
@@ -167,12 +197,12 @@ fun iconFor(item: FileItem): ImageVector = if (item.isDir) {
     Icons.Outlined.Folder
 } else {
     when (item.name.substringAfterLast('.', "").lowercase()) {
-        in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "svg") -> Icons.Outlined.Image
+        in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg") -> Icons.Outlined.Image
         in setOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v") -> Icons.Outlined.Videocam
         in setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "amr") -> Icons.Outlined.Audiotrack
         in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> Icons.Outlined.FolderZip
         "apk" -> Icons.Outlined.InstallMobile
-        in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv") ->
+        in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "htm", "html") ->
             Icons.Outlined.Description
         else -> Icons.AutoMirrored.Outlined.InsertDriveFile
     }
@@ -233,8 +263,15 @@ fun FileGridCell(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMore: (() -> Unit)? = null,
+    highlight: Boolean = false,
 ) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    // Same pinpoint flash as FileRow — the reveal can land in either layout.
+    val bgTarget = when {
+        highlight -> MaterialTheme.colorScheme.tertiaryContainer
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val bg by animateColorAsState(bgTarget, tween(150), label = "fileCellBg")
     Surface(color = bg, shape = RoundedCornerShape(14.dp)) {
         Column(
             modifier = Modifier
@@ -438,7 +475,7 @@ fun ConflictDialog(
         text = {
             Column {
                 Text(
-                    "${conflicts.size} item(s) already exist here:",
+                    "${conflicts.size} ${Format.itemWord(conflicts.size)} already exist here:",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(6.dp))
@@ -475,22 +512,63 @@ fun ConflictDialog(
 }
 
 @Composable
-fun ProgressOverlay(text: String, fraction: Float?, onCancel: () -> Unit) {
+fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text(text) },
         text = {
             Column {
-                if (fraction != null && fraction >= 0f) {
-                    LinearProgressIndicator(
-                        progress = { fraction.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
+                if (total > 0) {
+                    // Determinate: a smooth bar plus the two signals a bare bar withholds
+                    // — how far along (percent) and what is happening ("2 of 4 items",
+                    // with the entry name when the pipeline reports one).
+                    val target = (done.toFloat() / total).coerceIn(0f, 1f)
+                    val animated by animateFloatAsState(
+                        targetValue = target,
+                        animationSpec = tween(durationMillis = 250),
+                        label = "progress_fraction",
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LinearProgressIndicator(
+                            progress = { animated },
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${(target * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    val item = currentItem?.takeIf { it.isNotBlank() }
+                    Text(
+                        buildString {
+                            append(done).append(" of ").append(total)
+                            append(if (total == 1) " item" else " items")
+                            if (item != null) append(" — ").append(item)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 } else {
+                    // Unknown total (zip-volume merge, listing-driven ops): indeterminate.
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(12.dp))
                         Text("Working…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    currentItem?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -499,15 +577,28 @@ fun ProgressOverlay(text: String, fraction: Float?, onCancel: () -> Unit) {
     )
 }
 
+/** Finished-dialog title derived from the op's short word ("Copying" → "Copy finished"):
+ *  the dialog used to say "Operation finished" for everything, which never told you
+ *  WHAT finished. Unknown/blank titles keep the old generic text. */
+fun resultDoneTitle(resultTitle: String): String = when (resultTitle.trim()) {
+    "Copying" -> "Copy finished"
+    "Moving" -> "Move finished"
+    "Extracting" -> "Extract finished"
+    "Zipping" -> "Zip finished"
+    "Compressing" -> "Compression finished"
+    else -> "Operation finished"
+}
+
 @Composable
 fun ResultDialog(
     summary: String,
     failures: List<String>,
     onDismiss: () -> Unit,
+    resultTitle: String = "",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Operation finished") },
+        title = { Text(resultDoneTitle(resultTitle)) },
         text = {
             Column {
                 Text(summary, style = MaterialTheme.typography.bodyLarge)
@@ -538,7 +629,12 @@ fun SortMenu(
     androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         SortMode.entries.forEach { mode ->
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(if (mode == current) "${mode.name.lowercase().replaceFirstChar { it.uppercase() }} ✓" else mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                text = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                trailingIcon = {
+                    if (mode == current) {
+                        Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    }
+                },
                 onClick = { onSelect(mode) },
             )
         }
@@ -546,7 +642,12 @@ fun SortMenu(
         SortOrder.entries.forEach { order ->
             val label = if (order == SortOrder.ASC) "Ascending" else "Descending"
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(if (order == currentOrder) "$label ✓" else label) },
+                text = { Text(label) },
+                trailingIcon = {
+                    if (order == currentOrder) {
+                        Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    }
+                },
                 onClick = { onSelectOrder(order) },
             )
         }

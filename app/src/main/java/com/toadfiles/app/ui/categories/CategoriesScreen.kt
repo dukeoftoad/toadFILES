@@ -151,7 +151,7 @@ fun CategoriesScreen(
         val trashed = state.lastTrashed ?: return@LaunchedEffect
         vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
-            message = "Moved ${trashed.size} item(s) to trash",
+            message = "Moved ${trashed.size} ${Format.itemWord(trashed.size)} to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
@@ -200,7 +200,7 @@ fun CategoriesScreen(
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(vm.selectedEntries()) }) {
-                            Icon(Icons.Outlined.Delete, "Delete")
+                            Icon(Icons.Outlined.Delete, "Move to trash")
                         }
                         // Bulk menu, like Browse's: the batch ops that make sense for
                         // media rows (zip, single-archive extract, properties, rename).
@@ -208,7 +208,7 @@ fun CategoriesScreen(
                         DropdownMenu(expanded = bulkMenuOpen, onDismissRequest = { bulkMenuOpen = false }) {
                             val picked = vm.selectedEntries()
                             DropdownMenuItem(
-                                text = { Text("Zip ${picked.size} item(s)…") },
+                                text = { Text("Zip ${picked.size} ${Format.itemWord(picked.size)}…") },
                                 onClick = {
                                     bulkMenuOpen = false
                                     val files = picked.mapNotNull { it.data?.let(::File) }
@@ -262,7 +262,7 @@ fun CategoriesScreen(
                             Column {
                                 Text(state.selected!!.label)
                                 Text(
-                                    "${state.entries.size} item(s) · " +
+                                    "${state.entries.size} ${Format.itemWord(state.entries.size)} · " +
                                         Format.size(state.entries.sumOf { it.size }),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -321,9 +321,11 @@ fun CategoriesScreen(
         } else {
             CategoryEntries(
                 state = state,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                // No second .padding(padding): the PullToRefreshBox above already
+                // consumed the Scaffold insets — applying them again pushed the whole
+                // drill-in a full top-bar height down, leaving a dead band between
+                // the bar and the first row (owner report). Browse pads exactly once.
+                modifier = Modifier.fillMaxSize(),
                 onEntryTap = { e ->
                     when {
                         inSelection -> vm.toggleSelection(e)
@@ -362,10 +364,10 @@ fun CategoriesScreen(
     // Delete confirmation: media entries go to the real 30-day trash.
     state.pendingDelete?.let { entries ->
         ConfirmDialog(
-            title = "Move ${entries.size} item(s) to trash?",
+            title = "Move ${entries.size} ${Format.itemWord(entries.size)} to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
                 "You can undo right away or restore them from the Trash page.",
-            confirmLabel = "Delete",
+            confirmLabel = "Move to trash",
             destructive = true,
             onConfirm = { vm.confirmDelete() },
             onDismiss = { vm.dismissDelete() },
@@ -542,7 +544,7 @@ private fun TotalsHeader(summaries: List<CategorySummary>) {
                 Text("Media library", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "$totalItems indexed item(s) · ${Format.size(totalBytes)}",
+                    "$totalItems indexed ${Format.itemWord(totalItems)} · ${Format.size(totalBytes)}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -577,7 +579,7 @@ private fun CategoryTile(summary: CategorySummary, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                "${summary.count} item(s) · ${Format.size(summary.totalBytes)}",
+                "${summary.count} ${Format.itemWord(summary.count)} · ${Format.size(summary.totalBytes)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
