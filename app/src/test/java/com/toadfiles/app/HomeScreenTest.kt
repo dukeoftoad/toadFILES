@@ -92,6 +92,10 @@ class HomeScreenTest {
                 )
             }
         }
+        // HomeScreen refreshes its data when it enters composition. Wait for that
+        // second (screen-entry) refresh too; the pre-composition wait above only
+        // covers the initial ViewModel load.
+        compose.waitUntil(10_000) { !vm.state.value.loadingRecent }
     }
 
     @Test
