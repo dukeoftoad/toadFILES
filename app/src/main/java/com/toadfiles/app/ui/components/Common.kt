@@ -1,6 +1,7 @@
 package com.toadfiles.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -67,8 +68,28 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.util.VideoThumbs
+import kotlinx.coroutines.delay
 import java.io.File
 import coil3.compose.AsyncImage
+
+/**
+ * Pulses [onPulse] twice — the "Show in folder" pinpoint flash (owner report: a bare
+ * folder jump left the user hunting for the file themselves). on → off → on → off,
+ * always settling on "off", ~1s total with the default timings so the flash reads as
+ * two deliberate blinks, not a strobe.
+ */
+internal suspend fun blinkTwice(
+    pulseMs: Long = 300,
+    gapMs: Long = 200,
+    onPulse: (Boolean) -> Unit,
+) {
+    repeat(2) {
+        onPulse(true)
+        delay(pulseMs)
+        onPulse(false)
+        delay(gapMs)
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -80,9 +101,16 @@ fun FileRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMore: (() -> Unit)? = null,
+    highlight: Boolean = false,
 ) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
-    else Color.Transparent
+    // The pinpoint flash uses the tertiary container so it reads as its own signal,
+    // never as "selected" (which stays secondaryContainer).
+    val bgTarget = when {
+        highlight -> MaterialTheme.colorScheme.tertiaryContainer
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val bg by animateColorAsState(bgTarget, tween(150), label = "fileRowBg")
     Surface(color = bg, shape = RoundedCornerShape(12.dp)) {
         Row(
             modifier = Modifier
@@ -235,8 +263,15 @@ fun FileGridCell(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMore: (() -> Unit)? = null,
+    highlight: Boolean = false,
 ) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    // Same pinpoint flash as FileRow — the reveal can land in either layout.
+    val bgTarget = when {
+        highlight -> MaterialTheme.colorScheme.tertiaryContainer
+        selected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val bg by animateColorAsState(bgTarget, tween(150), label = "fileCellBg")
     Surface(color = bg, shape = RoundedCornerShape(14.dp)) {
         Column(
             modifier = Modifier
