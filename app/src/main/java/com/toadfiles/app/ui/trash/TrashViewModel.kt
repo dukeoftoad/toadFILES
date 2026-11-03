@@ -286,26 +286,31 @@ class TrashViewModel(
 
     fun emptyNow() {
         _state.update { it.copy(confirmingEmpty = false) }
-        val targets = _state.value.entries
-        if (targets.isEmpty()) return
-        runBatch(
-            title = "Emptying trash",
-            targets = targets,
-            op = { e -> Trash.deleteForever(e.file) },
-        ) { done, cancelled ->
-            // "Empty" can fail per item (a payload the filesystem refuses to delete);
-            // report what is actually left instead of claiming success (D5).
-            val remaining = Trash.entries(volumeRoots).size
-            _state.update {
-                it.copy(
-                    toast = when {
-                        cancelled -> "Stopped — $done of ${targets.size} deleted, the rest is still in trash"
-                        remaining > 0 -> "Couldn't empty trash — $remaining ${Format.itemWord(remaining)} couldn't be deleted"
-                        else -> "Trash emptied — $done ${Format.itemWord(done)} removed forever"
-                    },
-                )
+        viewModelScope.launch(ioDispatcher) {
+            // List the trash as it exists RIGHT NOW (what Trash.empty() used to do):
+            // the screen's list can be stale — items trashed from elsewhere after the
+            // last refresh would otherwise silently survive the "empty".
+            val targets = Trash.entries(volumeRoots)
+            if (targets.isEmpty()) return@launch
+            runBatch(
+                title = "Emptying trash",
+                targets = targets,
+                op = { e -> Trash.deleteForever(e.file) },
+            ) { done, cancelled ->
+                // "Empty" can fail per item (a payload the filesystem refuses to delete);
+                // report what is actually left instead of claiming success (D5).
+                val remaining = Trash.entries(volumeRoots).size
+                _state.update {
+                    it.copy(
+                        toast = when {
+                            cancelled -> "Stopped — $done of ${targets.size} deleted, the rest is still in trash"
+                            remaining > 0 -> "Couldn't empty trash — $remaining ${Format.itemWord(remaining)} couldn't be deleted"
+                            else -> "Trash emptied — $done ${Format.itemWord(done)} removed forever"
+                        },
+                    )
+                }
+                refresh()
             }
-            refresh()
         }
     }
 
