@@ -96,7 +96,9 @@ class FileActionSheetTest {
         assertRowShown("Add favorite")
         // "Select more" is gone: long-press starts multi-select now.
         // File-only actions
-        assertRowShown("Copy path")
+        // The full-path row now presents the path itself with a Copy affordance.
+        assertRowShown("Path")
+        assertRowShown("Copy")
         assertRowShown("Open with…")
         // For a non-zip file the compress row reads "Compress this file" (not "Extract here")
         assertRowShown("Compress this file")
