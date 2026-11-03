@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.CreateNewFolder
@@ -949,7 +950,12 @@ private fun FilterMenu(
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         FilterMode.entries.forEach { m ->
             DropdownMenuItem(
-                text = { Text(if (m == current) "${m.label} ✓" else m.label) },
+                text = { Text(m.label) },
+                trailingIcon = {
+                    if (m == current) {
+                        Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    }
+                },
                 onClick = { onSelect(m) },
             )
         }

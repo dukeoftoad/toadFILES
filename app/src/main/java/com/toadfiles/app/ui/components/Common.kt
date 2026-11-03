@@ -594,7 +594,12 @@ fun SortMenu(
     androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         SortMode.entries.forEach { mode ->
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(if (mode == current) "${mode.name.lowercase().replaceFirstChar { it.uppercase() }} ✓" else mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                text = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                trailingIcon = {
+                    if (mode == current) {
+                        Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    }
+                },
                 onClick = { onSelect(mode) },
             )
         }
@@ -602,7 +607,12 @@ fun SortMenu(
         SortOrder.entries.forEach { order ->
             val label = if (order == SortOrder.ASC) "Ascending" else "Descending"
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(if (order == currentOrder) "$label ✓" else label) },
+                text = { Text(label) },
+                trailingIcon = {
+                    if (order == currentOrder) {
+                        Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    }
+                },
                 onClick = { onSelectOrder(order) },
             )
         }
