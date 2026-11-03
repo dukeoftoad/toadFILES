@@ -440,7 +440,7 @@ fun ConflictDialog(
         text = {
             Column {
                 Text(
-                    "${conflicts.size} item(s) already exist here:",
+                    "${conflicts.size} ${Format.itemWord(conflicts.size)} already exist here:",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(6.dp))

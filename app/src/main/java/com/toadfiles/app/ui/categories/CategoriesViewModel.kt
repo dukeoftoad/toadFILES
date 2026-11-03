@@ -14,6 +14,7 @@ import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileOps
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.MediaTrashOps
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
@@ -334,7 +335,7 @@ class CategoriesViewModel(
                         gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
                         restored < trashed.size ->
                             "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored item(s)$renamedNote"
+                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     },
                 )
             }
@@ -747,7 +748,7 @@ class CategoriesViewModel(
             val roots = container.fileRepo.roots().map { it.dir }
             val result = Trash.trash(live, roots)
             if (result.failureCount > 0) {
-                requestToast("Could not delete ${result.failureCount} source item(s)")
+                requestToast("Could not delete ${result.failureCount} source ${Format.itemWord(result.failureCount)}")
             }
         }
     }

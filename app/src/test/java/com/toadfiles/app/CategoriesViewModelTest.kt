@@ -234,8 +234,8 @@ class CategoriesViewModelTest {
 
     @Test
     fun `toast is consumed after being shown`() = runTest {
-        vm.requestToast("Moved 2 item(s) to trash")
-        assertEquals("Moved 2 item(s) to trash", vm.state.value.toast)
+        vm.requestToast("Moved 2 items to trash")
+        assertEquals("Moved 2 items to trash", vm.state.value.toast)
         vm.consumeToast()
         assertNull(vm.state.value.toast)
     }
@@ -267,7 +267,7 @@ class CategoriesViewModelTest {
             vm.consumeUndoOffer()
             assertNull(vm.state.value.lastTrashed)
             vm.undoDelete(trashed)
-            await { vm.state.value.toast == "Restored 1 item(s)" }
+            await { vm.state.value.toast == "Restored 1 item" }
             assertTrue(src.exists())
         } finally {
             src.delete()

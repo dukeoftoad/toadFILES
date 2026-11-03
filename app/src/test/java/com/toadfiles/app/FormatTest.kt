@@ -35,4 +35,12 @@ class FormatTest {
     fun `negative size is unknown`() {
         assertEquals("?", Format.size(-1))
     }
+
+    @Test
+    fun `itemWord pluralizes properly - never item(s)`() {
+        assertEquals("item", Format.itemWord(1))
+        assertEquals("items", Format.itemWord(0))
+        assertEquals("items", Format.itemWord(2))
+        assertEquals("items", Format.itemWord(128))
+    }
 }

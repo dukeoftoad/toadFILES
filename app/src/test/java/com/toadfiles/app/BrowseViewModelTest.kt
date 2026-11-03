@@ -420,7 +420,7 @@ class BrowseViewModelTest {
         vm.undoDelete(trashed)
         await { f.exists() }
         assertEquals("precious", f.readText())
-        assertEquals("Restored 1 item(s)", vm.state.value.toast)
+        assertEquals("Restored 1 item", vm.state.value.toast)
     }
 
     @Test
@@ -1294,7 +1294,7 @@ class BrowseViewModelTest {
         vm.undoDelete(trashed)
 
         await { File(dir, "clash (1).txt").exists() }
-        assertEquals("Restored 1 item(s), 1 renamed", vm.state.value.toast)
+        assertEquals("Restored 1 item, 1 renamed", vm.state.value.toast)
         // The restored destination was re-scanned into the media index (D1).
         assertEquals(listOf(File(dir, "clash (1).txt").absolutePath), media.rescans.flatten())
     }
