@@ -1144,6 +1144,31 @@ class BrowseViewModel(
     }
 
     /**
+     * Extracts an archive into a new folder under the directory explicitly chosen in
+     * Browse's destination-picker mode. Reuses the normal conflict and extraction
+     * pipeline so password prompts, progress, undo, and post-extract navigation behave
+     * exactly like the other extraction entry points.
+     */
+    fun extractZipInto(file: File, destination: File) {
+        if (!destination.isDirectory || !destination.canWrite()) {
+            _state.update { it.copy(toast = "Choose a writable destination folder") }
+            return
+        }
+        val target = File(destination, file.nameWithoutExtension)
+        if (target.exists()) {
+            _state.update {
+                it.copy(
+                    pendingConflict = PendingConflict(
+                        OpKind.ZIP_EXTRACT, target, listOf(file), listOf(target.name),
+                    ),
+                )
+            }
+        } else {
+            startExtract(file, target)
+        }
+    }
+
+    /**
      * Extracts an archive (.zip or .7z) into a folder named after it next to it — or,
      * when [targetName] is set ("Extract to…"), into a folder with that name under the
      * default destination: the user's archive folder when set, else the current
