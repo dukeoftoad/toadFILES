@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -40,7 +42,6 @@ import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -92,7 +94,10 @@ import android.os.Environment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.ui.components.TransferBar
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.BackKeyAction
@@ -585,11 +590,12 @@ fun BrowseScreen(
 
             if (!selectionMode && state.clipboard != null) {
                 val clip = state.clipboard!!
-                PasteBar(
-                    mode = clip.mode.name.lowercase(),
+                TransferBar(
+                    mode = clip.mode,
                     count = clip.files.size,
+                    blockedReason = vm.transferBlockedReason(),
                     onPaste = { vm.pasteFromClipboard() },
-                    onDiscard = { vm.clearClipboard() },
+                    onCancel = { vm.clearClipboard() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 24.dp),
@@ -943,42 +949,6 @@ private fun FilterMenu(
                 text = { Text(if (m == current) "${m.label} ✓" else m.label) },
                 onClick = { onSelect(m) },
             )
-        }
-    }
-}
-
-@Composable
-private fun PasteBar(
-    mode: String,
-    count: Int,
-    onPaste: () -> Unit,
-    onDiscard: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shadowElevation = 4.dp,
-    ) {
-        Row(
-            Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.ContentPaste, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "$count item(s) ready to $mode",
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onPaste) { Text("Paste") }
-            IconButton(onClick = onDiscard) {
-                Icon(
-                    Icons.Outlined.Close, "Discard",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
         }
     }
 }

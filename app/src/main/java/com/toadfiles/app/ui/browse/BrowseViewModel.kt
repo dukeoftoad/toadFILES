@@ -531,13 +531,9 @@ class BrowseViewModel(
 
     fun copyToClipboard(mode: Clipboard.Mode, files: List<File>) {
         container.clipboard.set(mode, files)
-        _state.update {
-            it.copy(
-                toast = "${files.size} item(s) ready to " +
-                    (if (mode == Clipboard.Mode.COPY) "copy" else "move"),
-                selection = emptySet(),
-            )
-        }
+        // No arming toast: the TransferBar is the immediate, persistent feedback
+        // (a second Snackbar for the same event was visual noise).
+        _state.update { it.copy(selection = emptySet()) }
     }
 
     fun setSortOrder(order: com.toadfiles.app.domain.SortOrder) {
@@ -712,6 +708,22 @@ class BrowseViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Non-null when Paste must be disabled in the current directory: a MOVE whose
+     * destination is a selected folder itself or anything inside it would nest a tree
+     * under itself. COPY is always allowed (the conflict dialog owns naming there).
+     */
+    fun transferBlockedReason(): String? {
+        val clip = _state.value.clipboard ?: return null
+        if (clip.mode != Clipboard.Mode.MOVE) return null
+        val dir = _state.value.dir ?: return null
+        val dirPath = dir.absolutePath.trimEnd('/')
+        return clip.files.firstOrNull { f ->
+            val p = f.absolutePath.trimEnd('/')
+            dirPath == p || dirPath.startsWith(p + File.separator)
+        }?.let { "You can't move a folder into itself" }
     }
 
     private fun Clipboard.Mode.toKind() = when (this) {
