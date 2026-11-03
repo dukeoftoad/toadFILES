@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.foundation.shape.CircleShape
@@ -99,6 +100,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.ui.components.TransferBar
+import com.toadfiles.app.ui.components.blinkTwice
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.BackKeyAction
@@ -130,6 +132,7 @@ fun BrowseScreen(
     initialDir: String,
     bottomPadding: Dp,
     onNavigateUp: () -> Unit,
+    revealName: String? = null,
     vm: BrowseViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -212,6 +215,40 @@ fun BrowseScreen(
 
     val selectionMode = state.selection.isNotEmpty()
     BackHandler(enabled = selectionMode) { vm.clearSelection() }
+
+    // ---- "Show in folder" pinpoint (owner report) ----
+    // A bare folder jump left the user hunting for the file themselves; now the
+    // listing scrolls to the revealed file and blinks it twice. [consumedReveal]
+    // survives process death (saveable) and blocks a re-blink when the user comes
+    // back to this entry; [activeReveal] drives the row flash only while the
+    // blink coroutine is actually running.
+    var consumedReveal by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeReveal by remember { mutableStateOf<String?>(null) }
+    var blinkOn by remember { mutableStateOf(false) }
+    val revealTarget = revealName?.takeIf { it != consumedReveal }
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(revealTarget, state.loading, state.items) {
+        val name = revealTarget ?: return@LaunchedEffect
+        if (state.loading || state.items.isEmpty()) return@LaunchedEffect
+        consumedReveal = name
+        val index = state.items.filter { state.filterMode.matches(it.name) }
+            .indexOfFirst { it.file.name == name }
+        if (index < 0) return@LaunchedEffect // vanished or filtered out — nothing to point at
+        try {
+            activeReveal = name
+            if (state.settings.browseLayout == BrowseLayout.GRID) {
+                gridState.animateScrollToItem(index)
+            } else {
+                listState.animateScrollToItem(index)
+            }
+            blinkTwice { on -> blinkOn = on }
+        } finally {
+            // Cancellation-safe settle: a mid-blink re-list must never strand the row lit.
+            activeReveal = null
+            blinkOn = false
+        }
+    }
     BackHandler(enabled = !selectionMode) {
         // v1.7.3 back-key setting: EXIT leaves Browse from any depth — the same thing
         // the old back-at-root behavior did (onNavigateUp → popBackStack; Browse is a
@@ -560,6 +597,7 @@ fun BrowseScreen(
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(112.dp),
                             modifier = Modifier.fillMaxSize(),
+                            state = gridState,
                             contentPadding = PaddingValues(horizontal = 12.dp),
                         ) {
                             gridItems(visible, key = { it.file.path }) { item ->
@@ -567,6 +605,7 @@ fun BrowseScreen(
                                     item = item,
                                     selected = item.file in state.selection,
                                     isFavorite = item.file.path in state.favoritePaths,
+                                    highlight = blinkOn && item.file.name == activeReveal,
                                     onClick = { openItem(item) },
                                     onLongClick = { longPressItem(item) },
                                 )
@@ -574,12 +613,13 @@ fun BrowseScreen(
                             item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(80.dp)) }
                         }
                     } else {
-                        LazyColumn(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
                             itemsIndexed(visible, key = { _, it -> it.file.path }) { _, item ->
                                 FileRow(
                                     item = item,
                                     selected = item.file in state.selection,
                                     isFavorite = item.file.path in state.favoritePaths,
+                                    highlight = blinkOn && item.file.name == activeReveal,
                                     subtitle = if (item.isDir) null else
                                         "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
                                     onClick = { openItem(item) },
