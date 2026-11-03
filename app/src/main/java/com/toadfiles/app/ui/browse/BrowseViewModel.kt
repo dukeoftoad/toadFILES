@@ -1152,8 +1152,21 @@ class BrowseViewModel(
      * entries, Keep both extracts into a uniquely named sibling, Skip merges without
      * overwriting.
      */
-    fun extractZip(file: File, targetName: String? = null) {
-        if (targetName == null) {
+    fun extractZip(file: File, targetName: String? = null, targetDirectory: File? = null) {
+        if (targetDirectory != null) {
+            if (!targetDirectory.isDirectory || !targetDirectory.canWrite()) {
+                _state.update { it.copy(toast = "Cannot write to the selected folder") }
+                return
+            }
+            val target = File(targetDirectory, file.nameWithoutExtension)
+            if (target.exists()) {
+                _state.update {
+                    it.copy(pendingConflict = PendingConflict(OpKind.ZIP_EXTRACT, target, listOf(file), listOf(target.name)))
+                }
+            } else {
+                startExtract(file, target)
+            }
+        } else if (targetName == null) {
             val dir = file.parentFile ?: return
             val target = File(dir, file.nameWithoutExtension)
             if (target.exists()) {

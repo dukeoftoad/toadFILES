@@ -179,6 +179,7 @@ fun BrowseScreen(
     var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
     /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
+    var selectingExtractFolder by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
@@ -276,6 +277,10 @@ fun BrowseScreen(
     // the field instead of leaving the folder. (Query non-blank keeps the handler
     // above enabled and this one disabled — query clears first.)
     BackHandler(enabled = !selectionMode && searchOpen && state.query.isBlank()) { searchOpen = false }
+    BackHandler(enabled = selectingExtractFolder) {
+        selectingExtractFolder = false
+        pendingExtractTo = null
+    }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -284,7 +289,29 @@ fun BrowseScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) { data -> Snackbar(data) } },
         topBar = {
-            if (selectionMode) {
+            if (selectingExtractFolder) {
+                TopAppBar(
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    title = { Text("Choose extraction folder", maxLines = 1) },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            selectingExtractFolder = false
+                            pendingExtractTo = null
+                        }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Cancel folder selection") }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            val archive = pendingExtractTo
+                            val destination = state.dir
+                            selectingExtractFolder = false
+                            pendingExtractTo = null
+                            if (archive != null && destination != null) {
+                                vm.extractZip(archive, targetDirectory = destination)
+                            }
+                        }) { Icon(Icons.Outlined.Check, "Use this folder") }
+                    },
+                )
+            } else if (selectionMode) {
                 TopAppBar(
             windowInsets = WindowInsets(0, 0, 0, 0),
                     title = { Text("${state.selection.size} selected") },
@@ -352,6 +379,8 @@ fun BrowseScreen(
                                     onClick = {
                                         moreMenuOpen = false
                                         pendingExtractTo = single
+                                        vm.clearSelection()
+                                        selectingExtractFolder = true
                                     },
                                     leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) },
                                 )
@@ -557,6 +586,7 @@ fun BrowseScreen(
 
                 val openItem: (FileItem) -> Unit = { item ->
                     when {
+                        selectingExtractFolder -> if (item.isDir) vm.openDir(item.file)
                         selectionMode -> vm.toggleSelection(item)
                         item.isDir -> vm.openDir(item.file)
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
@@ -744,21 +774,6 @@ fun BrowseScreen(
             dismissButton = { TextButton(onClick = { pendingArchiveTap = null }) { Text("Cancel") } },
         )
     }
-    // "Extract to…": the user names the destination folder — under the default
-    // destination (archive folder when set, v1.7.3), else the current directory.
-    pendingExtractTo?.let { archive ->
-        NameInputDialog(
-            title = "Extract to…",
-            initialValue = archive.nameWithoutExtension,
-            destination = vm.archiveFolderOr(state.dir)?.path,
-            confirmLabel = "Extract",
-            onConfirm = {
-                pendingExtractTo = null
-                vm.extractZip(archive, targetName = it)
-            },
-            onDismiss = { pendingExtractTo = null },
-        )
-    }
     // Encrypted archive: the extract came back passwordRequired — ask, then retry
     // with the same target dir / replace semantics (v1.8.0).
     state.pendingPasswordFor?.let { archive ->
@@ -923,6 +938,7 @@ fun BrowseScreen(
                 {
                     pendingActionSheet = null
                     pendingExtractTo = item.file
+                    selectingExtractFolder = true
                 }
             } else null,
             onToggleFavorite = {

@@ -107,6 +107,15 @@ fun FileActionSheet(
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                     )
+                    if (!item.isDir) {
+                        Text(
+                            item.file.absolutePath,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            modifier = if (onCopyPath != null) Modifier.clickable(onClick = onCopyPath) else Modifier,
+                        )
+                    }
                     Text(
                         if (item.isDir) "Folder" else "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
                         style = MaterialTheme.typography.labelMedium,
