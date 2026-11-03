@@ -944,6 +944,9 @@ fun BrowseScreen(
             onExtractTo = if (ArchiveOps.canExtract(item.name)) {
                 {
                     pendingActionSheet = null
+                    vm.clearSelection()
+                    searchOpen = false
+                    if (state.query.isNotBlank()) vm.setQuery("")
                     pendingExtractTo = item.file
                 }
             } else null,
