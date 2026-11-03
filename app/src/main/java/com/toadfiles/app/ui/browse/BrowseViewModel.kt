@@ -24,6 +24,7 @@ import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.PendingPasswordRetry
 import com.toadfiles.app.ui.components.PropertiesDetail
 import com.toadfiles.app.ui.components.VolumeChoice
@@ -531,13 +532,9 @@ class BrowseViewModel(
 
     fun copyToClipboard(mode: Clipboard.Mode, files: List<File>) {
         container.clipboard.set(mode, files)
-        _state.update {
-            it.copy(
-                toast = "${files.size} item(s) ready to " +
-                    (if (mode == Clipboard.Mode.COPY) "copy" else "move"),
-                selection = emptySet(),
-            )
-        }
+        // No arming toast: the TransferBar is the immediate, persistent feedback
+        // (a second Snackbar for the same event was visual noise).
+        _state.update { it.copy(selection = emptySet()) }
     }
 
     fun setSortOrder(order: com.toadfiles.app.domain.SortOrder) {
@@ -682,7 +679,7 @@ class BrowseViewModel(
                         gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
                         restored < trashed.size ->
                             "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored item(s)$renamedNote"
+                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     },
                 )
             }
@@ -714,6 +711,22 @@ class BrowseViewModel(
         }
     }
 
+    /**
+     * Non-null when Paste must be disabled in the current directory: a MOVE whose
+     * destination is a selected folder itself or anything inside it would nest a tree
+     * under itself. COPY is always allowed (the conflict dialog owns naming there).
+     */
+    fun transferBlockedReason(): String? {
+        val clip = _state.value.clipboard ?: return null
+        if (clip.mode != Clipboard.Mode.MOVE) return null
+        val dir = _state.value.dir ?: return null
+        val dirPath = dir.absolutePath.trimEnd('/')
+        return clip.files.firstOrNull { f ->
+            val p = f.absolutePath.trimEnd('/')
+            dirPath == p || dirPath.startsWith(p + File.separator)
+        }?.let { "You can't move a folder into itself" }
+    }
+
     private fun Clipboard.Mode.toKind() = when (this) {
         Clipboard.Mode.COPY -> OpKind.COPY
         Clipboard.Mode.MOVE -> OpKind.MOVE
@@ -732,9 +745,15 @@ class BrowseViewModel(
             _state.update { it.copy(toast = e.message) }
             return
         }
+        // ZIP_EXTRACT names the archive in the overlay; resultTitle stays "Extracting".
+        val progressTitle = if (kind == OpKind.ZIP_EXTRACT) {
+            "Extracting ${sources.first().name}"
+        } else {
+            label(kind)
+        }
         _state.update {
             it.copy(
-                progress = label(kind) to OpProgress(
+                progress = progressTitle to OpProgress(
                     0,
                     if (kind == OpKind.ZIP_EXTRACT) ArchiveOps.entryCount(sources.first()) ?: 1 else sources.size,
                     "",
@@ -758,7 +777,7 @@ class BrowseViewModel(
                     ArchiveOps.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, password = null, onProgress = onP)
                 }
             }
-        }) { r ->
+        }, progressTitle) { r ->
             if (kind == OpKind.MOVE && r.succeeded > 0) remapMovedFavorites(sources, target)
             // Post-extract redirect (v1.7.1): navigate into the extracted folder.
             if (kind == OpKind.ZIP_EXTRACT) {
@@ -801,10 +820,11 @@ class BrowseViewModel(
     private fun runOp(
         title: String,
         op: suspend (onP: (OpProgress) -> Unit) -> OpResult,
+        progressTitle: String = title,
         onDone: suspend (OpResult) -> Unit = {},
     ) {
         opJob = viewModelScope.launch(ioDispatcher) {
-            val r = op { p -> _state.update { it.copy(progress = title to p) } }
+            val r = op { p -> _state.update { it.copy(progress = progressTitle to p) } }
             _state.update { it.copy(progress = null, result = r, resultTitle = title) }
             onDone(r)
             _state.value.dir?.let { d -> load(d) }
@@ -1117,7 +1137,7 @@ class BrowseViewModel(
                 lastTrashed = result.moved.takeIf { m -> m.isNotEmpty() },
                 undoOfferSeq = ++undoOfferId,
                 toast = if (result.failureCount > 0) {
-                    "Could not delete ${result.failureCount} source item(s)"
+                    "Could not delete ${result.failureCount} source ${Format.itemWord(result.failureCount)}"
                 } else it.toast,
             )
         }
@@ -1137,8 +1157,15 @@ class BrowseViewModel(
             val dir = file.parentFile ?: return
             val target = File(dir, file.nameWithoutExtension)
             if (target.exists()) {
+                // Same collision flow as "Extract to…" and paste: the user picks the
+                // strategy instead of hitting a dead-end toast (Keep both extracts into
+                // a unique sibling, Replace/Skip merge into the existing folder).
                 _state.update {
-                    it.copy(toast = "A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
+                    it.copy(
+                        pendingConflict = PendingConflict(
+                            OpKind.ZIP_EXTRACT, target, listOf(file), listOf(target.name),
+                        ),
+                    )
                 }
                 return
             }
@@ -1170,12 +1197,15 @@ class BrowseViewModel(
      *  password comes back [OpResult.passwordRequired] and opens the password prompt
      *  instead of reporting a failure. */
     private fun startExtract(file: File, target: File, replace: Boolean = false, password: CharArray? = null) {
+        // The overlay names the archive — "Extracting" alone is ambiguous when several
+        // archives sit in the same folder. resultTitle stays the short "Extracting".
+        val progressTitle = "Extracting ${file.name}"
         _state.update {
-            it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, ""))
+            it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, ""))
         }
         opJob = viewModelScope.launch(ioDispatcher) {
             val r = ArchiveOps.extract(file, target, replace, password = password) { p ->
-                _state.update { it.copy(progress = "Extracting" to p) }
+                _state.update { it.copy(progress = progressTitle to p) }
             }
             if (r.passwordRequired) {
                 // Encrypted archive: ask for the password, don't report a failure.

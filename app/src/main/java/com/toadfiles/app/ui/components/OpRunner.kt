@@ -73,9 +73,9 @@ class OpRunner(
 
 /**
  * Progress overlay + result dialog for a running/finished op — the exact wiring both
- * media screens rendered inline. Shows the overlay while [progress] is set (fraction
- * only when [OpProgress.total] is positive, indeterminate otherwise) and the result
- * dialog once [result] arrives.
+ * media screens rendered inline. Shows the overlay while [progress] is set (percent,
+ * "N of M items" and the live entry name when [OpProgress.total] is positive,
+ * "Working…" plus the entry name otherwise) and the result dialog once [result] arrives.
  */
 @Composable
 fun MediaOpOverlays(
@@ -88,7 +88,9 @@ fun MediaOpOverlays(
     progress?.let { (title, p) ->
         ProgressOverlay(
             text = title,
-            fraction = if (p.total > 0) p.done.toFloat() / p.total else null,
+            done = p.done,
+            total = p.total,
+            currentItem = p.currentItem,
             onCancel = onCancel,
         )
     }
@@ -97,6 +99,7 @@ fun MediaOpOverlays(
             summary = "$resultTitle: ${r.summary}",
             failures = r.failures,
             onDismiss = onDismissResult,
+            resultTitle = resultTitle,
         )
     }
 }
@@ -117,6 +120,8 @@ fun MediaOpOverlays(
  * @param open attempts to open the entry; returns false when no app handled it.
  * @param toast surfaces failures/info through the screen's snackbar channel.
  * @param requestDelete starts the trash flow for this single entry.
+ * @param onShowInFolder receives the entry's real file path; the navigation layer
+ *        resolves the parent folder and hands Browse the file name to pinpoint.
  * @param onDetails opens the entry's properties/details view.
  * @param onExtract runs the zip extract op for this entry's on-disk path ("Extract here").
  * @param onRename opens the rename flow for this entry (Categories only).
@@ -160,8 +165,9 @@ fun MediaEntryActionSheet(
             onShowInFolder = e.data?.let { path ->
                 {
                     onDismiss()
-                    val parent = File(path).parentFile
-                    if (parent != null && parent.isDirectory) onShowInFolder(parent.absolutePath)
+                    // Full file path — the nav host resolves the parent and passes the
+                    // name to Browse for the scroll-to + blink pinpoint.
+                    onShowInFolder(path)
                 }
             },
             onDelete = e.data?.let {

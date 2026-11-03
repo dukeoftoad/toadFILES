@@ -234,8 +234,8 @@ class CategoriesViewModelTest {
 
     @Test
     fun `toast is consumed after being shown`() = runTest {
-        vm.requestToast("Moved 2 item(s) to trash")
-        assertEquals("Moved 2 item(s) to trash", vm.state.value.toast)
+        vm.requestToast("Moved 2 items to trash")
+        assertEquals("Moved 2 items to trash", vm.state.value.toast)
         vm.consumeToast()
         assertNull(vm.state.value.toast)
     }
@@ -267,7 +267,7 @@ class CategoriesViewModelTest {
             vm.consumeUndoOffer()
             assertNull(vm.state.value.lastTrashed)
             vm.undoDelete(trashed)
-            await { vm.state.value.toast == "Restored 1 item(s)" }
+            await { vm.state.value.toast == "Restored 1 item" }
             assertTrue(src.exists())
         } finally {
             src.delete()
@@ -386,7 +386,7 @@ class CategoriesViewModelTest {
     }
 
     @Test
-    fun `extractZip refuses an existing destination folder with a toast`() = runTest {
+    fun `extractZip to an existing destination folder asks via the conflict dialog, not a dead-end toast`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "cat-extract-${System.nanoTime()}")
         root.mkdirs()
         try {
@@ -396,11 +396,22 @@ class CategoriesViewModelTest {
 
             vm.extractZip(zip)
 
-            assertEquals(
-                "A folder named \"bundle\" already exists. Rename or move it before extracting.",
-                vm.state.value.toast,
-            )
+            // Same collision flow as "Extract to…": the dialog decides, nothing is
+            // extracted yet and no toast sends the user away to rename things.
+            val pc = vm.state.value.pendingExtractConflict
+            assertNotNull(pc)
+            assertEquals("bundle", pc!!.target.name)
             assertNull(vm.state.value.result)
+            assertNull(vm.state.value.toast)
+            assertFalse("nothing may be extracted before the user decides", File(root, "bundle (1)").exists())
+
+            vm.resolveExtractConflict(ConflictStrategy.RENAME)
+
+            await { vm.state.value.result != null }
+            assertEquals(0, vm.state.value.result!!.failed)
+            assertEquals("zipbody", File(root, "bundle (1)/inner.txt").readText())
+            // Keep both leaves the pre-existing folder untouched.
+            assertFalse(File(root, "bundle/inner.txt").exists())
         } finally {
             root.deleteRecursively()
         }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,9 +27,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.CreateNewFolder
@@ -40,7 +44,6 @@ import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Share
@@ -51,6 +54,7 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -92,7 +96,11 @@ import android.os.Environment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.ui.components.TransferBar
+import com.toadfiles.app.ui.components.blinkTwice
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.BackKeyAction
@@ -124,6 +132,7 @@ fun BrowseScreen(
     initialDir: String,
     bottomPadding: Dp,
     onNavigateUp: () -> Unit,
+    revealName: String? = null,
     vm: BrowseViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -197,7 +206,7 @@ fun BrowseScreen(
         val trashed = state.lastTrashed ?: return@LaunchedEffect
         vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
-            message = "Moved ${trashed.size} item(s) to trash",
+            message = "Moved ${trashed.size} ${Format.itemWord(trashed.size)} to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
@@ -206,6 +215,46 @@ fun BrowseScreen(
 
     val selectionMode = state.selection.isNotEmpty()
     BackHandler(enabled = selectionMode) { vm.clearSelection() }
+
+    // ---- "Show in folder" pinpoint (owner report) ----
+    // A bare folder jump left the user hunting for the file themselves; now the
+    // listing scrolls to the revealed file and blinks it twice. [consumedReveal]
+    // survives process death (saveable) and blocks a re-blink when the user comes
+    // back to this entry; [activeReveal] drives the row flash only while the
+    // blink coroutine is actually running.
+    var consumedReveal by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeReveal by remember { mutableStateOf<String?>(null) }
+    var blinkOn by remember { mutableStateOf(false) }
+    val revealTarget = revealName?.takeIf { it != consumedReveal }
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(revealTarget, state.loading, state.items) {
+        val name = revealTarget ?: return@LaunchedEffect
+        if (state.loading || state.items.isEmpty()) return@LaunchedEffect
+        val index = state.items.filter { state.filterMode.matches(it.name) }
+            .indexOfFirst { it.file.name == name }
+        if (index < 0) {
+            // Vanished or filtered out — consume without acting, nothing to point at.
+            consumedReveal = name
+            return@LaunchedEffect
+        }
+        try {
+            activeReveal = name
+            if (state.settings.browseLayout == BrowseLayout.GRID) {
+                gridState.animateScrollToItem(index)
+            } else {
+                listState.animateScrollToItem(index)
+            }
+            blinkTwice { on -> blinkOn = on }
+            // Consume only AFTER the pinpoint finished: writing it earlier would
+            // re-key this very effect mid-scroll and cancel the work (CI-caught).
+            consumedReveal = name
+        } finally {
+            // Cancellation-safe settle: a mid-blink re-list must never strand the row lit.
+            activeReveal = null
+            blinkOn = false
+        }
+    }
     BackHandler(enabled = !selectionMode) {
         // v1.7.3 back-key setting: EXIT leaves Browse from any depth — the same thing
         // the old back-at-root behavior did (onNavigateUp → popBackStack; Browse is a
@@ -260,7 +309,7 @@ fun BrowseScreen(
                             vm.clearSelection()
                         }) { Icon(Icons.Outlined.Share, "Share") }
                         IconButton(onClick = { vm.requestDelete(state.selection.toList()) }) {
-                            Icon(Icons.Outlined.Delete, "Delete")
+                            Icon(Icons.Outlined.Delete, "Move to trash")
                         }
                         IconButton(onClick = { moreMenuOpen = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                         DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
@@ -281,7 +330,7 @@ fun BrowseScreen(
                                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Compress ${state.selection.size} item(s)…") },
+                                text = { Text("Compress ${state.selection.size} ${Format.itemWord(state.selection.size)}…") },
                                 onClick = {
                                     moreMenuOpen = false
                                     vm.requestZip(state.selection.toList())
@@ -427,7 +476,11 @@ fun BrowseScreen(
             }
         },
         floatingActionButton = {
-            if (!selectionMode) {
+            // The armed-transfer bar docks across this same bottom edge, and Scaffold
+            // draws the FAB on top of content — while a move/copy is armed the bar's
+            // Paste/Cancel buttons and item count must stay visible and reachable, so
+            // the FAB steps aside (owner report: it overlaid the transfer actions).
+            if (!selectionMode && state.clipboard == null) {
                 FloatingActionButton(onClick = { vm.requestNewFolder() }) {
                     Icon(Icons.Outlined.CreateNewFolder, "New folder")
                 }
@@ -550,6 +603,7 @@ fun BrowseScreen(
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(112.dp),
                             modifier = Modifier.fillMaxSize(),
+                            state = gridState,
                             contentPadding = PaddingValues(horizontal = 12.dp),
                         ) {
                             gridItems(visible, key = { it.file.path }) { item ->
@@ -557,6 +611,7 @@ fun BrowseScreen(
                                     item = item,
                                     selected = item.file in state.selection,
                                     isFavorite = item.file.path in state.favoritePaths,
+                                    highlight = blinkOn && item.file.name == activeReveal,
                                     onClick = { openItem(item) },
                                     onLongClick = { longPressItem(item) },
                                 )
@@ -564,12 +619,13 @@ fun BrowseScreen(
                             item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(80.dp)) }
                         }
                     } else {
-                        LazyColumn(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
                             itemsIndexed(visible, key = { _, it -> it.file.path }) { _, item ->
                                 FileRow(
                                     item = item,
                                     selected = item.file in state.selection,
                                     isFavorite = item.file.path in state.favoritePaths,
+                                    highlight = blinkOn && item.file.name == activeReveal,
                                     subtitle = if (item.isDir) null else
                                         "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
                                     onClick = { openItem(item) },
@@ -585,11 +641,12 @@ fun BrowseScreen(
 
             if (!selectionMode && state.clipboard != null) {
                 val clip = state.clipboard!!
-                PasteBar(
-                    mode = clip.mode.name.lowercase(),
+                TransferBar(
+                    mode = clip.mode,
                     count = clip.files.size,
+                    blockedReason = vm.transferBlockedReason(),
                     onPaste = { vm.pasteFromClipboard() },
-                    onDiscard = { vm.clearClipboard() },
+                    onCancel = { vm.clearClipboard() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 24.dp),
@@ -740,10 +797,10 @@ fun BrowseScreen(
     }
     state.pendingDelete?.let { files ->
         ConfirmDialog(
-            title = "Move ${files.size} item(s) to trash?",
+            title = "Move ${files.size} ${Format.itemWord(files.size)} to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
                 "You can undo right away or restore them from the Trash page.",
-            confirmLabel = "Delete",
+            confirmLabel = "Move to trash",
             destructive = true,
             onConfirm = { vm.confirmDelete() },
             onDismiss = { vm.dismissDelete() },
@@ -760,7 +817,9 @@ fun BrowseScreen(
     state.progress?.let { (title, p) ->
         ProgressOverlay(
             text = title,
-            fraction = if (p.total > 0) p.done.toFloat() / p.total else null,
+            done = p.done,
+            total = p.total,
+            currentItem = p.currentItem,
             onCancel = {
                 // v1.7.3 abortConfirm: ask before killing a running archive operation
                 // unless the user turned the confirmation off in Settings.
@@ -787,6 +846,7 @@ fun BrowseScreen(
             summary = "${state.resultTitle}: ${r.summary}",
             failures = r.failures,
             onDismiss = { vm.dismissResult() },
+            resultTitle = state.resultTitle,
         )
     }
     state.pendingProperties?.let { file ->
@@ -940,45 +1000,14 @@ private fun FilterMenu(
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         FilterMode.entries.forEach { m ->
             DropdownMenuItem(
-                text = { Text(if (m == current) "${m.label} ✓" else m.label) },
+                text = { Text(m.label) },
+                trailingIcon = {
+                    if (m == current) {
+                        Icon(Icons.Outlined.Check, contentDescription = "Selected")
+                    }
+                },
                 onClick = { onSelect(m) },
             )
-        }
-    }
-}
-
-@Composable
-private fun PasteBar(
-    mode: String,
-    count: Int,
-    onPaste: () -> Unit,
-    onDiscard: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shadowElevation = 4.dp,
-    ) {
-        Row(
-            Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.ContentPaste, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "$count item(s) ready to $mode",
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onPaste) { Text("Paste") }
-            IconButton(onClick = onDiscard) {
-                Icon(
-                    Icons.Outlined.Close, "Discard",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
         }
     }
 }

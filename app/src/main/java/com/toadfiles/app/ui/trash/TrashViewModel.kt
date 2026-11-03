@@ -6,9 +6,13 @@ import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
+import com.toadfiles.app.domain.Format
+import com.toadfiles.app.domain.OpProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -25,6 +29,9 @@ data class TrashUiState(
     val selection: Set<String> = emptySet(),
     /** Batch "delete forever" confirmation (operates on [selection]). */
     val confirmingBatchDelete: Boolean = false,
+    /** Shared progress overlay for the multi-item flows (owner report: they used to run
+     *  blind — no bar, no count, no cancel). Same shape Browse's op overlay consumes. */
+    val progress: Pair<String, OpProgress>? = null,
     val toast: String? = null,
 )
 
@@ -42,6 +49,21 @@ class TrashViewModel(
 
     private val volumeRoots: List<File>
         get() = container.fileRepo.roots().map { it.dir }
+
+    /** The running multi-item flow (empty / batch delete / batch restore); cancelled
+     *  by [cancelBatch] from the progress overlay's Cancel button. */
+    private var batchJob: Job? = null
+
+    /** Test seam: awaited before processing item [i] of a batch. Production: null —
+     *  real filesystem deletes are far too fast for a cancel test to land mid-loop
+     *  without a deterministic pause point. */
+    internal var perItemGate: (suspend (Int) -> Unit)? = null
+
+    /** Stops the running batch at the next item boundary. Items already processed are
+     *  kept — deletion is permanent — and the summary toast + refresh still run. */
+    fun cancelBatch() {
+        batchJob?.cancel()
+    }
 
     /** Monotonically increasing request id; only the newest refresh may apply its result. */
     private var refreshSeq = 0L
@@ -148,27 +170,36 @@ class TrashViewModel(
     /** Batch restore never destroys data — no confirmation needed. The selection is
      *  cleared synchronously BEFORE the work launches (like [confirmBatchDeleteForever])
      *  so a double-tap can never relaunch the same batch (N2). Renames and rescans are
-     *  surfaced per D4/D1. */
+     *  surfaced per D4/D1; the shared progress overlay tracks each item. */
     fun requestBatchRestore() {
         val selected = selectedEntries()
         if (selected.isEmpty()) return
         _state.update { it.copy(selection = emptySet()) }
-        viewModelScope.launch(ioDispatcher) {
-            var restored = 0
-            var renamed = 0
-            val restoredPaths = mutableListOf<String>()
-            for (e in selected) {
-                val dest = Trash.restore(e.file) ?: continue
-                restored++
-                if (dest.name != e.originPath.substringAfterLast('/')) renamed++
-                restoredPaths += dest.absolutePath
-            }
-            media.rescan(restoredPaths)
+        val restoredPaths = mutableListOf<String>()
+        var renamed = 0
+        runBatch(
+            title = "Restoring",
+            targets = selected,
+            op = { e ->
+                val dest = Trash.restore(e.file)
+                if (dest != null) {
+                    restoredPaths += dest.absolutePath
+                    if (dest.name != e.originPath.substringAfterLast('/')) renamed++
+                }
+                dest != null
+            },
+        ) { restored, cancelled ->
+            // A trashed file's MediaStore row is long gone — only a scan brings the
+            // restored files back into Recent/Categories and galleries (D1).
+            if (restoredPaths.isNotEmpty()) media.rescan(restoredPaths)
             val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
             _state.update {
                 it.copy(
-                    toast = if (restored == selected.size) "Restored $restored item(s)$renamedNote"
-                    else "Restored $restored of ${selected.size} — some original locations are unavailable$renamedNote",
+                    toast = when {
+                        cancelled -> "Stopped — restored $restored of ${selected.size}, the rest is still in trash$renamedNote"
+                        restored == selected.size -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
+                        else -> "Restored $restored of ${selected.size} — some original locations are unavailable$renamedNote"
+                    },
                 )
             }
             refresh()
@@ -186,12 +217,18 @@ class TrashViewModel(
         val selected = selectedEntries()
         _state.update { it.copy(confirmingBatchDelete = false, selection = emptySet()) }
         if (selected.isEmpty()) return
-        viewModelScope.launch(ioDispatcher) {
-            val deleted = selected.count { Trash.deleteForever(it.file) }
+        runBatch(
+            title = "Deleting forever",
+            targets = selected,
+            op = { e -> Trash.deleteForever(e.file) },
+        ) { deleted, cancelled ->
             _state.update {
                 it.copy(
-                    toast = if (deleted == selected.size) "Deleted $deleted item(s) forever"
-                    else "Deleted $deleted of ${selected.size} — the rest may already be gone",
+                    toast = when {
+                        cancelled -> "Stopped — deleted $deleted of ${selected.size}, the rest is still in trash"
+                        deleted == selected.size -> "Deleted $deleted ${Format.itemWord(deleted)} forever"
+                        else -> "Deleted $deleted of ${selected.size} — the rest may already be gone"
+                    },
                 )
             }
             refresh()
@@ -203,20 +240,77 @@ class TrashViewModel(
         return _state.value.entries.filter { it.file.absolutePath in sel }
     }
 
+    private fun displayName(e: TrashEntry) =
+        e.originPath.substringAfterLast('/').ifEmpty { e.file.name }
+
+    /**
+     * The shared multi-item runner (owner report): emits [progress] per item so the
+     * screen can show the same overlay Browse uses, and stops at the next item
+     * boundary when the job is cancelled — items already processed are kept.
+     * [onFinished] ALWAYS runs, also after a cancel, so the toast and the refresh
+     * reflect what actually happened instead of leaving a stale list.
+     */
+    private fun runBatch(
+        title: String,
+        targets: List<TrashEntry>,
+        op: (TrashEntry) -> Boolean,
+        onFinished: (done: Int, cancelled: Boolean) -> Unit,
+    ) {
+        batchJob?.cancel()
+        batchJob = viewModelScope.launch(ioDispatcher) {
+            var done = 0
+            var cancelled = false
+            for ((i, e) in targets.withIndex()) {
+                _state.update {
+                    it.copy(progress = title to OpProgress(i, targets.size, displayName(e)))
+                }
+                try {
+                    // Everything per-item is inside ONE try: a cancel can land while the
+                    // test gate (or any future suspension) is paused, and the resulting
+                    // CancellationException must still produce the stopped-summary path.
+                    perItemGate?.invoke(i)
+                    // Cancellation checkpoint per item — the loop body (Trash.deleteForever)
+                    // is blocking, so without this a cancel could only land at the gate.
+                    coroutineContext.ensureActive()
+                    op(e)
+                } catch (_: CancellationException) {
+                    cancelled = true
+                    break
+                }
+                done++
+            }
+            _state.update { it.copy(progress = null) }
+            onFinished(done, cancelled)
+        }
+    }
+
     fun emptyNow() {
         _state.update { it.copy(confirmingEmpty = false) }
         viewModelScope.launch(ioDispatcher) {
-            val removed = Trash.empty(volumeRoots)
-            // "Empty" can fail per item (a payload the filesystem refuses to delete);
-            // report what is actually left instead of claiming success (D5).
-            val remaining = Trash.entries(volumeRoots).size
-            _state.update {
-                it.copy(
-                    toast = if (remaining > 0) "Couldn't empty trash — $remaining item(s) couldn't be deleted"
-                    else "Trash emptied — $removed item(s) removed forever",
-                )
+            // List the trash as it exists RIGHT NOW (what Trash.empty() used to do):
+            // the screen's list can be stale — items trashed from elsewhere after the
+            // last refresh would otherwise silently survive the "empty".
+            val targets = Trash.entries(volumeRoots)
+            if (targets.isEmpty()) return@launch
+            runBatch(
+                title = "Emptying trash",
+                targets = targets,
+                op = { e -> Trash.deleteForever(e.file) },
+            ) { done, cancelled ->
+                // "Empty" can fail per item (a payload the filesystem refuses to delete);
+                // report what is actually left instead of claiming success (D5).
+                val remaining = Trash.entries(volumeRoots).size
+                _state.update {
+                    it.copy(
+                        toast = when {
+                            cancelled -> "Stopped — $done of ${targets.size} deleted, the rest is still in trash"
+                            remaining > 0 -> "Couldn't empty trash — $remaining ${Format.itemWord(remaining)} couldn't be deleted"
+                            else -> "Trash emptied — $done ${Format.itemWord(done)} removed forever"
+                        },
+                    )
+                }
+                refresh()
             }
-            refresh()
         }
     }
 

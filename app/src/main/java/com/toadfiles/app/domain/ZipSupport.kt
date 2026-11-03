@@ -584,7 +584,7 @@ object ZipSupport {
             else failures += "Could not restore the previous ${original.name}; old copy kept as ${backup.name}"
         }
         failures += "Publication into ${targetDir.name} $reason and was rolled back: " +
-            "$removed published item(s) removed, $restored replaced item(s) restored"
+            "$removed published ${Format.itemWord(removed)} removed, $restored replaced ${Format.itemWord(restored)} restored"
     }
 
     /** Same "(1)"-style suffixing as [PathSafety.uniqueName], but purely name-based for

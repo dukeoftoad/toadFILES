@@ -221,7 +221,7 @@ fun StorageScreen(
                         Column(Modifier.weight(1f)) {
                             Text("Trash", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "${state.trashCount} item(s) · ${Format.size(state.trashBytes)}",
+                                "${state.trashCount} ${Format.itemWord(state.trashCount)} · ${Format.size(state.trashBytes)}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -323,7 +323,7 @@ private fun MediaStatRow(name: String, count: Int, bytes: Long, fillFraction: Fl
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             Text(
-                "$count item(s) · ${Format.size(bytes)}",
+                "$count ${Format.itemWord(count)} · ${Format.size(bytes)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

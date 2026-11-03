@@ -14,6 +14,7 @@ import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileOps
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.MediaTrashOps
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
@@ -334,7 +335,7 @@ class CategoriesViewModel(
                         gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
                         restored < trashed.size ->
                             "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored item(s)$renamedNote"
+                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     },
                 )
             }
@@ -638,7 +639,9 @@ class CategoriesViewModel(
             }
             val target = File(dir, file.nameWithoutExtension)
             if (target.exists()) {
-                requestToast("A folder named \"${target.name}\" already exists. Rename or move it before extracting.")
+                // Same collision flow as "Extract to…" — the user picks the strategy in
+                // the shared dialog instead of a dead-end "rename it first" toast.
+                _state.update { it.copy(pendingExtractConflict = PendingExtractConflict(file, target)) }
                 return
             }
             startExtract(file, target)
@@ -685,10 +688,11 @@ class CategoriesViewModel(
     fun dismissExtractConflict() = _state.update { it.copy(pendingExtractConflict = null) }
 
     private fun startExtract(file: File, target: File, overwrite: Boolean = false, password: CharArray? = null) {
-        _state.update { it.copy(progress = "Extracting" to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
+        val progressTitle = "Extracting ${file.name}"
+        _state.update { it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
         ops.run(
             op = { onP -> ArchiveOps.extract(file, target, overwrite, password = password, onProgress = onP) },
-            onProgress = { p -> _state.update { it.copy(progress = "Extracting" to p) } },
+            onProgress = { p -> _state.update { it.copy(progress = progressTitle to p) } },
             onDone = { r ->
                 if (r.passwordRequired) {
                     // Encrypted archive: ask for the password, don't report a failure.
@@ -744,7 +748,7 @@ class CategoriesViewModel(
             val roots = container.fileRepo.roots().map { it.dir }
             val result = Trash.trash(live, roots)
             if (result.failureCount > 0) {
-                requestToast("Could not delete ${result.failureCount} source item(s)")
+                requestToast("Could not delete ${result.failureCount} source ${Format.itemWord(result.failureCount)}")
             }
         }
     }

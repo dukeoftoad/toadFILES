@@ -42,6 +42,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import java.io.File
 import kotlinx.coroutines.launch
 import com.toadfiles.app.ui.about.AboutScreen
 import com.toadfiles.app.ui.analyzer.StorageAnalyzerScreen
@@ -62,7 +63,7 @@ import com.toadfiles.app.domain.NavStyle
 
 object Routes {
     const val HOME = "home"
-    const val BROWSE = "browse?dir={dir}"
+    const val BROWSE = "browse?dir={dir}&reveal={reveal}"
     const val CATEGORIES = "categories"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
@@ -73,7 +74,8 @@ object Routes {
     const val APPEARANCE = "appearance"
     const val STORAGE_ANALYZER = "storage_analyzer?root={root}"
 
-    fun browse(dir: String): String = "browse?dir=${Uri.encode(dir)}"
+    fun browse(dir: String, reveal: String? = null): String =
+        "browse?dir=${Uri.encode(dir)}" + (reveal?.let { "&reveal=${Uri.encode(it)}" } ?: "")
     fun storageAnalyzer(root: String = ""): String =
         "storage_analyzer?root=${Uri.encode(root)}"
 }
@@ -207,19 +209,36 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             }
             composable(
                 route = Routes.BROWSE,
-                arguments = listOf(navArgument("dir") { type = NavType.StringType; defaultValue = "" }),
+                arguments = listOf(
+                    navArgument("dir") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("reveal") {
+                        type = NavType.StringType; nullable = true; defaultValue = null
+                    },
+                ),
             ) { entry ->
                 BrowseScreen(
                     initialDir = entry.arguments?.getString("dir").orEmpty(),
                     bottomPadding = padding.calculateBottomPadding(),
                     onNavigateUp = { navController.popBackStack() },
+                    revealName = entry.arguments?.getString("reveal"),
                 )
             }
             composable(Routes.RECENT) {
                 RecentScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
-                    onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
+                    onShowInFolder = { path ->
+                        // "Show in folder" (owner report): the file must be PINPOINTED,
+                        // not just its folder opened — pass the file name along so Browse
+                        // scrolls to it and blinks it twice.
+                        val f = File(path)
+                        val parent = f.parentFile
+                        if (parent != null && parent.isDirectory) {
+                            navController.navigateSingleTop(
+                                Routes.browse(parent.absolutePath, reveal = f.name)
+                            )
+                        }
+                    },
                     onOpenDrawer = openDrawer,
                 )
             }
@@ -227,7 +246,16 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 CategoriesScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
-                    onShowInFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
+                    onShowInFolder = { path ->
+                        // Same pinpoint as Recent: hand Browse the file name to flash.
+                        val f = File(path)
+                        val parent = f.parentFile
+                        if (parent != null && parent.isDirectory) {
+                            navController.navigateSingleTop(
+                                Routes.browse(parent.absolutePath, reveal = f.name)
+                            )
+                        }
+                    },
                 )
             }
             composable(Routes.SETTINGS) {

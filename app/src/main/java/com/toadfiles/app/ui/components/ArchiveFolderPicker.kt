@@ -34,10 +34,11 @@ import androidx.compose.ui.unit.dp
 import java.io.File
 
 /**
- * Minimal folder picker for the v1.7.3 "Archive Folder" setting (no reusable
+ * Minimal folder picker for the v1.7.3 "Archive folder" setting (no reusable
  * picker existed anywhere in ui/). Browses the directories of external storage,
- * navigates up/down, and confirms with "Use This Folder"; "Same Folder As Source"
- * resets the preference to blank (v1.7.2 behavior).
+ * navigates up/down, and confirms with "Use this folder"; "Same folder as source"
+ * resets the preference to blank (v1.7.2 behavior). Labels are sentence case,
+ * like every other dialog in the app.
  */
 @Suppress("DEPRECATION") // Environment.getExternalStorageDirectory(): primary shared storage is all this picker needs.
 @Composable
@@ -62,7 +63,7 @@ fun ArchiveFolderPicker(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Archive Folder") },
+        title = { Text("Archive folder") },
         text = {
             Column {
                 Text(
@@ -89,7 +90,7 @@ fun ArchiveFolderPicker(
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
                                 Spacer(Modifier.width(12.dp))
-                                Text("Up One Level", style = MaterialTheme.typography.bodyLarge)
+                                Text("Up one level", style = MaterialTheme.typography.bodyLarge)
                             }
                         }
                     }
@@ -124,12 +125,12 @@ fun ArchiveFolderPicker(
                 }
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 TextButton(onClick = { onSelect("") }) {
-                    Text("Same Folder As Source")
+                    Text("Same folder as source")
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSelect(dir.absolutePath) }) { Text("Use This Folder") }
+            TextButton(onClick = { onSelect(dir.absolutePath) }) { Text("Use this folder") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

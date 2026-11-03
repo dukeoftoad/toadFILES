@@ -6,8 +6,10 @@ import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
+import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.ui.trash.TrashViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -188,7 +190,7 @@ class TrashViewModelTest {
 
         vm.requestBatchRestore()
         await { vm.state.value.entries.isEmpty() && vm.state.value.selection.isEmpty() }
-        assertEquals("Restored 2 item(s)", vm.state.value.toast)
+        assertEquals("Restored 2 items", vm.state.value.toast)
         assertTrue(File(volume, "b1.txt").exists() && File(volume, "b2.txt").exists())
     }
 
@@ -208,7 +210,7 @@ class TrashViewModelTest {
         vm.requestBatchRestore() // the double-tap: harmless no-op
 
         await { vm.state.value.entries.isEmpty() }
-        assertEquals("Restored 2 item(s)", vm.state.value.toast)
+        assertEquals("Restored 2 items", vm.state.value.toast)
         // Both restored destinations were re-scanned into the media index (D1).
         assertEquals(
             listOf(File(volume, "s1.txt").absolutePath, File(volume, "s2.txt").absolutePath).sorted(),
@@ -227,7 +229,7 @@ class TrashViewModelTest {
         vm.requestBatchRestore()
 
         await { File(volume, "r (1).txt").exists() }
-        assertEquals("Restored 1 item(s), 1 renamed", vm.state.value.toast)
+        assertEquals("Restored 1 item, 1 renamed", vm.state.value.toast)
     }
 
     @Test
@@ -294,7 +296,7 @@ class TrashViewModelTest {
 
         vm.emptyNow()
         await { vm.state.value.entries.isEmpty() && !vm.state.value.confirmingEmpty }
-        assertEquals("Trash emptied — 2 item(s) removed forever", vm.state.value.toast)
+        assertEquals("Trash emptied — 2 items removed forever", vm.state.value.toast)
     }
 
     @Test
@@ -310,12 +312,114 @@ class TrashViewModelTest {
             vm.emptyNow()
 
             await { vm.state.value.toast != null }
-            assertEquals("Couldn't empty trash — 2 item(s) couldn't be deleted", vm.state.value.toast)
+            assertEquals("Couldn't empty trash — 2 items couldn't be deleted", vm.state.value.toast)
             await { !vm.state.value.loading }
             assertEquals("the stuck items must still be listed", 2, vm.state.value.entries.size)
         } finally {
             trashDir.setWritable(true)
         }
+    }
+
+    // ---- batch progress + cancel (owner report: the multi-item trash flows ran blind) ----
+
+    @Test
+    fun `empty trash emits per-item progress and settles on the summary toast`() = runTest {
+        repeat(3) { seedTrash("multi$it.txt") }
+        vm.refresh()
+        await { vm.state.value.entries.size == 3 && !vm.state.value.loading }
+
+        // Record every progress emission the loop makes: done counts 0,1,2 for 3 items.
+        val seen = mutableListOf<OpProgress>()
+        vm.perItemGate = { seen += vm.state.value.progress!!.second }
+
+        vm.emptyNow()
+
+        assertNull(vm.state.value.progress)
+        assertEquals(listOf(0, 1, 2), seen.map { it.done })
+        assertTrue(seen.all { it.total == 3 })
+        assertTrue(seen.all { it.currentItem.isNotBlank() })
+        assertEquals("Trash emptied — 3 items removed forever", vm.state.value.toast)
+        await { vm.state.value.entries.isEmpty() }
+    }
+
+    @Test
+    fun `cancel stops emptying at the next item and keeps the rest`() = runTest {
+        repeat(5) { seedTrash("cancel$it.txt") }
+        vm.refresh()
+        await { vm.state.value.entries.size == 5 && !vm.state.value.loading }
+
+        // Pause the loop before its second item (item 0 already deleted): the exact
+        // spot a user's Cancel tap would land — real deletes are far too fast to
+        // race, hence the injected gate.
+        val pausedAtItem1 = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        vm.perItemGate = { i ->
+            if (i == 1) {
+                pausedAtItem1.complete(Unit)
+                release.await()
+            }
+        }
+
+        vm.emptyNow()
+        pausedAtItem1.await()
+        assertEquals(1, vm.state.value.progress!!.second.done)
+        assertEquals("Emptying trash", vm.state.value.progress!!.first)
+        assertEquals(4, vm.state.value.entries.count { it.file.exists() })
+
+        vm.cancelBatch()
+        release.complete(Unit)
+        // Drive any coroutine machinery that queued on the test scheduler (dispatch
+        // behavior must not matter — the assertions are on the final state).
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.state.value.progress)
+        assertEquals("Stopped — 1 of 5 deleted, the rest is still in trash", vm.state.value.toast)
+        // The list refreshed to the truth: the 4 kept items are still in trash.
+        await { vm.state.value.entries.size == 4 }
+        assertEquals(4, vm.state.value.entries.count { it.file.exists() })
+    }
+
+    @Test
+    fun `batch delete forever shows progress and stops on cancel mid-batch`() = runTest {
+        repeat(3) { seedTrash("batch$it.txt") }
+        vm.refresh()
+        await { vm.state.value.entries.size == 3 && !vm.state.value.loading }
+        vm.selectAll()
+        vm.requestBatchDeleteForever()
+        assertTrue(vm.state.value.confirmingBatchDelete)
+
+        val release = CompletableDeferred<Unit>()
+        vm.perItemGate = { i -> if (i == 1) release.await() }
+
+        vm.confirmBatchDeleteForever()
+        assertEquals("Deleting forever", vm.state.value.progress!!.first)
+        assertEquals(1, vm.state.value.progress!!.second.done)
+
+        vm.cancelBatch()
+        release.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertNull(vm.state.value.progress)
+        assertEquals("Stopped — deleted 1 of 3, the rest is still in trash", vm.state.value.toast)
+        await { vm.state.value.entries.size == 2 }
+    }
+
+    @Test
+    fun `batch restore shows the shared progress overlay`() = runTest {
+        seedTrash("pr1.txt")
+        seedTrash("pr2.txt")
+        vm.refresh()
+        await { vm.state.value.entries.size == 2 }
+        vm.selectAll()
+
+        val titles = mutableListOf<String>()
+        vm.perItemGate = { titles += vm.state.value.progress!!.first }
+
+        vm.requestBatchRestore()
+
+        assertEquals(listOf("Restoring", "Restoring"), titles)
+        assertNull(vm.state.value.progress)
+        assertEquals("Restored 2 items", vm.state.value.toast)
     }
 
     /** Media-source double that only records rescan() calls (restore re-indexing, D1). */

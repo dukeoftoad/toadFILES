@@ -88,7 +88,10 @@ class FileActionSheetTest {
         assertRowShown("Rename")
         assertRowShown("Copy to…")
         assertRowShown("Move to…")
-        assertRowShown("Delete")
+        assertRowShown("Move to trash")
+        // The row must never promise bare "Delete": it trashes (30-day undo), it does
+        // not destroy — the confirm dialog and the Trash page use "Delete forever".
+        assertRowHidden("Delete")
         assertRowShown("Properties")
         assertRowShown("Add favorite")
         // "Select more" is gone: long-press starts multi-select now.
@@ -143,7 +146,7 @@ class FileActionSheetTest {
         renderSheet(fileItem("song.mp3", isDir = false), wired = false)
         assertRowShown("Open")
         assertRowShown("Share")
-        assertRowShown("Delete")
+        assertRowShown("Move to trash")
         assertRowShown("Properties")
         assertRowHidden("Rename")
         assertRowHidden("Copy to…")
