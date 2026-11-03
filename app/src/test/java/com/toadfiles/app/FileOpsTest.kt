@@ -95,12 +95,25 @@ class FileOpsTest {
     }
 
     @Test
-    fun `missing source is skipped and reported`() = runBlocking {
+    fun `missing source fails with a reported reason, not a silent skip`() = runBlocking {
         val dst = tmp.newFolder("dst")
         val ghost = File(tmp.root, "ghost.txt")
         val r = FileOps.copy(listOf(ghost), dst, ConflictStrategy.RENAME)
-        assertEquals(1, r.skipped)
-        assertEquals(0, r.failed)
+        // The source vanished since it was cut/copied — the result must say so under
+        // Details, not fold it into "skipped" where it reads like the user's own choice.
+        assertEquals(1, r.failed)
+        assertEquals(0, r.skipped)
+        assertTrue(r.failures.any { it.startsWith("ghost.txt:") && it.contains("source not found") })
+    }
+
+    @Test
+    fun `move reports a vanished source the same way`() = runBlocking {
+        val dst = tmp.newFolder("dst")
+        val ghost = File(tmp.root, "ghost2.txt")
+        val r = FileOps.move(listOf(ghost), dst, ConflictStrategy.RENAME)
+        assertEquals(1, r.failed)
+        assertEquals(0, r.skipped)
+        assertTrue(r.failures.any { it.startsWith("ghost2.txt:") && it.contains("source not found") })
     }
 
     @Test
