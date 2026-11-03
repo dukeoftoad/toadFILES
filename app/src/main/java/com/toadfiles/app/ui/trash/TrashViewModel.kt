@@ -12,11 +12,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 data class TrashUiState(
@@ -264,11 +264,15 @@ class TrashViewModel(
                 _state.update {
                     it.copy(progress = title to OpProgress(i, targets.size, displayName(e)))
                 }
-                perItemGate?.invoke(i)
                 try {
-                    // Trash.deleteForever is blocking — re-entering the dispatcher per
-                    // item gives every item a real cancellation checkpoint.
-                    withContext(ioDispatcher) { op(e) }
+                    // Everything per-item is inside ONE try: a cancel can land while the
+                    // test gate (or any future suspension) is paused, and the resulting
+                    // CancellationException must still produce the stopped-summary path.
+                    perItemGate?.invoke(i)
+                    // Cancellation checkpoint per item — the loop body (Trash.deleteForever)
+                    // is blocking, so without this a cancel could only land at the gate.
+                    coroutineContext.ensureActive()
+                    op(e)
                 } catch (_: CancellationException) {
                     cancelled = true
                     break

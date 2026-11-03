@@ -367,7 +367,10 @@ class TrashViewModelTest {
         assertEquals(4, vm.state.value.entries.count { it.file.exists() })
 
         vm.cancelBatch()
-        release.complete(Unit) // resumes the loop inline: next withContext throws → stop
+        release.complete(Unit)
+        // Drive any coroutine machinery that queued on the test scheduler (dispatch
+        // behavior must not matter — the assertions are on the final state).
+        testScheduler.advanceUntilIdle()
 
         assertNull(vm.state.value.progress)
         assertEquals("Stopped — 1 of 5 deleted, the rest is still in trash", vm.state.value.toast)
@@ -394,6 +397,7 @@ class TrashViewModelTest {
 
         vm.cancelBatch()
         release.complete(Unit)
+        testScheduler.advanceUntilIdle()
 
         assertNull(vm.state.value.progress)
         assertEquals("Stopped — deleted 1 of 3, the rest is still in trash", vm.state.value.toast)
