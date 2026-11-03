@@ -124,8 +124,8 @@ class RecentViewModelTest {
 
     @Test
     fun `toast is consumed after being shown`() = runTest {
-        vm.requestToast("Moved 1 item(s) to trash")
-        assertEquals("Moved 1 item(s) to trash", vm.state.value.toast)
+        vm.requestToast("Moved 1 item to trash")
+        assertEquals("Moved 1 item to trash", vm.state.value.toast)
         vm.consumeToast()
         assertNull(vm.state.value.toast)
     }
@@ -166,7 +166,7 @@ class RecentViewModelTest {
             undoVm.consumeUndoOffer()
             assertNull(undoVm.state.value.lastTrashed)
             undoVm.undoDelete(trashed)
-            await { undoVm.state.value.toast == "Restored 1 item(s)" }
+            await { undoVm.state.value.toast == "Restored 1 item" }
             assertTrue(src.exists())
             assertEquals(listOf(src.absolutePath), fake.rescanned)
         } finally {

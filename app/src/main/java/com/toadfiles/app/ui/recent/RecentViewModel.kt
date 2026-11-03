@@ -14,6 +14,7 @@ import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.PathSafety
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.OpRunner
 import com.toadfiles.app.ui.components.PendingPasswordRetry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -223,7 +224,7 @@ class RecentViewModel(
                         gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
                         restored < trashed.size ->
                             "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored item(s)$renamedNote"
+                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     },
                 )
             }

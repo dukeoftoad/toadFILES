@@ -24,6 +24,7 @@ import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.CompressLevel
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.PendingPasswordRetry
 import com.toadfiles.app.ui.components.PropertiesDetail
 import com.toadfiles.app.ui.components.VolumeChoice
@@ -678,7 +679,7 @@ class BrowseViewModel(
                         gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
                         restored < trashed.size ->
                             "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored item(s)$renamedNote"
+                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     },
                 )
             }
@@ -1136,7 +1137,7 @@ class BrowseViewModel(
                 lastTrashed = result.moved.takeIf { m -> m.isNotEmpty() },
                 undoOfferSeq = ++undoOfferId,
                 toast = if (result.failureCount > 0) {
-                    "Could not delete ${result.failureCount} source item(s)"
+                    "Could not delete ${result.failureCount} source ${Format.itemWord(result.failureCount)}"
                 } else it.toast,
             )
         }

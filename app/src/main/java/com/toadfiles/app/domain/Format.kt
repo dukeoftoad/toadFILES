@@ -6,6 +6,10 @@ import java.util.Locale
 
 object Format {
 
+    /** Proper plural for user-facing counts: "1 item", "2 items" — never "item(s)".
+     *  Returns just the word so qualified forms compose too ("3 source items"). */
+    fun itemWord(n: Int): String = if (n == 1) "item" else "items"
+
     /** 1024-style units like most desktop file managers. */
     fun size(bytes: Long): String {
         if (bytes < 0) return "?"

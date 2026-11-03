@@ -124,7 +124,7 @@ fun RecentScreen(
         val trashed = state.lastTrashed ?: return@LaunchedEffect
         vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
-            message = "Moved ${trashed.size} item(s) to trash",
+            message = "Moved ${trashed.size} ${Format.itemWord(trashed.size)} to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
@@ -330,7 +330,7 @@ fun RecentScreen(
     state.pendingDelete?.let { entries ->
         AlertDialog(
             onDismissRequest = { vm.dismissDelete() },
-            title = { Text("Move ${entries.size} item(s) to trash?") },
+            title = { Text("Move ${entries.size} ${Format.itemWord(entries.size)} to trash?") },
             text = {
                 Text("Items are moved to the toadFILES trash and kept for 30 days. " +
                     "You can restore them from the Trash page.")

@@ -180,7 +180,7 @@ fun TrashScreen(
     if (state.confirmingEmpty) {
         ConfirmDialog(
             title = "Empty trash?",
-            message = "Permanently delete all ${state.entries.size} item(s)? This cannot be undone.",
+            message = "Permanently delete all ${state.entries.size} ${Format.itemWord(state.entries.size)}? This cannot be undone.",
             confirmLabel = "Delete forever",
             destructive = true,
             onConfirm = { vm.emptyNow() },
@@ -205,8 +205,8 @@ fun TrashScreen(
     // Batch delete forever: same respect, applied to the whole selection (v1.7.5).
     if (state.confirmingBatchDelete) {
         ConfirmDialog(
-            title = "Delete ${state.selection.size} item(s) forever?",
-            message = "Permanently delete the ${state.selection.size} selected item(s)? This cannot be undone.",
+            title = "Delete ${state.selection.size} ${Format.itemWord(state.selection.size)} forever?",
+            message = "Permanently delete the ${state.selection.size} selected ${Format.itemWord(state.selection.size)}? This cannot be undone.",
             confirmLabel = "Delete forever",
             destructive = true,
             onConfirm = { vm.confirmBatchDeleteForever() },

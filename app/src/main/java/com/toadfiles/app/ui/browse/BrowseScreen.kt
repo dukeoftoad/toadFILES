@@ -202,7 +202,7 @@ fun BrowseScreen(
         val trashed = state.lastTrashed ?: return@LaunchedEffect
         vm.consumeUndoOffer()
         val result = snackbar.showSnackbar(
-            message = "Moved ${trashed.size} item(s) to trash",
+            message = "Moved ${trashed.size} ${Format.itemWord(trashed.size)} to trash",
             actionLabel = "Undo",
             duration = SnackbarDuration.Long,
         )
@@ -286,7 +286,7 @@ fun BrowseScreen(
                                 leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) },
                             )
                             DropdownMenuItem(
-                                text = { Text("Compress ${state.selection.size} item(s)…") },
+                                text = { Text("Compress ${state.selection.size} ${Format.itemWord(state.selection.size)}…") },
                                 onClick = {
                                     moreMenuOpen = false
                                     vm.requestZip(state.selection.toList())
@@ -746,7 +746,7 @@ fun BrowseScreen(
     }
     state.pendingDelete?.let { files ->
         ConfirmDialog(
-            title = "Move ${files.size} item(s) to trash?",
+            title = "Move ${files.size} ${Format.itemWord(files.size)} to trash?",
             message = "Items are moved to the toadFILES trash and kept for 30 days. " +
                 "You can undo right away or restore them from the Trash page.",
             confirmLabel = "Delete",

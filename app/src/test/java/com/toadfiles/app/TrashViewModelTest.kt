@@ -188,7 +188,7 @@ class TrashViewModelTest {
 
         vm.requestBatchRestore()
         await { vm.state.value.entries.isEmpty() && vm.state.value.selection.isEmpty() }
-        assertEquals("Restored 2 item(s)", vm.state.value.toast)
+        assertEquals("Restored 2 items", vm.state.value.toast)
         assertTrue(File(volume, "b1.txt").exists() && File(volume, "b2.txt").exists())
     }
 
@@ -208,7 +208,7 @@ class TrashViewModelTest {
         vm.requestBatchRestore() // the double-tap: harmless no-op
 
         await { vm.state.value.entries.isEmpty() }
-        assertEquals("Restored 2 item(s)", vm.state.value.toast)
+        assertEquals("Restored 2 items", vm.state.value.toast)
         // Both restored destinations were re-scanned into the media index (D1).
         assertEquals(
             listOf(File(volume, "s1.txt").absolutePath, File(volume, "s2.txt").absolutePath).sorted(),
@@ -227,7 +227,7 @@ class TrashViewModelTest {
         vm.requestBatchRestore()
 
         await { File(volume, "r (1).txt").exists() }
-        assertEquals("Restored 1 item(s), 1 renamed", vm.state.value.toast)
+        assertEquals("Restored 1 item, 1 renamed", vm.state.value.toast)
     }
 
     @Test
@@ -294,7 +294,7 @@ class TrashViewModelTest {
 
         vm.emptyNow()
         await { vm.state.value.entries.isEmpty() && !vm.state.value.confirmingEmpty }
-        assertEquals("Trash emptied — 2 item(s) removed forever", vm.state.value.toast)
+        assertEquals("Trash emptied — 2 items removed forever", vm.state.value.toast)
     }
 
     @Test
@@ -310,7 +310,7 @@ class TrashViewModelTest {
             vm.emptyNow()
 
             await { vm.state.value.toast != null }
-            assertEquals("Couldn't empty trash — 2 item(s) couldn't be deleted", vm.state.value.toast)
+            assertEquals("Couldn't empty trash — 2 items couldn't be deleted", vm.state.value.toast)
             await { !vm.state.value.loading }
             assertEquals("the stuck items must still be listed", 2, vm.state.value.entries.size)
         } finally {

@@ -6,6 +6,7 @@ import com.toadfiles.app.AppContainer
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
+import com.toadfiles.app.domain.Format
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -167,7 +168,7 @@ class TrashViewModel(
             val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
             _state.update {
                 it.copy(
-                    toast = if (restored == selected.size) "Restored $restored item(s)$renamedNote"
+                    toast = if (restored == selected.size) "Restored $restored ${Format.itemWord(restored)}$renamedNote"
                     else "Restored $restored of ${selected.size} — some original locations are unavailable$renamedNote",
                 )
             }
@@ -190,7 +191,7 @@ class TrashViewModel(
             val deleted = selected.count { Trash.deleteForever(it.file) }
             _state.update {
                 it.copy(
-                    toast = if (deleted == selected.size) "Deleted $deleted item(s) forever"
+                    toast = if (deleted == selected.size) "Deleted $deleted ${Format.itemWord(deleted)} forever"
                     else "Deleted $deleted of ${selected.size} — the rest may already be gone",
                 )
             }
@@ -212,8 +213,8 @@ class TrashViewModel(
             val remaining = Trash.entries(volumeRoots).size
             _state.update {
                 it.copy(
-                    toast = if (remaining > 0) "Couldn't empty trash — $remaining item(s) couldn't be deleted"
-                    else "Trash emptied — $removed item(s) removed forever",
+                    toast = if (remaining > 0) "Couldn't empty trash — $remaining ${Format.itemWord(remaining)} couldn't be deleted"
+                    else "Trash emptied — $removed ${Format.itemWord(removed)} removed forever",
                 )
             }
             refresh()
