@@ -6,6 +6,76 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-11-03
+
+A transfer-UX overhaul release: a redesigned move/copy transfer bar, real
+progress with cancel everywhere, conflict flows that no longer dead-end,
+the show-in-folder pinpoint, and a long sweep of wording, pluralization
+and icon honesty fixes across the app.
+
+### Added
+- **Redesigned move/copy transfer bar**: one calm M3 surface replaces the old
+  PasteBar + arming-Snackbar double feedback — intent-shaped icon (move vs
+  copy), action-first title ("Move to here" / "Copy to here"), properly
+  pluralized item count, an explicit Cancel button and a filled Paste button.
+  Paste is disabled with an inline reason when a MOVE would nest a folder
+  under itself; copy stays always allowed.
+- **Extract-here conflict flow**: extracting an archive onto an existing
+  destination folder no longer dead-ends with a refusal toast — Browse,
+  Categories and Recent now open the shared conflict dialog (Keep both /
+  Replace / Skip), the same flow "Extract to…" already used.
+- **Progress overlays that say what they are doing**: the shared progress
+  overlay now reports an animated determinate bar with percent, "N of M
+  items" (proper plural) and the live current entry name ("Extracting
+  pack.zip"); unknown totals stay indeterminate with the entry name shown.
+- **Cancel for the trash batch flows**: empty trash, batch delete-forever
+  and batch restore all run through one shared runner rendering the same
+  progress overlay with a working Cancel — cancellation stops at the next
+  item boundary, keeps everything already processed, still rescans
+  restored files, and fires an honest "Stopped — X of Y" summary before
+  refreshing the list to the truth.
+- **Show-in-folder pinpoint**: "Show in folder" no longer just opens the
+  parent folder — the listing scrolls the file into view and flashes its
+  row/cell twice (list and grid layouts); a vanished or filtered target
+  degrades to a plain folder open.
+- **Operation-titled result dialogs**: "Copy finished", "Move finished",
+  "Extract finished" etc., derived from the running operation instead of
+  the generic "Operation finished".
+
+### Changed
+- **Honest trash wording app-wide**: every red row and icon that actually
+  moves items to the 30-day recoverable trash now says "Move to trash";
+  "Delete forever" stays exclusive to the Trash page's permanent actions.
+- **Proper item pluralization everywhere**: "1 item / 2 items" across
+  trash confirms, compress/zip menus, conflict dialog, trash toasts,
+  storage and category subtitles — the "item(s)" pattern is gone.
+- **Sort/filter menus mark selection with a Material 3 trailing check
+  icon** (announced as its own word by TalkBack) instead of a "✓" text
+  glyph glued onto the label.
+- **Sentence case sweep**: the archive folder picker ("Archive folder",
+  "Up one level", "Same folder as source", "Use this folder") and the
+  Settings General block rows and choice labels follow the app-wide
+  sentence-case convention; ZIP/7z acronyms stay upper.
+- **File icons match the friendly type names**: .heif shows the image
+  icon and .htm/.html the document icon, matching what the properties
+  sheet promises.
+
+### Fixed
+- **New-folder FAB no longer overlays the armed transfer bar** (and the
+  same bottom-edge dock conflict in selection mode); the FAB returns
+  after Paste or Cancel.
+- **Category drill-in dead band removed**: the entries list consumed the
+  Scaffold insets twice, pushing the whole list a full top-bar height
+  down; insets are consumed once, matching Browse.
+- **A vanished source is a reported failure, not a silent "skip"**:
+  pasting/moving a batch whose file was deleted elsewhere (or whose
+  removable storage is gone) now shows "N failed" in the result summary
+  and names the missing file in Details; a user-chosen conflict Skip is
+  still a skip.
+- **Empty trash acts on the trash at execution time**, not on a stale
+  screen snapshot that could miss items trashed from elsewhere after the
+  last refresh.
+
 ## [1.9.1] — 2026-11-03
 
 The final release of toadFILES — the app now ships an in-app What's New
