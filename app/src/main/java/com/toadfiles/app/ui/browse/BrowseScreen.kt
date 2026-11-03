@@ -766,7 +766,9 @@ fun BrowseScreen(
     state.progress?.let { (title, p) ->
         ProgressOverlay(
             text = title,
-            fraction = if (p.total > 0) p.done.toFloat() / p.total else null,
+            done = p.done,
+            total = p.total,
+            currentItem = p.currentItem,
             onCancel = {
                 // v1.7.3 abortConfirm: ask before killing a running archive operation
                 // unless the user turned the confirmation off in Settings.

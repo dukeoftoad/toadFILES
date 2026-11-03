@@ -659,21 +659,31 @@ class BrowseViewModelTest {
     }
 
     @Test
-    fun `extractZip default still refuses when the sibling folder exists`() = runTest {
+    fun `extractZip to an existing sibling folder asks via the conflict dialog, not a dead-end toast`() = runTest {
         val zip = File(dir, "plain.zip")
         makeZip(zip, mapOf("a.txt" to "A".toByteArray()))
-        File(dir, "plain").mkdirs()
+        File(dir, "plain").apply { mkdirs() }.resolve("old.txt").writeText("OLD")
         vm.openDir(dir)
 
         vm.extractZip(zip)
 
-        assertEquals(
-            "A folder named \"plain\" already exists. Rename or move it before extracting.",
-            vm.state.value.toast,
-        )
+        // Same collision flow as paste and "Extract to…": the dialog decides, nothing
+        // is written yet and no toast tells the user to go rename things by hand.
+        val pc = vm.state.value.pendingConflict
+        assertNotNull(pc)
+        assertEquals(OpKind.ZIP_EXTRACT, pc!!.op)
+        assertEquals(listOf("plain"), pc.conflicts)
         assertNull(vm.state.value.result)
         assertNull(vm.state.value.progress)
-        assertFalse("nothing may be extracted on refusal", File(dir, "plain/a.txt").exists())
+        assertNull(vm.state.value.toast)
+        assertFalse("nothing may be extracted before the user decides", File(dir, "plain (1)").exists())
+
+        vm.resolveConflict(ConflictStrategy.RENAME)
+
+        await { vm.state.value.result != null && vm.state.value.items.isNotEmpty() }
+        assertEquals("A", File(dir, "plain (1)/a.txt").readText())
+        // Keep both leaves the pre-existing folder untouched.
+        assertEquals("OLD", File(dir, "plain/old.txt").readText())
     }
 
     @Test
