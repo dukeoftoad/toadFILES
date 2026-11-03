@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.CategorySummary
+import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.ui.recent.RecentViewModel
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -259,7 +261,7 @@ class RecentViewModelTest {
     }
 
     @Test
-    fun `extractZip refuses an existing destination folder with a toast`() = runTest {
+    fun `extractZip to an existing destination folder asks via the conflict dialog, not a dead-end toast`() = runTest {
         val root = File(container.fileRepo.primaryRoot(), "recent-extract-${System.nanoTime()}")
         root.mkdirs()
         try {
@@ -269,11 +271,22 @@ class RecentViewModelTest {
 
             vm.extractZip(zip)
 
-            assertEquals(
-                "A folder named \"bundle\" already exists. Rename or move it before extracting.",
-                vm.state.value.toast,
-            )
+            // Same collision flow as Browse/Categories: the dialog decides, nothing is
+            // extracted yet and no toast sends the user away to rename things.
+            val pc = vm.state.value.pendingExtractConflict
+            assertNotNull(pc)
+            assertEquals("bundle", pc!!.target.name)
             assertNull(vm.state.value.result)
+            assertNull(vm.state.value.toast)
+            assertFalse("nothing may be extracted before the user decides", File(root, "bundle (1)").exists())
+
+            vm.resolveExtractConflict(ConflictStrategy.RENAME)
+
+            await { vm.state.value.result != null }
+            assertEquals(0, vm.state.value.result!!.failed)
+            assertEquals("zipbody", File(root, "bundle (1)/inner.txt").readText())
+            // Keep both leaves the pre-existing folder untouched.
+            assertFalse(File(root, "bundle/inner.txt").exists())
         } finally {
             root.deleteRecursively()
         }

@@ -79,6 +79,7 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
@@ -365,6 +366,17 @@ fun RecentScreen(
         onCancel = { vm.cancelOp() },
         onDismissResult = { vm.dismissResult() },
     )
+
+    // "Extract here" collision: the shared conflict dialog with Browse/Categories
+    // semantics (keep both / replace / skip) — no more dead-end refusal toast.
+    state.pendingExtractConflict?.let { pc ->
+        ConflictDialog(
+            conflicts = listOf(pc.target.name),
+            targetName = pc.target.name,
+            onDecide = { vm.resolveExtractConflict(it) },
+            onDismiss = { vm.dismissExtractConflict() },
+        )
+    }
 
     // Encrypted archive: the extract came back passwordRequired — ask, then retry
     // with the same target dir / replace semantics (v1.8.0).
