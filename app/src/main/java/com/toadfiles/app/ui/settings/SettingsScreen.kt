@@ -169,7 +169,7 @@ fun SettingsScreen(
             SettingsCard {
                 ChoiceRow(
                     icon = Icons.Outlined.FolderZip,
-                    title = "Open Action (ZIP)",
+                    title = "Open action (ZIP)",
                     choices = ZipOpenAction.entries,
                     selected = settings.zipOpenAction,
                     label = ::zipOpenLabel,
@@ -178,7 +178,7 @@ fun SettingsScreen(
                 RowDivider()
                 ChoiceRow(
                     icon = Icons.Outlined.Archive,
-                    title = "Open Action (7z)",
+                    title = "Open action (7z)",
                     choices = SevenZipOpenAction.entries,
                     selected = settings.sevenZipOpenAction,
                     label = ::sevenZipOpenLabel,
@@ -187,7 +187,7 @@ fun SettingsScreen(
                 RowDivider()
                 SwitchRow(
                     icon = Icons.Outlined.Delete,
-                    title = "Delete Source After Compression",
+                    title = "Delete source after compression",
                     subtitle = "Remove the original files once the archive is created",
                     checked = settings.deleteAfterCompress,
                     onChange = { vm.setDeleteAfterCompress(it) },
@@ -195,7 +195,7 @@ fun SettingsScreen(
                 RowDivider()
                 SwitchRow(
                     icon = Icons.Outlined.FolderZip,
-                    title = "Delete Archive After Extraction",
+                    title = "Delete archive after extraction",
                     subtitle = "Remove the archive once everything is extracted",
                     checked = settings.deleteAfterExtract,
                     onChange = { vm.setDeleteAfterExtract(it) },
@@ -203,7 +203,7 @@ fun SettingsScreen(
                 RowDivider()
                 SwitchRow(
                     icon = Icons.Outlined.Verified,
-                    title = "Confirm Before Aborting",
+                    title = "Confirm before aborting",
                     subtitle = "Ask before canceling a running archive operation",
                     checked = settings.abortConfirm,
                     onChange = { vm.setAbortConfirm(it) },
@@ -211,7 +211,7 @@ fun SettingsScreen(
                 RowDivider()
                 SwitchRow(
                     icon = Icons.Outlined.Verified,
-                    title = "Confirm Before Overwriting",
+                    title = "Confirm before overwriting",
                     subtitle = "Ask before extraction replaces existing files",
                     checked = settings.overwriteConfirm,
                     onChange = { vm.setOverwriteConfirm(it) },
@@ -439,9 +439,9 @@ private fun ArchiveFolderRow(current: String, onSelect: (String) -> Unit) {
     ) {
         IconChip(Icons.Outlined.FolderZip)
         Column(Modifier.weight(1f)) {
-            Text("Archive Folder", style = MaterialTheme.typography.bodyLarge)
+            Text("Archive folder", style = MaterialTheme.typography.bodyLarge)
             Text(
-                current.ifBlank { "Same Folder As Source" },
+                current.ifBlank { "Same folder as source" },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 2,
@@ -469,14 +469,14 @@ private fun ArchiveFolderRow(current: String, onSelect: (String) -> Unit) {
 private fun sortModeLabel(mode: SortMode) = mode.name.lowercase().replaceFirstChar { it.uppercase() }
 
 private fun zipOpenLabel(action: ZipOpenAction) = when (action) {
-    ZipOpenAction.MENU -> "Show Menu"
+    ZipOpenAction.MENU -> "Show menu"
     ZipOpenAction.EXTRACT -> "Extract"
-    ZipOpenAction.OPEN_WITH -> "Open With"
+    ZipOpenAction.OPEN_WITH -> "Open with"
 }
 
 private fun sevenZipOpenLabel(action: SevenZipOpenAction) = when (action) {
-    SevenZipOpenAction.MENU -> "Show Menu"
+    SevenZipOpenAction.MENU -> "Show menu"
     SevenZipOpenAction.EXTRACT -> "Extract"
-    SevenZipOpenAction.OPEN_WITH -> "Open With"
+    SevenZipOpenAction.OPEN_WITH -> "Open with"
 }
 
