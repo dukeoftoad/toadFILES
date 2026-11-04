@@ -435,6 +435,10 @@ class CategoriesViewModelTest {
             assertTrue(slowVm.state.value.progress != null) // overlay up pre-op (seed is synchronous)
 
             slowVm.cancelOp()
+            // Audit A1: cancel clears the overlay only after the op job fully stopped
+            // (join-before-clear). Virtual time drains the join and the state update
+            // deterministically, so idling once covers both the cancel and the clear.
+            testScheduler.advanceUntilIdle()
             assertNull(slowVm.state.value.progress)
             testScheduler.advanceUntilIdle() // the cancelled job never starts the extract
             assertNull(slowVm.state.value.result)
