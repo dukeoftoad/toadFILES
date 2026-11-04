@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.AppTheme
@@ -40,6 +41,8 @@ data class ToadSettings(
     val appTheme: AppTheme = AppTheme.DEFAULT,
     /** v1.11: how the app moves (nav transitions, springs, splash). */
     val motionStyle: MotionStyle = MotionStyle.DEFAULT,
+    /** v1.11: the typeface (Appearance tab). [AppFont.DEFAULT] = bundled Manrope. */
+    val appFont: AppFont = AppFont.DEFAULT,
     /** Legacy v1.10 flag. Kept (and written) only so a pre-1.11 install's
      *  Material-You choice can be migrated into [appTheme]; the Appearance tab
      *  no longer exposes it — Material You is its own theme entry now. */
@@ -112,6 +115,7 @@ class SettingsRepository(
         val THEME = stringPreferencesKey("theme_mode")
         val APP_THEME = stringPreferencesKey("app_theme")
         val MOTION_STYLE = stringPreferencesKey("motion_style")
+        val APP_FONT = stringPreferencesKey("app_font")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val ACCENT = stringPreferencesKey("accent_color")
         val HIDDEN = booleanPreferencesKey("show_hidden")
@@ -146,6 +150,8 @@ class SettingsRepository(
                 ?: migrateAppTheme(p),
             motionStyle = p[Keys.MOTION_STYLE]?.let { runCatching { MotionStyle.valueOf(it) }.getOrNull() }
                 ?: MotionStyle.DEFAULT,
+            appFont = p[Keys.APP_FONT]?.let { runCatching { AppFont.valueOf(it) }.getOrNull() }
+                ?: AppFont.DEFAULT,
             dynamicColor = p[Keys.DYNAMIC] ?: true,
             accentColor = p[Keys.ACCENT]?.let { runCatching { AccentColor.valueOf(it) }.getOrNull() }
                 ?: AccentColor.TOAD,
@@ -189,6 +195,7 @@ class SettingsRepository(
     suspend fun setThemeMode(mode: ThemeMode) = store.edit { it[Keys.THEME] = mode.name }
     suspend fun setAppTheme(theme: AppTheme) = store.edit { it[Keys.APP_THEME] = theme.name }
     suspend fun setMotionStyle(style: MotionStyle) = store.edit { it[Keys.MOTION_STYLE] = style.name }
+    suspend fun setAppFont(font: AppFont) = store.edit { it[Keys.APP_FONT] = font.name }
     suspend fun setDynamicColor(enabled: Boolean) = store.edit { it[Keys.DYNAMIC] = enabled }
     suspend fun setAccentColor(accent: AccentColor) = store.edit { it[Keys.ACCENT] = accent.name }
     suspend fun setShowHidden(enabled: Boolean) = store.edit { it[Keys.HIDDEN] = enabled }

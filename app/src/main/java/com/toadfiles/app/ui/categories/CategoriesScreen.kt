@@ -89,6 +89,9 @@ import com.toadfiles.app.ui.components.FileGridCell
 import com.toadfiles.app.ui.components.FileRow
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
+import com.toadfiles.app.ui.components.MediaTapRoute
+import com.toadfiles.app.ui.components.ApkInstallDialog
+import com.toadfiles.app.ui.components.routeMediaTap
 import com.toadfiles.app.ui.components.CompressDialog
 import com.toadfiles.app.ui.components.PasswordPromptDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
@@ -125,12 +128,17 @@ fun CategoriesScreen(
     bottomPadding: Dp,
     onBack: () -> Unit,
     onShowInFolder: (String) -> Unit,
+    /** Flaw fix: extractable archives route into Browse's extract-or-open dialog
+     *  instead of a bare ACTION_VIEW that bounces back into toadFILES itself. */
+    onOpenArchive: (File) -> Unit = {},
     vm: CategoriesViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var actionSheetFor by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
+    /** APK awaiting the shared install-confirm dialog (row tap or sheet "Open"). */
+    var pendingInstallApk by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var bulkMenuOpen by remember { mutableStateOf(false) }
     /** An archive the user picked "Extract to…" for: ask for the destination folder name. */
@@ -165,8 +173,22 @@ fun CategoriesScreen(
     BackHandler(enabled = inSelection) { vm.clearSelection() }
     BackHandler(enabled = inDrillIn && !inSelection) { vm.close() }
 
+    // Flaw fix (owner report): the same tap-routing rule Recent uses — the system
+    // package installer for APKs (a notes app was hijacking plain ACTION_VIEWs),
+    // toadFILES' own extract flow for archives, an external viewer otherwise.
     val openEntry: (MediaRepository.MediaEntry) -> Boolean = { e ->
-        Intents.openContent(context, e.uri, e.mime)
+        when (val route = routeMediaTap(e)) {
+            is MediaTapRoute.InstallApk -> {
+                pendingInstallApk = e
+                true
+            }
+            is MediaTapRoute.OpenArchive -> {
+                onOpenArchive(route.archive)
+                true
+            }
+            is MediaTapRoute.OpenExternal ->
+                Intents.openContent(context, route.uri, route.mime)
+        }
     }
 
     Scaffold(
@@ -360,6 +382,17 @@ fun CategoriesScreen(
         onZip = { f -> vm.requestZip(listOf(f)) },
         onExtractTo = { f -> pendingExtractTo = f },
     )
+
+    // APK install confirm: the shared dialog Browse shows, over the MediaStore uri —
+    // the package installer gets the handoff, never a generic VIEW resolver.
+    pendingInstallApk?.let { e ->
+        ApkInstallDialog(
+            apkName = e.name,
+            launch = { Intents.installApkFromUri(context, e.uri) },
+            onDismiss = { pendingInstallApk = null },
+            toast = vm::requestToast,
+        )
+    }
 
     // Delete confirmation: media entries go to the real 30-day trash.
     state.pendingDelete?.let { entries ->

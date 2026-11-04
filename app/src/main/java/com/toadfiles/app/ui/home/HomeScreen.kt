@@ -70,13 +70,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.data.MediaRepository
+import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.theme.toadFileIconFor
+import com.toadfiles.app.ui.components.MediaTapRoute
 import com.toadfiles.app.ui.components.iconFor
+import com.toadfiles.app.ui.components.routeMediaTap
 import com.toadfiles.app.util.Intents
+import android.widget.Toast
 import java.io.File
 
 /**
@@ -93,12 +98,19 @@ fun HomeScreen(
     onOpenTrash: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDrawer: (() -> Unit)? = null,
+    /** Flaw fix: extractable archives route into Browse's extract-or-open dialog
+     *  instead of a bare ACTION_VIEW that bounces back into toadFILES itself. */
+    onOpenArchive: (File) -> Unit = {},
     vm: HomeViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var editorOpen by remember { mutableStateOf(false) }
     var removeTarget by remember { mutableStateOf<QuickAccessEntry?>(null) }
+    /** APK favorite awaiting the shared install-confirm dialog. */
+    var pendingInstallFile by remember { mutableStateOf<File?>(null) }
+    /** APK recent-row awaiting the shared install-confirm dialog. */
+    var pendingInstallEntry by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
 
     // Home data (storage, quick links, recents) can change while the user is in another
     // tab — refresh every time this screen re-enters composition.
@@ -303,9 +315,17 @@ fun HomeScreen(
                 FavoriteRow(
                     item = fav,
                     onClick = {
-                        if (fav.isDir) onOpenFolder(fav.file.path)
-                        else if (!Intents.openFile(context, fav.file)) {
-                            // Nothing can open it: no fake success, just a silent row tap.
+                        when {
+                            fav.isDir -> onOpenFolder(fav.file.path)
+                            // Flaw fix (owner report): an APK favorite goes to the
+                            // system package installer (a notes app was hijacking
+                            // plain ACTION_VIEWs), an extractable archive into the
+                            // extract-or-open dialog — never a bare resolver.
+                            fav.file.name.lowercase().endsWith(".apk") -> pendingInstallFile = fav.file
+                            ArchiveOps.canExtract(fav.file.name) -> onOpenArchive(fav.file)
+                            else -> if (!Intents.openFile(context, fav.file)) {
+                                // Nothing can open it: no fake success, just a silent row tap.
+                            }
                         }
                     },
                     onToggleFavorite = { vm.toggleFavorite(fav.file.path) },
@@ -372,8 +392,16 @@ fun HomeScreen(
                         RecentPreviewRow(
                             e = e,
                             onClick = {
-                                if (!Intents.openContent(context, e.uri, e.mime)) {
-                                    // Nothing installed can open this type; no fake feedback.
+                                // Flaw fix: the same tap-routing rule Recent uses —
+                                // installer for APKs, the extract flow for archives,
+                                // an external viewer otherwise.
+                                when (val route = routeMediaTap(e)) {
+                                    is MediaTapRoute.InstallApk -> pendingInstallEntry = e
+                                    is MediaTapRoute.OpenArchive -> onOpenArchive(route.archive)
+                                    is MediaTapRoute.OpenExternal ->
+                                        if (!Intents.openContent(context, route.uri, route.mime)) {
+                                            // Nothing installed can open this type; no fake feedback.
+                                        }
                                 }
                             },
                         )
@@ -417,6 +445,27 @@ fun HomeScreen(
                 }) { Text("Remove") }
             },
             dismissButton = { TextButton(onClick = { removeTarget = null }) { Text("Cancel") } },
+        )
+    }
+
+    // APK install confirms (favorite + recent strip): the shared dialog Browse
+    // shows. Home has no snackbar channel by design, so outcome messages use a
+    // plain platform toast, exactly like MainActivity's handoff messages.
+    val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
+    pendingInstallFile?.let { apk ->
+        ApkInstallDialog(
+            apkName = apk.name,
+            launch = { Intents.installApk(context, apk) },
+            onDismiss = { pendingInstallFile = null },
+            toast = toast,
+        )
+    }
+    pendingInstallEntry?.let { e ->
+        ApkInstallDialog(
+            apkName = e.name,
+            launch = { Intents.installApkFromUri(context, e.uri) },
+            onDismiss = { pendingInstallEntry = null },
+            toast = toast,
         )
     }
 }

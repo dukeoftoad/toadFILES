@@ -62,6 +62,7 @@ import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
+import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.MotionStyle
@@ -69,6 +70,7 @@ import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.theme.AccentPalettes
 import com.toadfiles.app.ui.theme.AppIconPalettes
 import com.toadfiles.app.ui.theme.ToadThemes
+import com.toadfiles.app.ui.theme.fontFamilyFor
 
 /**
  * Dedicated Appearance subpage. Since the v1.11 redesign it offers:
@@ -77,6 +79,9 @@ import com.toadfiles.app.ui.theme.ToadThemes
  *    redesign, Material You (wallpaper colors), Google's Material 3 baseline,
  *    Slate + Neon and the Classic palette (which keeps the seven accent colors),
  *    plus the light / dark / follow-system selector;
+ *  - **Font** — [AppFont]: the device's system typeface, the bundled Manrope, the
+ *    unique chunky Toad font, Inter, Space Grotesk or JetBrains Mono — every entry
+ *    previews in its own letterforms;
  *  - **Motion** — [MotionStyle]: Springy toad, Calm & precise or Cinematic, applied
  *    app-wide through `LocalToadMotion`;
  *  - **Navigation** and **App icon** as before (same SettingsViewModel setters,
@@ -177,6 +182,29 @@ fun AppearanceScreen(
                                     onClick = { vm.setAccent(accent) },
                                 )
                             }
+                        }
+                    }
+                }
+            }
+            // ---- Font ----
+            // The typeface picker: every entry previews in its own family (the name
+            // row and the "Aa" chip), so the card shows exactly what picking it does
+            // to the whole app — no guessing from a dropdown label.
+            Spacer(Modifier.height(32.dp))
+
+            Text("Font", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    AppFont.entries.forEachIndexed { index, font ->
+                        FontRow(
+                            font = font,
+                            selected = settings.appFont == font,
+                            onClick = { vm.setAppFont(font) },
+                        )
+                        if (index != AppFont.entries.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 4.dp))
                         }
                     }
                 }
@@ -334,6 +362,58 @@ private fun ThemeCard(
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
+    }
+}
+
+/**
+ * One font entry: an "Aa" chip plus the entry's own name rendered in that
+ * family — the honest preview — with a description and the selection radio.
+ */
+@Composable
+private fun FontRow(
+    font: AppFont,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val family = fontFamilyFor(font)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    if (selected) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Aa",
+                style = MaterialTheme.typography.titleLarge.copy(fontFamily = family),
+                color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.size(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                font.label,
+                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = family),
+            )
+            Text(
+                font.description,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        RadioButton(selected = selected, onClick = onClick)
     }
 }
 

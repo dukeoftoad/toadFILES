@@ -155,6 +155,20 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
         { scope.launch { drawerState.open() } }
     } else null
 
+    // Flaw fix (owner report): tapping an extractable archive on a media surface
+    // (Recent, Home's strip/favorites, the Categories drill-in) routes into
+    // Browse's extract-or-open dialog — extract here / extract to… / open — instead
+    // of firing a VIEW intent that, now that toadFILES registers as an archive
+    // handler, bounces back into the app itself or off into another archiver.
+    val openArchive: (File) -> Unit = { archive ->
+        navController.navigateSingleTop(
+            Routes.browse(
+                archive.parentFile?.absolutePath ?: "",
+                openArchive = archive.absolutePath,
+            )
+        )
+    }
+
     val appScaffold: @Composable () -> Unit = {
     Scaffold(
         // Single source of truth for window insets: this outer Scaffold applies the
@@ -213,6 +227,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenTrash = { navController.navigateSingleTop(Routes.TRASH) },
                     onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
                     onOpenDrawer = openDrawer,
+                    onOpenArchive = openArchive,
                 )
             }
             composable(
@@ -259,6 +274,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         }
                     },
                     onOpenDrawer = openDrawer,
+                    onOpenArchive = openArchive,
                 )
             }
             composable(Routes.CATEGORIES) {
@@ -275,6 +291,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                             )
                         }
                     },
+                    onOpenArchive = openArchive,
                 )
             }
             composable(Routes.SETTINGS) {
