@@ -81,6 +81,7 @@ import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.theme.toadFileIconFor
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
 import com.toadfiles.app.ui.components.PasswordPromptDialog
@@ -429,10 +430,11 @@ private fun RecentRow(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        e.name.substringAfterLast('.', "?").uppercase().take(4),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    Icon(
+                        toadFileIconFor(e.name.substringAfterLast('.', "")),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(26.dp),
                     )
                 }
             }
@@ -561,10 +563,11 @@ private fun RecentGridCell(
                             .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            e.name.substringAfterLast('.', "?").uppercase().take(4),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        Icon(
+                            toadFileIconFor(e.name.substringAfterLast('.', "")),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(40.dp),
                         )
                     }
                 }

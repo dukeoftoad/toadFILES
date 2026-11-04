@@ -661,9 +661,10 @@ class SettingsRepositoryTest {
     // ---- v1.9: app icon ----
 
     @Test
-    fun `app icon defaults to CLASSIC and GREEN on first launch`() = runTest {
+    fun `app icon defaults to TOAD and GREEN on first launch`() = runTest {
         val s = newRepo().settings.first()
-        assertEquals(AppIconDesign.CLASSIC, s.appIconDesign)
+        // v1.11 redesign: the toad mark is the shipped icon.
+        assertEquals(AppIconDesign.TOAD, s.appIconDesign)
         assertEquals(AppIconColor.GREEN, s.appIconColor)
     }
 
@@ -681,7 +682,7 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `corrupt app icon values fall back to CLASSIC and GREEN`() = runTest {
+    fun `corrupt app icon values fall back to TOAD and GREEN`() = runTest {
         val store = newStore()
         val repo = SettingsRepository(store = store)
         store.edit {
@@ -689,7 +690,7 @@ class SettingsRepositoryTest {
             it[stringPreferencesKey("app_icon_color")] = "ALSO_NOT_REAL"
         }
         val s = repo.settings.first()
-        assertEquals(AppIconDesign.CLASSIC, s.appIconDesign)
+        assertEquals(AppIconDesign.TOAD, s.appIconDesign)
         assertEquals(AppIconColor.GREEN, s.appIconColor)
     }
 }

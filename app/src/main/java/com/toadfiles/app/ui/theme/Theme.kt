@@ -5,35 +5,37 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppTheme
+import com.toadfiles.app.domain.MotionStyle
 
 /**
- * App theme. Two layers of color choice:
+ * App theme. Three layers of choice, all set on the Appearance tab:
  *
- * 1. When the user enables Material You dynamic color on Android 12+, the wallpaper-derived
- *    scheme wins regardless of accent. This mirrors how Pixel/Oxygen apps behave and avoids
- *    clashing with the rest of the system.
- * 2. Otherwise, the user's chosen [AccentColor] picks a hand-tuned [ColorScheme] from
- *    [AccentPalettes]. The default is [AccentColor.TOAD] so upgraders keep their familiar
- *    moss/mud look from v1.0–v1.3.
+ * 1. [AppTheme] — the visual identity. [AppTheme.MATERIAL_YOU] follows the wallpaper
+ *    (dynamic color); [AppTheme.CLASSIC] keeps the original accent-color system; the
+ *    other three are hand-tuned full palettes ([ToadThemes]).
+ * 2. [ThemeMode] — light / dark / follow system, applied within every identity.
+ * 3. [MotionStyle] — how the app moves, provided to every screen via
+ *    [LocalToadMotion] so springs, durations and nav transitions follow the user's
+ *    taste without per-screen hard-coding.
  *
- * Typography and shapes are shared by every accent so the visual rhythm doesn't shift.
+ * Typography (bundled Manrope — see [Type.kt]) and shapes are shared by every
+ * identity so the visual rhythm stays coherent.
  */
 @Composable
 fun ToadTheme(
+    appTheme: AppTheme = AppTheme.DEFAULT,
     themeMode: ThemeMode = ThemeMode.SYSTEM,
-    dynamicColor: Boolean = true,
     accentColor: AccentColor = AccentColor.TOAD,
+    motionStyle: MotionStyle = MotionStyle.DEFAULT,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -42,33 +44,35 @@ fun ToadTheme(
         ThemeMode.DARK -> true
     }
     val context = LocalContext.current
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        else -> AccentPalettes.schemeFor(accentColor, dark = darkTheme)
+    val colorScheme = when (appTheme) {
+        AppTheme.MATERIAL_YOU ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            } else {
+                // Unreachable with minSdk 34, kept as a safe fallback.
+                AccentPalettes.schemeFor(accentColor, dark = darkTheme)
+            }
+        AppTheme.CLASSIC -> AccentPalettes.schemeFor(accentColor, dark = darkTheme)
+        else -> ToadThemes.schemeFor(appTheme, dark = darkTheme)
+            ?: AccentPalettes.schemeFor(accentColor, dark = darkTheme)
     }
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = ToadTypography,
-        shapes = ToadShapes,
-        content = content,
-    )
+    CompositionLocalProvider(
+        LocalToadMotion provides ToadMotion.forStyle(motionStyle),
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = ToadTypography,
+            shapes = ToadShapes,
+            content = content,
+        )
+    }
 }
 
-private val ToadTypography = Typography(
-    headlineMedium = TextStyle(fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 34.sp),
-    titleLarge = TextStyle(fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp),
-    titleMedium = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-    labelLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
-    labelMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 12.sp),
-)
-
+/** Softer, rounder geometry for the redesign — bigger radii than the M3 defaults. */
 private val ToadShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(32.dp),
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(26.dp),
+    extraLarge = RoundedCornerShape(34.dp),
 )

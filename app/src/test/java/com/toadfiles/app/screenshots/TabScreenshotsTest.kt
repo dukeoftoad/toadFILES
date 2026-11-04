@@ -298,6 +298,19 @@ class TabScreenshotsTest {
         settle()
         shot("08-settings.png")
     }
+
+    @Test
+    fun `09 appearance tab`() {
+        startApp()
+        compose.onNodeWithTag("tab_Settings").performClick()
+        settle()
+        compose.onNodeWithTag("settings_appearance_row").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Dark forest").fetchSemanticsNodes().isNotEmpty()
+        }
+        settle()
+        shot("09-appearance.png")
+    }
 }
 
 /** Minimal MediaStore stand-in: filters rows for the exact selections MediaRepository builds. */

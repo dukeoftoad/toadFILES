@@ -5,14 +5,15 @@ package com.toadfiles.app.domain
  * it names one of the 36 `<activity-alias>` launcher entries declared in AndroidManifest;
  * [AppIconSwitcher] enables exactly that alias so the home screen shows this icon.
  *
- * [CLASSIC] reuses the foreground shipped since v1.0 and stays the default, so existing
- * users see no visual regression when they upgrade.
+ * [TOAD] is the v1.11 redesign's mascot mark and the default; [CLASSIC] reuses the
+ * foreground shipped since v1.0.
  *
  * Persisted by name in DataStore; [com.toadfiles.app.data.SettingsRepository] falls back
  * to [CLASSIC] for unknown values, so adding or removing designs later never breaks a
  * user's preferences.
  */
 enum class AppIconDesign(val label: String) {
+    TOAD("Toad mark"),
     CLASSIC("Classic"),
     FACE("Toad face"),
     DOC("Document"),

@@ -4,6 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -121,12 +122,14 @@ fun SettingsScreen(
         ) {
             SectionHeader("Appearance")
             SettingsCard {
-                NavigationRow(
-                    icon = Icons.Outlined.Palette,
-                    title = "Appearance",
-                    subtitle = "Theme, colors, navigation, app icon",
-                    onClick = { onOpenAppearance?.invoke() },
-                )
+                Box(Modifier.testTag("settings_appearance_row")) {
+                    NavigationRow(
+                        icon = Icons.Outlined.Palette,
+                        title = "Appearance",
+                        subtitle = "Theme, colors, navigation, app icon",
+                        onClick = { onOpenAppearance?.invoke() },
+                    )
+                }
             }
 
             SectionHeader("Browsing")
