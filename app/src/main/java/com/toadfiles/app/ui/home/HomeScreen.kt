@@ -74,6 +74,7 @@ import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.theme.toadFileIconFor
 import com.toadfiles.app.ui.components.iconFor
 import com.toadfiles.app.util.Intents
 import java.io.File
@@ -674,17 +675,22 @@ private fun RecentPreviewRow(
                         .size(44.dp),
                 )
             } else {
-                Card(shape = RoundedCornerShape(10.dp)) {
-                    Row(
-                        Modifier.size(44.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            e.name.substringAfterLast('.', "?").uppercase().take(3),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
+                // v1.11: the toad file-type family replaces the extension monogram.
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            RoundedCornerShape(10.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        toadFileIconFor(e.name.substringAfterLast('.', "")),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp),
+                    )
                 }
             }
             Spacer(Modifier.width(12.dp))

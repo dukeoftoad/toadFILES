@@ -24,6 +24,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cache Robolectric android-all artifacts
+        # Robolectric fetches the android-all jars through its own Maven fetcher
+        # into ~/.m2, which the Gradle cache does not cover. Cache them so a
+        # Maven Central hiccup cannot fail every test class (PR #25 CI, Nov 2026).
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-v1
+          restore-keys: robolectric-${{ runner.os }}-
+
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 

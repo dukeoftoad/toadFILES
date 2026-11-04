@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 /**
- * PackageManagerAppIconSwitcher: the component-name rule must match the 36
+ * PackageManagerAppIconSwitcher: the component-name rule must match the 42
  * activity-alias names in AndroidManifest exactly — otherwise the switcher would flip
  * the state of components that don't exist and the launcher icon would never change.
  * Manifest sync is verified against the raw manifest source (Robolectric's
@@ -64,7 +64,7 @@ class AppIconSwitcherTest {
     }
 
     @Test
-    fun `all 36 combos produce distinct names that resolve to manifest aliases`() {
+    fun `all 42 combos produce distinct names that resolve to manifest aliases`() {
         val switcher = newSwitcher()
         val classNames = mutableSetOf<String>()
         for (d in AppIconDesign.entries) {
@@ -81,27 +81,27 @@ class AppIconSwitcherTest {
                 classNames += cn.className
             }
         }
-        assertEquals(36, AppIconDesign.entries.size * AppIconColor.entries.size)
-        assertEquals(36, classNames.size)
-        assertEquals(36, Regex("<activity-alias").findAll(manifestText).count())
+        assertEquals(42, AppIconDesign.entries.size * AppIconColor.entries.size)
+        assertEquals(42, classNames.size)
+        assertEquals(42, Regex("<activity-alias").findAll(manifestText).count())
     }
 
     @Test
-    fun `apply plan enables the chosen alias first and disables the other 35`() {
+    fun `apply plan enables the chosen alias first and disables the other 41`() {
         // The component names embed the app's real package name; make that assumption
         // explicit so a harness with a different packageName fails loudly here.
         assertEquals("com.toadfiles.app", context.packageName)
 
         val plan = newSwitcher().plan(AppIconDesign.FACE, AppIconColor.TEAL)
 
-        // Exactly 36 component changes; the target is FIRST and the only ENABLED one.
-        assertEquals(36, plan.size)
+        // Exactly 42 component changes; the target is FIRST and the only ENABLED one.
+        assertEquals(42, plan.size)
         assertEquals(
             ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherFaceTeal"),
             plan.first().first,
         )
         assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, plan.first().second)
-        assertEquals(35, plan.drop(1).map { it.first }.toSet().size)
+        assertEquals(41, plan.drop(1).map { it.first }.toSet().size)
         assertTrue(
             plan.drop(1).all { it.second == PackageManager.COMPONENT_ENABLED_STATE_DISABLED },
         )

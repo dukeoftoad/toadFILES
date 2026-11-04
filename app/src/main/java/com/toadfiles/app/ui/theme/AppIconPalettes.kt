@@ -29,6 +29,7 @@ object AppIconPalettes {
 
     /** Foreground drawable of the design. CLASSIC reuses the foreground shipped in v1.0. */
     fun foregroundRes(design: AppIconDesign): Int = when (design) {
+        AppIconDesign.TOAD -> R.drawable.ic_launcher_fg_toad
         AppIconDesign.CLASSIC -> R.drawable.ic_launcher_foreground
         AppIconDesign.FACE -> R.drawable.ic_launcher_fg_face
         AppIconDesign.DOC -> R.drawable.ic_launcher_fg_doc

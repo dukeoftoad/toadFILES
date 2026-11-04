@@ -54,6 +54,7 @@ import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.theme.EmptyTrashArt
 import com.toadfiles.app.ui.components.ProgressOverlay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -137,7 +138,7 @@ fun TrashScreen(
                 Modifier
                     .fillMaxSize()
             ) {
-                EmptyState("Trash is empty")
+                EmptyState("Trash is empty", art = { EmptyTrashArt() })
                 Text(
                     "Deleted items are kept for ${Trash.RETENTION_DAYS} days, then removed automatically.",
                     style = MaterialTheme.typography.labelMedium,

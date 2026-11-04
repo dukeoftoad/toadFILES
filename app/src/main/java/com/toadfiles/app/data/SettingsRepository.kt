@@ -13,9 +13,11 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
+import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.NavStyle
+import com.toadfiles.app.domain.MotionStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
@@ -34,8 +36,15 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 data class ToadSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** v1.11: the full visual identity (Appearance tab). [AppTheme.DEFAULT] = the redesign. */
+    val appTheme: AppTheme = AppTheme.DEFAULT,
+    /** v1.11: how the app moves (nav transitions, springs, splash). */
+    val motionStyle: MotionStyle = MotionStyle.DEFAULT,
+    /** Legacy v1.10 flag. Kept (and written) only so a pre-1.11 install's
+     *  Material-You choice can be migrated into [appTheme]; the Appearance tab
+     *  no longer exposes it — Material You is its own theme entry now. */
     val dynamicColor: Boolean = true,
-    /** Accent chosen by the user when dynamic color is OFF. Ignored when dynamicColor is on. */
+    /** Accent chosen by the user — applies to [AppTheme.CLASSIC] only. */
     val accentColor: AccentColor = AccentColor.TOAD,
     val showHidden: Boolean = false,
     val sortMode: SortMode = SortMode.NAME,
@@ -74,7 +83,7 @@ data class ToadSettings(
     val archiveFolder: String = "",
     // ---- v1.9: app icon ----
     /** Launcher icon foreground design; applied to the launcher via activity-aliases. */
-    val appIconDesign: AppIconDesign = AppIconDesign.CLASSIC,
+    val appIconDesign: AppIconDesign = AppIconDesign.TOAD,
     /** Launcher icon background tint. */
     val appIconColor: AppIconColor = AppIconColor.GREEN,
 ) {
@@ -101,6 +110,8 @@ class SettingsRepository(
 
     private object Keys {
         val THEME = stringPreferencesKey("theme_mode")
+        val APP_THEME = stringPreferencesKey("app_theme")
+        val MOTION_STYLE = stringPreferencesKey("motion_style")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val ACCENT = stringPreferencesKey("accent_color")
         val HIDDEN = booleanPreferencesKey("show_hidden")
@@ -131,6 +142,10 @@ class SettingsRepository(
         ToadSettings(
             themeMode = p[Keys.THEME]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                 ?: ThemeMode.SYSTEM,
+            appTheme = p[Keys.APP_THEME]?.let { runCatching { AppTheme.valueOf(it) }.getOrNull() }
+                ?: migrateAppTheme(p),
+            motionStyle = p[Keys.MOTION_STYLE]?.let { runCatching { MotionStyle.valueOf(it) }.getOrNull() }
+                ?: MotionStyle.DEFAULT,
             dynamicColor = p[Keys.DYNAMIC] ?: true,
             accentColor = p[Keys.ACCENT]?.let { runCatching { AccentColor.valueOf(it) }.getOrNull() }
                 ?: AccentColor.TOAD,
@@ -165,13 +180,15 @@ class SettingsRepository(
             overwriteConfirm = p[Keys.OVERWRITE_CONFIRM] ?: true,
             archiveFolder = p[Keys.ARCHIVE_FOLDER] ?: "",
             appIconDesign = p[Keys.APP_ICON_DESIGN]?.let { runCatching { AppIconDesign.valueOf(it) }.getOrNull() }
-                ?: AppIconDesign.CLASSIC,
+                ?: AppIconDesign.TOAD,
             appIconColor = p[Keys.APP_ICON_COLOR]?.let { runCatching { AppIconColor.valueOf(it) }.getOrNull() }
                 ?: AppIconColor.GREEN,
         )
     }
 
     suspend fun setThemeMode(mode: ThemeMode) = store.edit { it[Keys.THEME] = mode.name }
+    suspend fun setAppTheme(theme: AppTheme) = store.edit { it[Keys.APP_THEME] = theme.name }
+    suspend fun setMotionStyle(style: MotionStyle) = store.edit { it[Keys.MOTION_STYLE] = style.name }
     suspend fun setDynamicColor(enabled: Boolean) = store.edit { it[Keys.DYNAMIC] = enabled }
     suspend fun setAccentColor(accent: AccentColor) = store.edit { it[Keys.ACCENT] = accent.name }
     suspend fun setShowHidden(enabled: Boolean) = store.edit { it[Keys.HIDDEN] = enabled }
@@ -309,6 +326,17 @@ class SettingsRepository(
             }
         }
     }
+
+    /**
+     * v1.11 theme migration for upgraders who never stored an [AppTheme]:
+     *  - explicitly turned dynamic color OFF or picked an accent → keep their look
+     *    as [AppTheme.CLASSIC] (the accent picker lives there),
+     *  - everyone else (Material You on, the v1.10 default, or fresh installs)
+     *    gets the redesign's [AppTheme.DEFAULT].
+     */
+    private fun migrateAppTheme(p: Preferences): AppTheme =
+        if (p[Keys.DYNAMIC] == false || p[Keys.ACCENT] != null) AppTheme.CLASSIC
+        else AppTheme.DEFAULT
 
     private fun parseFolderUses(raw: Set<String>?): Map<String, Int> {
         if (raw.isNullOrEmpty()) return emptyMap()
