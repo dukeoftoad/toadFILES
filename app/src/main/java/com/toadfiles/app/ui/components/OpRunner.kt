@@ -7,9 +7,13 @@ import com.toadfiles.app.data.toFileItem
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.util.Intents
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -33,6 +37,13 @@ import java.io.File
  * Launches one file op at a time on [ioDispatcher] inside [scope] and reports progress
  * and the result back through callbacks. Carries no state of its own beyond the current
  * [Job]; the calling ViewModel owns all op state.
+ *
+ * Single-flight (audit v2.0.0 A1): a new [run] cancels the previous op and waits for it
+ * to fully unwind before starting the new one, so two taps can never run two
+ * concurrent extractions into the same destination, and the older op's late [onDone]
+ * can never overwrite the newer result. [cancel] runs its [after] callback only after
+ * the op coroutine has actually stopped, so an in-flight progress tick can no longer
+ * resurrect the overlay after the user dismissed it.
  */
 class OpRunner(
     private val scope: CoroutineScope,
@@ -40,29 +51,58 @@ class OpRunner(
 ) {
     private var job: Job? = null
 
+    /** True while an op is running. */
+    val isBusy: Boolean
+        get() = job?.isActive == true
+
     /**
-     * Runs [op] on the IO dispatcher. Every progress tick goes to [onProgress]; when the
-     * op finishes, [onDone] receives the [OpResult] still inside the op coroutine (before
-     * it ends), so the caller can swap the progress overlay for the result dialog in a
-     * single state update and chain its own refresh, exactly as the old inline blocks did.
-     * Like the ViewModels' former `opJob` handling, a new run replaces the job reference
-     * without cancelling a still-running previous one.
+     * Runs [op] on the IO dispatcher as the ONLY op: the previous one (if any) is
+     * cancelled and fully joined first, inside the new coroutine. Every progress tick
+     * goes to [onProgress]; when the op finishes without having been cancelled,
+     * [onDone] receives the [OpResult] still inside the op coroutine (before it ends),
+     * so the caller can swap the progress overlay for the result dialog in a single
+     * state update and chain its own refresh, exactly as the old inline blocks did.
+     * A cancelled run NEVER publishes [onDone] — the [ensureActive] guard before it
+     * rethrows the cancellation instead.
      */
     fun run(
         op: suspend (onProgress: (OpProgress) -> Unit) -> OpResult,
         onProgress: (OpProgress) -> Unit,
         onDone: (OpResult) -> Unit,
     ) {
+        val previous = job
         job = scope.launch(ioDispatcher) {
-            val r = op { onProgress(it) }
-            onDone(r)
+            // Audit A1: single-flight. Cancel-and-join (not just replace) so the old
+            // op cannot interleave writes with this one or deliver a stale result.
+            previous?.cancelAndJoin()
+            try {
+                val r = op { onProgress(it) }
+                currentCoroutineContext().ensureActive() // a cancelled op publishes nothing
+                onDone(r)
+            } catch (ce: CancellationException) {
+                throw ce
+            }
         }
     }
 
-    /** Cancels the current op (cooperative, like Browse's cancelOp), then runs [after]. */
+    /**
+     * Cancels the current op (cooperative, like Browse's cancelOp). [after] runs once
+     * the op coroutine has fully stopped — on [scope]'s dispatcher — so clearing the
+     * progress overlay cannot race a final in-flight tick (audit A1: the overlay used
+     * to be cleared before the op stopped, and a tick landing after the clear would
+     * resurrect a dead overlay). Safe when no op is running: [after] runs right away.
+     */
     fun cancel(after: () -> Unit) {
-        job?.cancel()
-        after()
+        val current = job
+        if (current == null) {
+            after()
+            return
+        }
+        current.cancel()
+        scope.launch {
+            current.join()
+            after()
+        }
     }
 
     /** Cancels any running op; call from the ViewModel's onCleared(). */
