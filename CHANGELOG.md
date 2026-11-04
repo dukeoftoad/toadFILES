@@ -4,6 +4,18 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased]
+
+### Fixed
+- **Double-tapping an archive operation no longer runs two at once**
+  (full-repo audit v2.0.0, finding A1 — see docs/audits/AUDIT-v2.0.0.md). The
+  shared op engine behind Recent's and Categories' extract/zip/delete ops is
+  now single-flight: a new op cancels the previous one and waits for it to
+  unwind before starting, the older op can never overwrite the newer result
+  dialog, and cancelling actually stops the op before the progress overlay is
+  cleared — a cancelled op can no longer publish a result or resurrect the
+  overlay. Four new regression tests pin the behavior.
+
 ## [2.0.0] — 2026-11-04
 
 The full visual-identity release: five themes, three motion styles, six font
