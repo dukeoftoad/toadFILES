@@ -6,6 +6,26 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [1.10.1] — 2026-11-04
+
+A small patch release that rounds off the 1.10 transfer-UX overhaul: the
+Appearance dropdowns match across screens, the file action sheet shows the
+full path, and archive extraction gained a proper Browse destination picker.
+
+### Fixed
+- **Consistent Appearance dropdown styling on the main Settings screen**:
+  rounded 20dp menu, tonal elevation, Material body typography, a
+  primary-colored selected option and a trailing checkmark — the same
+  treatment the navigation-style dropdown on the Appearance screen already
+  had.
+- **Full file path in the file action sheet**: the path row now shows the
+  complete path, scrolls horizontally when it is too long, and can be tapped
+  to copy it.
+- **"Extract to…" uses a Browse destination picker** instead of a bare name
+  prompt: navigate folders, confirm the current folder, or cancel — "Extract
+  here" remains the quick action, and extraction still reuses the existing
+  conflict/password/progress flow.
+
 ## [1.10.0] — 2026-11-03
 
 A transfer-UX overhaul release: a redesigned move/copy transfer bar, real

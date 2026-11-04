@@ -1,22 +1,61 @@
 name: Release
 
-# Builds a signed release APK when a tag like v1.3.0 is pushed, then attaches
-# it to a GitHub Release. Tags only, this never runs on PRs.
+# Builds a signed release APK for a release tag like v1.3.0 and attaches it
+# to the matching GitHub Release. This never runs on PRs.
+#
+# Also covered, after a release was once published straight from the web UI
+# (which creates the tag without a git push, so the tag-push trigger never
+# fired and the release sat there without an APK):
+#   - release: published  — a UI/manual release triggers this workflow, which
+#     builds the tag and attaches the APK to that same release;
+#   - workflow_dispatch   — re-run a release build for an existing tag by hand.
 on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build (e.g. v1.10.1)'
+        required: true
 
 permissions:
   contents: write   # required to create a Release and upload assets
 
 jobs:
   release:
+    # Publishing a release through softprops (as github-actions[bot]) fires the
+    # release event too — without this guard every tag push would build the APK
+    # twice. Only releases published by a human proceed through that path.
+    if: github.event_name != 'release' || github.event.release.author.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
+      - name: Resolve tag
+        id: meta
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          TAG="${RELEASE_TAG:-${DISPATCH_TAG:-${GITHUB_REF#refs/tags/}}}"
+          case "$TAG" in
+            v[0-9]*) ;; # a release tag, as expected
+            *) echo "::error::No release tag resolved for this event (got '$TAG')"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
+          APK_DATE=$(date -u +"%Y-%m-%d")
+          echo "name=toadFILES $TAG ($APK_DATE)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The release event checks out the default branch by default; pin the
+          # checkout to the exact tag being released so the APK is built from
+          # the tagged sources.
+          ref: ${{ steps.meta.outputs.ref }}
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -58,14 +97,6 @@ jobs:
           TOADFILES_KEY_ALIAS: ${{ secrets.TOADFILES_KEY_ALIAS }}
           TOADFILES_KEY_PASSWORD: ${{ secrets.TOADFILES_KEY_PASSWORD }}
         run: ./gradlew :app:assembleRelease --stacktrace
-
-      - name: Read version metadata
-        id: meta
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          APK_DATE=$(date -u +"%Y-%m-%d")
-          echo "name=toadFILES $TAG ($APK_DATE)" >> "$GITHUB_OUTPUT"
 
       - name: Rename APK to include tag
         run: |
