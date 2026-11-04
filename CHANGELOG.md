@@ -6,6 +6,29 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [1.10.2] — 2026-11-04
+
+A one-flaw patch release: toadFILES never showed up in the system
+"Open with" sheet, so handing a ZIP to the file manager that can
+actually unpack it was impossible.
+
+### Fixed
+- **toadFILES now appears in the system "Open with" sheet for ZIP and
+  7z archives** (owner report: opening a .zip from Recent offered
+  everything but toadFILES itself). The filter is deliberately narrow —
+  only the archive types the app can really extract; no catch-all.
+- **"Open with → toadFILES" now works end to end**: the handed-over
+  file is resolved to its real path (or copied out of a stream when it
+  has none), then opens the same extract-or-open dialog a tap in Browse
+  shows; extraction keeps the full conflict/password/progress flow and
+  post-extract redirect.
+- **Stream-only archives** (e-mail attachments, cloud previews) extract
+  into a folder named after the archive under Download instead of an
+  invisible cache folder.
+- **Picking toadFILES while it is already open** no longer stacks a
+  second copy of the app on the back stack (single-task launch).
+
+
 ## [1.10.1] — 2026-11-04
 
 A small patch release that rounds off the 1.10 transfer-UX overhaul: the
