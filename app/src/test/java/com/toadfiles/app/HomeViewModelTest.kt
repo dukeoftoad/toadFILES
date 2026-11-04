@@ -2,6 +2,7 @@ package com.toadfiles.app
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.lifecycle.viewModelScope
 import com.toadfiles.app.data.MediaQuerySource
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.CategorySummary
@@ -10,6 +11,7 @@ import com.toadfiles.app.ui.home.HomeViewModel
 import com.toadfiles.app.ui.home.QuickAccessEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -48,6 +50,12 @@ class HomeViewModelTest {
 
     @After
     fun tearDown() {
+        // Cancel the ViewModel scope BEFORE resetting Main: the VM launches eager
+        // Unconfined jobs (storage stats, quick access, folder uses) that outlive
+        // runTest otherwise. Under CI disk contention one of them would straddle
+        // the test boundary and crash into the disposed test Main dispatcher
+        // (IllegalStateException at resetMain) — the flake seen on hosted runners.
+        vm.viewModelScope.cancel()
         Dispatchers.resetMain()
     }
 
@@ -211,6 +219,8 @@ class HomeViewModelTest {
         await { !filtered.state.value.loadingRecent }
         assertNull(filtered.state.value.recentFilter)
         assertEquals(recentBaseline + 1, media.recentCalls.size)
+        // Same hygiene as tearDown: this VM outlives the test body unless cancelled.
+        filtered.viewModelScope.cancel()
     }
 
     @Test
