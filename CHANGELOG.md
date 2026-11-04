@@ -4,10 +4,15 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
-## [Unreleased]
+## [2.0.0] — 2026-11-04
+
+The full visual-identity release: five themes, three motion styles, six font
+choices — plus the flaw fixes that make opening files honest again. Manrope
+and the redesign stay the default look, so upgrading changes nothing until
+you pick something new yourself.
 
 ### Added
-- **A complete visual redesign** — the v1.11 look: bundled Manrope typography, a
+- **A complete visual redesign** — the 2.0 look: bundled Manrope typography, a
   softer and rounder shape scale, a hand-drawn toad brand kit (custom duotone
   file-type icons for images/video/audio/docs/archives/APKs, a two-tone folder
   icon, a blinkable mascot), illustrated toad empty states for empty folders,
@@ -28,7 +33,7 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
   OFL, instanced, Latin-subsetted and renamed per the license — see
   docs/licenses), **Inter**, **Space Grotesk** and **JetBrains Mono**. Every
   entry previews in its own letterforms; the pick applies app-wide through the
-  tuned v1.11 type scale (Manrope stays the default, so nothing changes until
+  tuned 2.0 type scale (Manrope stays the default, so nothing changes until
   you choose).
 - **New launcher icon**: the "Toad mark" design joins the icon picker and is
   now the shipped default, in all six background tints.
@@ -64,6 +69,12 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 - The "Open with → toadFILES" handoff lands Browse on a folder the user can
   actually see — the archive's own folder, or Download for stream copies that
   only exist in the app cache — instead of the invisible cache directory.
+- **A ghost icon choice can no longer blank the app from the launcher**: the
+  launcher-icon switcher now verifies the chosen alias exists in the installed
+  build before touching any component state. A persisted choice naming an
+  alias the running build doesn't ship (a downgrade or a restored backup)
+  used to disable all 42 real launcher entries while "enabling" nothing —
+  the app vanished from the home screen until the next install.
 
 ## [1.10.2] — 2026-11-04
 

@@ -26,14 +26,42 @@ interface AppIconSwitcher {
  * home screen and break pinned shortcuts. [PackageManager.DONT_KILL_APP] keeps the
  * running process alive across the switch.
  *
+ * Before touching any component state, [apply] verifies the TARGET alias actually
+ * exists in the installed build (the ghost-alias guard): enabling an alias the
+ * manifest doesn't declare while disabling every real one would leave the app with
+ * NO launcher entry at all — it would vanish from the home screen until the next
+ * install. This can only happen when a persisted icon choice names a component the
+ * running build doesn't ship (a downgrade or a restored backup), but the cost of
+ * the guard is one PackageManager lookup and the failure it prevents is the
+ * "toadFILES app not showing" report class.
+ *
  * The whole body is wrapped in [runCatching]: this runs at app startup, and a
  * PackageManager failure must never take the app down.
  */
-class PackageManagerAppIconSwitcher(private val context: Context) : AppIconSwitcher {
+class PackageManagerAppIconSwitcher(
+    private val context: Context,
+    /**
+     * How to decide that a component exists in this build. Defaults to the real
+     * PackageManager lookup; tests inject a stub because Robolectric's PackageManager
+     * does not resolve activity-aliases (it always throws for them).
+     */
+    private val componentInstalled: (ComponentName, PackageManager) -> Boolean = { component, pm ->
+        try {
+            pm.getActivityInfo(component, 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
+    },
+) : AppIconSwitcher {
 
     override fun apply(design: AppIconDesign, color: AppIconColor) {
         runCatching {
             val pm = context.packageManager
+            val target = componentNameFor(design, color)
+            // Ghost-alias guard: never disable the other aliases unless the target
+            // really exists — otherwise the app ends up with zero launcher entries.
+            check(componentInstalled(target, pm)) { "target alias is not installed: $target" }
             for ((component, state) in plan(design, color)) {
                 pm.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
             }
@@ -41,10 +69,10 @@ class PackageManagerAppIconSwitcher(private val context: Context) : AppIconSwitc
     }
 
     /**
-     * The exact sequence of component changes [apply] performs: the target alias
-     * FIRST (enabled), then the other 35 (disabled) — at no point is the app left
-     * without a launcher entry. Pure and unit-testable; [apply] only adds the
-     * PackageManager call (Robolectric cannot observe alias component state).
+     * The exact sequence of component changes [apply] performs once the ghost-alias
+     * guard has passed: the target alias FIRST (enabled), then the other 35
+     * (disabled) — at no point is the app left without a launcher entry. Pure and
+     * unit-testable; [apply] adds the guard plus the PackageManager calls.
      */
     fun plan(design: AppIconDesign, color: AppIconColor): List<Pair<ComponentName, Int>> {
         val target = componentNameFor(design, color)
