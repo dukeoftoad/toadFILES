@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,38 +38,25 @@ import androidx.compose.material3.IconButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
 import com.toadfiles.app.data.ThemeMode
-import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.update.StartupUpdateCheck
 import com.toadfiles.app.update.UpdateBanner
 import com.toadfiles.app.ui.Routes
 import com.toadfiles.app.ui.ToadNavHost
 import com.toadfiles.app.ui.theme.ToadTheme
-import com.toadfiles.app.util.IncomingIntents
-import com.toadfiles.app.util.Intents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
     private var hasAllFilesAccess by mutableStateOf(false)
-
-    /**
-     * Archive handed over by the system "Open with" sheet (v1.10.2 manifest VIEW
-     * filter). Held as state so the routing effect below fires as soon as storage
-     * access is granted — the handoff must survive the permission round-trip, not
-     * only the happy path.
-     */
-    private var pendingViewUri by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ToadViewModelFactory.init(application)
         enableEdgeToEdge()
         refreshPermissionState()
-        pendingViewUri = IncomingIntents.extractViewUri(intent)
         setContent {
             val appScope = remember { (application as ToadApp).container.appScope }
             val settings = remember {
@@ -90,48 +76,6 @@ class MainActivity : ComponentActivity() {
 
             // Hoisted so the banner's "Update" can deep-link into the existing About flow.
             val navController = rememberNavController()
-
-            // v1.10.2: an archive opened via "Open with → toadFILES" is routed into
-            // Browse's extract-or-open flow — the same dialog tapping the archive in
-            // Browse shows, so the handoff behaves like the in-app action. Waits for
-            // storage access: a handoff that arrives during onboarding must survive
-            // until the grant lands (onResume refreshes hasAllFilesAccess).
-            LaunchedEffect(pendingViewUri, hasAllFilesAccess) {
-                val uri = pendingViewUri ?: return@LaunchedEffect
-                if (!hasAllFilesAccess) return@LaunchedEffect
-                pendingViewUri = null
-                // Rotation must not replay the handoff from the retained intent —
-                // consume it at the source too.
-                setIntent(Intent(applicationContext, MainActivity::class.java))
-                val resolved = withContext(Dispatchers.IO) {
-                    IncomingIntents.resolveArchive(applicationContext, uri)
-                }
-                if (resolved == null) {
-                    Toast.makeText(applicationContext, "Could not open that file", Toast.LENGTH_SHORT).show()
-                    return@LaunchedEffect
-                }
-                if (!ArchiveOps.canExtract(resolved.file.name)) {
-                    // We only advertise archive mimes, but a provider can mislabel —
-                    // hand the file to whatever really handles it instead of failing.
-                    if (!Intents.openFile(applicationContext, resolved.file)) {
-                        Toast.makeText(applicationContext, "No app can open this file", Toast.LENGTH_SHORT).show()
-                    }
-                    return@LaunchedEffect
-                }
-                val dir = resolved.file.parentFile?.absolutePath
-                    ?: Environment.getExternalStorageDirectory().absolutePath
-                navController.navigate(
-                    Routes.browse(
-                        dir,
-                        openArchive = resolved.file.absolutePath,
-                        // Stream-copied archives live in the cache — "extract here"
-                        // would be invisible, so extraction goes to Download instead.
-                        archiveDest = if (resolved.fromStream) {
-                            IncomingIntents.defaultExtractDest().absolutePath
-                        } else null,
-                    ),
-                ) { launchSingleTop = true }
-            }
 
             ToadTheme(
                 themeMode = settings.value.themeMode,
@@ -161,14 +105,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        // singleTask: "Open with toadFILES" while the app is running lands here
-        // instead of stacking a second MainActivity on the existing task.
-        pendingViewUri = IncomingIntents.extractViewUri(intent)
     }
 
     override fun onStop() {
