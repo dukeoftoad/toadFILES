@@ -109,4 +109,51 @@ class AppIconSwitcherTest {
         assertTrue(plan.drop(1).any { it.first.className.endsWith("LauncherClassicGreen") })
         assertFalse(plan.drop(1).any { it.first.className.endsWith("LauncherFaceTeal") })
     }
+
+    @Test
+    fun `apply with an installed target enables it and disables the other 41`() {
+        val pm = context.packageManager
+        val switcher = PackageManagerAppIconSwitcher(context) { _, _ -> true }
+        val target = ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherFaceTeal")
+        val shippedDefault =
+            ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherToadGreen")
+
+        switcher.apply(AppIconDesign.FACE, AppIconColor.TEAL)
+
+        assertEquals(
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            pm.getComponentEnabledSetting(target),
+        )
+        assertEquals(
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            pm.getComponentEnabledSetting(shippedDefault),
+        )
+    }
+
+    @Test
+    fun `apply bails out untouched when the target alias is a ghost`() {
+        // Regression for the "app not showing" class: a persisted choice naming an
+        // alias this build doesn't ship must NOT disable the 42 real launcher
+        // entries — that left the app with zero launcher components and it vanished
+        // from the home screen until the next install.
+        val pm = context.packageManager
+        val ghost = PackageManagerAppIconSwitcher(context) { _, _ -> false }
+        val all = AppIconDesign.entries.flatMap { d ->
+            AppIconColor.entries.map { c -> ghost.componentNameFor(d, c) }
+        }
+        // Compare against the pre-call states instead of a fixed expectation: some
+        // components carry a manifest-declared state (the shipped default alias is
+        // enabled=true), and the guard's promise is "nothing changes", not "all DEFAULT".
+        val before = all.associateWith { pm.getComponentEnabledSetting(it) }
+
+        ghost.apply(AppIconDesign.TOAD, AppIconColor.GREEN)
+
+        for (component in all) {
+            assertEquals(
+                "ghost guard must leave $component untouched",
+                before[component],
+                pm.getComponentEnabledSetting(component),
+            )
+        }
+    }
 }
