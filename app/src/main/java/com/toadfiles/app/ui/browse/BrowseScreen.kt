@@ -80,6 +80,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -115,6 +116,9 @@ import com.toadfiles.app.ui.components.CompressDialog
 import com.toadfiles.app.ui.components.PasswordPromptDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.HopIn
+import com.toadfiles.app.ui.theme.LocalToadMotion
+import com.toadfiles.app.ui.theme.NoResultsArt
 import com.toadfiles.app.ui.components.FileActionSheet
 import com.toadfiles.app.ui.components.FileGridCell
 import com.toadfiles.app.ui.components.FileRow
@@ -214,6 +218,8 @@ fun BrowseScreen(
     }
 
     val selectionMode = state.selection.isNotEmpty()
+    // v1.11: the user's motion choice drives the transfer bar's slide and overshoot.
+    val motion = LocalToadMotion.current
     BackHandler(enabled = pendingExtractTo != null) { pendingExtractTo = null }
     BackHandler(enabled = selectionMode && pendingExtractTo == null) { vm.clearSelection() }
 
@@ -506,8 +512,11 @@ fun BrowseScreen(
             // Paste/Cancel buttons and item count must stay visible and reachable, so
             // the FAB steps aside (owner report: it overlaid the transfer actions).
             if (!selectionMode && state.clipboard == null) {
-                FloatingActionButton(onClick = { vm.requestNewFolder() }) {
-                    Icon(Icons.Outlined.CreateNewFolder, "New folder")
+                // v1.11: the toad hops in — entrance follows the user's motion style.
+                HopIn {
+                    FloatingActionButton(onClick = { vm.requestNewFolder() }) {
+                        Icon(Icons.Outlined.CreateNewFolder, "New folder")
+                    }
                 }
             }
         },
@@ -633,7 +642,10 @@ fun BrowseScreen(
                             state.error != null -> state.error!!
                             state.query.isNotBlank() -> "No matches for \"${state.query}\""
                             else -> "Empty folder"
-                        }
+                        },
+                        art = if (state.query.isNotBlank() && state.error == null) {
+                            { NoResultsArt() }
+                        } else null,
                     )
 
                     else -> if (state.settings.browseLayout == BrowseLayout.GRID) {
@@ -676,18 +688,27 @@ fun BrowseScreen(
                 }
             }
 
-            if (!selectionMode && state.clipboard != null) {
-                val clip = state.clipboard!!
-                TransferBar(
-                    mode = clip.mode,
-                    count = clip.files.size,
-                    blockedReason = vm.transferBlockedReason(),
-                    onPaste = { vm.pasteFromClipboard() },
-                    onCancel = { vm.clearClipboard() },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 24.dp),
-                )
+            // v1.11: the armed bar slides up with the motion style's overshoot
+            // (Springy toad) and slides back out on cancel/paste. The last non-null
+            // clipboard is remembered so the exit animation still has content to draw.
+            val lastClip = remember { mutableStateOf<com.toadfiles.app.data.Clipboard.Clip?>(null) }
+            state.clipboard?.let { lastClip.value = it }
+            AnimatedVisibility(
+                visible = !selectionMode && state.clipboard != null,
+                enter = motion.barEnter,
+                exit = motion.barExit,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                lastClip.value?.let { clip ->
+                    TransferBar(
+                        mode = clip.mode,
+                        count = clip.files.size,
+                        blockedReason = vm.transferBlockedReason(),
+                        onPaste = { vm.pasteFromClipboard() },
+                        onCancel = { vm.clearClipboard() },
+                        modifier = Modifier.padding(bottom = 24.dp),
+                    )
+                }
             }
                 }
         }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -22,14 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.FolderZip
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
-import androidx.compose.material.icons.outlined.InstallMobile
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
@@ -52,7 +46,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,6 +64,17 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.util.VideoThumbs
+import com.toadfiles.app.ui.theme.EmptyFolderArt
+import com.toadfiles.app.ui.theme.ToadFileApk
+import com.toadfiles.app.ui.theme.ToadFileArchive
+import com.toadfiles.app.ui.theme.ToadFileAudio
+import com.toadfiles.app.ui.theme.ToadFileDoc
+import com.toadfiles.app.ui.theme.ToadFileGeneric
+import com.toadfiles.app.ui.theme.ToadFileImage
+import com.toadfiles.app.ui.theme.ToadFileVideo
+import com.toadfiles.app.ui.theme.ToadFolder
+import com.toadfiles.app.ui.theme.LocalToadMotion
+import com.toadfiles.app.ui.theme.toadFileIconFor
 import kotlinx.coroutines.delay
 import java.io.File
 import coil3.compose.AsyncImage
@@ -194,28 +201,19 @@ fun FileRow(
 }
 
 fun iconFor(item: FileItem): ImageVector = if (item.isDir) {
-    Icons.Outlined.Folder
+    ToadFolder
 } else {
-    when (item.name.substringAfterLast('.', "").lowercase()) {
-        in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg") -> Icons.Outlined.Image
-        in setOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v") -> Icons.Outlined.Videocam
-        in setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "amr") -> Icons.Outlined.Audiotrack
-        in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> Icons.Outlined.FolderZip
-        "apk" -> Icons.Outlined.InstallMobile
-        in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "htm", "html") ->
-            Icons.Outlined.Description
-        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
-    }
+    toadFileIconFor(item.name.substringAfterLast('.', ""))
 }
 
 fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
-    FilterMode.ALL -> Icons.AutoMirrored.Outlined.InsertDriveFile
-    FilterMode.DOCS -> Icons.Outlined.Description
-    FilterMode.IMAGES -> Icons.Outlined.Image
-    FilterMode.VIDEOS -> Icons.Outlined.Videocam
-    FilterMode.AUDIO -> Icons.Outlined.Audiotrack
-    FilterMode.ARCHIVES -> Icons.Outlined.FolderZip
-    FilterMode.APKS -> Icons.Outlined.InstallMobile
+    FilterMode.ALL -> ToadFileGeneric
+    FilterMode.DOCS -> ToadFileDoc
+    FilterMode.IMAGES -> ToadFileImage
+    FilterMode.VIDEOS -> ToadFileVideo
+    FilterMode.AUDIO -> ToadFileAudio
+    FilterMode.ARCHIVES -> ToadFileArchive
+    FilterMode.APKS -> ToadFileApk
 }
 
 /**
@@ -372,24 +370,51 @@ fun FileGridCell(
     }
 }
 
+/**
+ * Scale-and-fade entrance driven by the user's motion style (the "toad hop").
+ * Wrap anything that should land with a spring — FABs, badges, new rows.
+ * Re-fires whenever [key] changes; removal is up to the caller's `if`.
+ */
 @Composable
-fun EmptyState(message: String, modifier: Modifier = Modifier) {
+fun HopIn(
+    key: Any? = true,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val motion = LocalToadMotion.current
+    var shown by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key) { shown = true }
+    val scale by animateFloatAsState(
+        targetValue = if (shown) 1f else 0.55f,
+        animationSpec = motion.emphasized,
+        label = "hop_scale",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(140),
+        label = "hop_alpha",
+    )
+    Box(modifier.scale(scale).alpha(alpha)) { content() }
+}
+
+@Composable
+fun EmptyState(
+    message: String,
+    modifier: Modifier = Modifier,
+    /** Optional custom illustration; defaults to the toad-over-folder scene. */
+    art: (@Composable () -> Unit)? = null,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            Icons.Outlined.Folder,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.size(56.dp),
-        )
-        Spacer(Modifier.height(12.dp))
+        if (art != null) art() else EmptyFolderArt()
+        Spacer(Modifier.height(16.dp))
         Text(
             message,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

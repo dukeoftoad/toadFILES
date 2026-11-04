@@ -60,6 +60,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.domain.NavStyle
+import com.toadfiles.app.ui.theme.LocalToadMotion
+import com.toadfiles.app.ui.theme.ToadFace
 
 object Routes {
     const val HOME = "home"
@@ -105,6 +107,9 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     val navSettings by settingsVm.settings.collectAsStateWithLifecycle()
     val navStyle = navSettings.navStyle
     val useDrawer = navStyle == NavStyle.SIDE_MENU
+    // v1.11: nav transitions follow the user's motion style (Springy toad / Calm /
+    // Cinematic), chosen on the Appearance tab.
+    val motion = LocalToadMotion.current
     val destinations = listOf(
         BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) },
         BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) },
@@ -186,15 +191,11 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             // screen Scaffold and TopAppBar zeroes its own window insets, so no screen
             // can double-pad (blank band) or skip padding (content under the clock).
             modifier = Modifier.padding(top = padding.calculateTopPadding()),
-            // v1.8.1: gentle cross-fade + micro-slide instead of the abrupt swap.
-            enterTransition = {
-                fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 24 }
-            },
-            exitTransition = { fadeOut(tween(180)) },
-            popEnterTransition = { fadeIn(tween(220)) },
-            popExitTransition = {
-                fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 24 }
-            },
+            // v1.11: motion-style-driven transitions (see LocalToadMotion).
+            enterTransition = { motion.screenEnter },
+            exitTransition = { motion.screenExit },
+            popEnterTransition = { motion.popEnter },
+            popExitTransition = { motion.popExit },
         ) {
             composable(Routes.HOME) {
                 HomeScreen(
@@ -328,11 +329,16 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             drawerState = drawerState,
             drawerContent = {
                 ModalDrawerSheet {
+                    // The mascot welcomes you in — same face as the splash.
+                    ToadFace(
+                        size = 56.dp,
+                        modifier = Modifier.padding(start = 24.dp, top = 20.dp),
+                    )
                     Text(
                         "toadFILES",
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.padding(
-                            start = 28.dp, top = 20.dp, bottom = 4.dp,
+                            start = 28.dp, top = 8.dp, bottom = 4.dp,
                         ),
                     )
                     Text(

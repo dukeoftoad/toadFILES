@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark window background so the cold-start frame matches the Dark forest
+         theme instead of flashing the light moss color before Compose draws. -->
+    <style name="Theme.ToadFiles" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">#0D120E</item>
+    </style>
+</resources>

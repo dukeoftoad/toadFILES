@@ -1,6 +1,5 @@
 package com.toadfiles.app.ui.settings
 
-import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,8 +36,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -61,23 +62,25 @@ import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
+import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.BackKeyAction
+import com.toadfiles.app.domain.MotionStyle
 import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.theme.AccentPalettes
 import com.toadfiles.app.ui.theme.AppIconPalettes
+import com.toadfiles.app.ui.theme.ToadThemes
 
 /**
- * Dedicated Appearance subpage (v1.7.3): theme mode, dynamic color and accent color
- * moved out of the main Settings list. The main Settings screen keeps a single
- * "Appearance" card that navigates here.
+ * Dedicated Appearance subpage. Since the v1.11 redesign it offers:
  *
- * The Back Key Action and Navigation Style preferences joined from the main Settings
- * "General" section: they shape how the app looks and moves, so they live with the
- * other look-and-feel choices. They reuse the same SettingsViewModel setters, so the
- * DataStore keys (nav_style, back_key_action) and all behavior are unchanged.
- *
- * Route "appearance" is registered in ToadNavHost; Settings navigates here via its
- * onOpenAppearance callback (v1.7.3 integration).
+ *  - **Theme** — one full visual identity per entry ([AppTheme]): the Dark forest
+ *    redesign, Material You (wallpaper colors), Google's Material 3 baseline,
+ *    Slate + Neon and the Classic palette (which keeps the seven accent colors),
+ *    plus the light / dark / follow-system selector;
+ *  - **Motion** — [MotionStyle]: Springy toad, Calm & precise or Cinematic, applied
+ *    app-wide through `LocalToadMotion`;
+ *  - **Navigation** and **App icon** as before (same SettingsViewModel setters,
+ *    same DataStore keys, same `appearance_scroll` test seam).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,7 +95,7 @@ fun AppearanceScreen(
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
         // Inset source of truth is the outer shell Scaffold in ToadNavHost; zeroing
-        // these avoids a double status-bar pad (the v1.7.3 top "dead band").
+        // these avoids a double status-bar pad.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
@@ -122,69 +125,78 @@ fun AppearanceScreen(
             Text("Theme", style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
 
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    ThemeMode.entries.forEach { mode ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { vm.setTheme(mode) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = settings.themeMode == mode, onClick = { vm.setTheme(mode) })
+            // Light / dark / system selector.
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                ThemeMode.entries.forEachIndexed { index, mode ->
+                    SegmentedButton(
+                        selected = settings.themeMode == mode,
+                        onClick = { vm.setTheme(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = ThemeMode.entries.size),
+                        label = {
                             Text(
                                 when (mode) {
-                                    ThemeMode.SYSTEM -> "Follow System"
+                                    ThemeMode.SYSTEM -> "System"
                                     ThemeMode.LIGHT -> "Light"
                                     ThemeMode.DARK -> "Dark"
                                 }
                             )
-                        }
-                    }
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Dynamic Color", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                                    "Use wallpaper-based Material You colors"
-                                else "Requires Android 12+",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = settings.dynamicColor,
-                            onCheckedChange = { vm.setDynamic(it) },
-                            enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
-                        )
-                    }
-                    // Accent picker — only meaningful when dynamic color is OFF. When
-                    // dynamic color is on the picker is shown disabled so the user can see
-                    // what's available once they turn Material You off; the swatch they
-                    // pre-select here will then apply immediately.
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Text("Accent Color", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Used when dynamic color is off. Toad is the original palette.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        },
                     )
-                    Spacer(Modifier.height(10.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(AccentColor.entries) { accent ->
-                            AccentSwatch(
-                                accent = accent,
-                                selected = settings.accentColor == accent,
-                                enabled = !settings.dynamicColor ||
-                                    Build.VERSION.SDK_INT < Build.VERSION_CODES.S,
-                                onClick = { vm.setAccent(accent) },
-                            )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            // One card per visual identity.
+            AppTheme.entries.forEach { theme ->
+                ThemeCard(
+                    theme = theme,
+                    selected = settings.appTheme == theme,
+                    onClick = { vm.setAppTheme(theme) },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // The accent-color picker belongs to the Classic identity only.
+            if (settings.appTheme == AppTheme.CLASSIC) {
+                Spacer(Modifier.height(8.dp))
+                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Accent Color", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Toad is the original moss & mud palette.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(AccentColor.entries) { accent ->
+                                AccentSwatch(
+                                    accent = accent,
+                                    selected = settings.accentColor == accent,
+                                    enabled = true,
+                                    onClick = { vm.setAccent(accent) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(32.dp))
+
+            Text("Motion", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    MotionStyle.entries.forEachIndexed { index, style ->
+                        SelectableRow(
+                            title = style.label,
+                            subtitle = style.description,
+                            selected = settings.motionStyle == style,
+                            onClick = { vm.setMotionStyle(style) },
+                        )
+                        if (index != MotionStyle.entries.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 4.dp))
                         }
                     }
                 }
@@ -263,6 +275,93 @@ fun AppearanceScreen(
             }
             Spacer(Modifier.height(32.dp))
         }
+    }
+}
+
+/** One visual-identity card: palette preview + name + description + selected check. */
+@Composable
+private fun ThemeCard(
+    theme: AppTheme,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val swatches = ToadThemes.swatches(theme)
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerLow
+            )
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Mini preview: the theme's background with its accent dots.
+        Box(
+            Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(swatches[0]),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                swatches.drop(1).forEach { color ->
+                    Box(
+                        Modifier
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.size(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(theme.label, style = MaterialTheme.typography.titleSmall)
+            Text(
+                theme.description,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Outlined.Check,
+                contentDescription = "Selected",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/** Simple selectable row with title + description and a trailing check. */
+@Composable
+private fun SelectableRow(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        RadioButton(selected = selected, onClick = onClick)
     }
 }
 
