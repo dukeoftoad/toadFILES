@@ -23,6 +23,13 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
   bounce), Calm & precise (quick eased fades) and Cinematic (longer arcs with
   scale). The choice drives nav transitions, the transfer bar's slide, the FAB
   hop and the splash, app-wide.
+- **Font picker on the Appearance tab** — the device's **System** font, the
+  bundled **Manrope**, the unique chunky **Toad** font (Baloo 2 under the SIL
+  OFL, instanced, Latin-subsetted and renamed per the license — see
+  docs/licenses), **Inter**, **Space Grotesk** and **JetBrains Mono**. Every
+  entry previews in its own letterforms; the pick applies app-wide through the
+  tuned v1.11 type scale (Manrope stays the default, so nothing changes until
+  you choose).
 - **New launcher icon**: the "Toad mark" design joins the icon picker and is
   now the shipped default, in all six background tints.
 
@@ -34,6 +41,29 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 - Test reliability: HomeViewModel tests cancel their ViewModel scopes so eager
   jobs can no longer straddle a test boundary and crash the shared test Main
   dispatcher under CI load.
+
+### Fixed
+- **APK taps open the Android package installer** (owner report: an APK was
+  "recognised as doc" and tapping it jumped straight into a notes app). On
+  Recent, Home's recents and favorites and the Categories drill-in, an .apk now
+  routes to the installer behind the same confirm dialog and "Install unknown
+  apps" gate Browse's zip rows use — never to a generic VIEW resolver that
+  whatever note-taking app happens to claim the type can hijack. `.xapk`/
+  `.apkm` bundles stay with external viewers (they are not installable
+  packages).
+- **Archive taps ask — they never redirect** (owner report: picking toadFILES
+  from the system "Open with" sheet for a zip dropped the user in a folder; a
+  stream-copied archive even auto-extracted into Download with no say at all).
+  The extract-or-open dialog now ALWAYS appears, with three choices: **Extract
+  here** (for handed-over stream copies: into Download, labeled as such),
+  **Extract to…** (navigate anywhere and pick the folder) and Open. Tapping an
+  archive inside toadFILES (Recent, Home, Categories, their action sheets)
+  routes into the same dialog instead of firing an ACTION_VIEW that, now that
+  toadFILES registers as an archive handler, bounced back into the app or off
+  into another archiver.
+- The "Open with → toadFILES" handoff lands Browse on a folder the user can
+  actually see — the archive's own folder, or Download for stream copies that
+  only exist in the app cache — instead of the invisible cache directory.
 
 ## [1.10.2] — 2026-11-04
 
