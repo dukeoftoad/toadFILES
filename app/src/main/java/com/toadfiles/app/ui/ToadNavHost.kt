@@ -65,7 +65,7 @@ import com.toadfiles.app.ui.theme.ToadFace
 
 object Routes {
     const val HOME = "home"
-    const val BROWSE = "browse?dir={dir}&reveal={reveal}"
+    const val BROWSE = "browse?dir={dir}&reveal={reveal}&open_archive={openArchive}&archive_dest={archiveDest}"
     const val CATEGORIES = "categories"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
@@ -76,8 +76,15 @@ object Routes {
     const val APPEARANCE = "appearance"
     const val STORAGE_ANALYZER = "storage_analyzer?root={root}"
 
-    fun browse(dir: String, reveal: String? = null): String =
-        "browse?dir=${Uri.encode(dir)}" + (reveal?.let { "&reveal=${Uri.encode(it)}" } ?: "")
+    fun browse(
+        dir: String,
+        reveal: String? = null,
+        openArchive: String? = null,
+        archiveDest: String? = null,
+    ): String =
+        "browse?dir=${Uri.encode(dir)}" + (reveal?.let { "&reveal=${Uri.encode(it)}" } ?: "") +
+            (openArchive?.let { "&open_archive=${Uri.encode(it)}" } ?: "") +
+            (archiveDest?.let { "&archive_dest=${Uri.encode(it)}" } ?: "")
     fun storageAnalyzer(root: String = ""): String =
         "storage_analyzer?root=${Uri.encode(root)}"
 }
@@ -215,6 +222,15 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     navArgument("reveal") {
                         type = NavType.StringType; nullable = true; defaultValue = null
                     },
+                    // v1.11: "Open with toadFILES" handoff — the archive to open the
+                    // extract-or-open dialog for, and (for stream-copied archives that
+                    // exist only in the cache) the user-visible destination folder.
+                    navArgument("open_archive") {
+                        type = NavType.StringType; nullable = true; defaultValue = null
+                    },
+                    navArgument("archive_dest") {
+                        type = NavType.StringType; nullable = true; defaultValue = null
+                    },
                 ),
             ) { entry ->
                 BrowseScreen(
@@ -222,6 +238,8 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     bottomPadding = padding.calculateBottomPadding(),
                     onNavigateUp = { navController.popBackStack() },
                     revealName = entry.arguments?.getString("reveal"),
+                    openArchivePath = entry.arguments?.getString("open_archive"),
+                    archiveDestPath = entry.arguments?.getString("archive_dest"),
                 )
             }
             composable(Routes.RECENT) {
