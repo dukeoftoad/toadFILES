@@ -6,6 +6,35 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+### Added
+- **A complete visual redesign** — the v1.11 look: bundled Manrope typography, a
+  softer and rounder shape scale, a hand-drawn toad brand kit (custom duotone
+  file-type icons for images/video/audio/docs/archives/APKs, a two-tone folder
+  icon, a blinkable mascot), illustrated toad empty states for empty folders,
+  the trash and no-results, and an animated launch splash where the toad hops
+  in and blinks.
+- **Theme picker on the Appearance tab** — five full identities: Dark forest
+  (the new default: moss on near-black with amber highlights), Material You
+  (wallpaper colors), Material 3 (Google's reference palette), Slate + Neon
+  (graphite on OLED black) and Classic toad (the original palette, keeping the
+  seven accent colors). Light/Dark/System stays per theme; upgraders who had
+  customized their look keep it, everyone else gets the redesign.
+- **Motion picker on the Appearance tab** — Springy toad (springs with a soft
+  bounce), Calm & precise (quick eased fades) and Cinematic (longer arcs with
+  scale). The choice drives nav transitions, the transfer bar's slide, the FAB
+  hop and the splash, app-wide.
+- **New launcher icon**: the "Toad mark" design joins the icon picker and is
+  now the shipped default, in all six background tints.
+
+### Changed
+- File rows on Home and Recent show the toad file-type icons instead of plain
+  extension monograms.
+- Cold start no longer flashes a light background in dark themes
+  (values-night window background).
+- Test reliability: HomeViewModel tests cancel their ViewModel scopes so eager
+  jobs can no longer straddle a test boundary and crash the shared test Main
+  dispatcher under CI load.
+
 ## [1.10.2] — 2026-11-04
 
 A one-flaw patch release: toadFILES never showed up in the system

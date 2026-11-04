@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,12 +38,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
-import com.toadfiles.app.data.ThemeMode
+import com.toadfiles.app.ui.components.ToadSplash
+import com.toadfiles.app.ui.theme.ToadFace
+import com.toadfiles.app.ui.theme.ToadTheme
 import com.toadfiles.app.update.StartupUpdateCheck
 import com.toadfiles.app.update.UpdateBanner
 import com.toadfiles.app.ui.Routes
 import com.toadfiles.app.ui.ToadNavHost
-import com.toadfiles.app.ui.theme.ToadTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -77,30 +79,40 @@ class MainActivity : ComponentActivity() {
             // Hoisted so the banner's "Update" can deep-link into the existing About flow.
             val navController = rememberNavController()
 
+            // v1.11 splash: the toad hops in and blinks on every cold start; a
+            // configuration change finishes the same animation instead of replaying it.
+            var splashShowing by rememberSaveable { mutableStateOf(true) }
+
             ToadTheme(
+                appTheme = settings.value.appTheme,
                 themeMode = settings.value.themeMode,
-                dynamicColor = settings.value.dynamicColor,
                 accentColor = settings.value.accentColor,
+                motionStyle = settings.value.motionStyle,
             ) {
-                Column(Modifier.fillMaxSize()) {
-                    if (hasFileAccess()) {
-                        // File browsing depends only on storage permission. The update
-                        // banner is optional and must never gate the main app UI.
-                        if (updateBanner != null && !bannerDismissed) {
-                            UpdateBanner(
-                                release = updateBanner,
-                                onOpenUpdateFlow = {
-                                    navController.navigate(Routes.ABOUT) { launchSingleTop = true }
-                                },
-                                onDismiss = startupUpdate::dismissBanner,
+                Box(Modifier.fillMaxSize()) {
+                    Column(Modifier.fillMaxSize()) {
+                        if (hasFileAccess()) {
+                            // File browsing depends only on storage permission. The update
+                            // banner is optional and must never gate the main app UI.
+                            if (updateBanner != null && !bannerDismissed) {
+                                UpdateBanner(
+                                    release = updateBanner,
+                                    onOpenUpdateFlow = {
+                                        navController.navigate(Routes.ABOUT) { launchSingleTop = true }
+                                    },
+                                    onDismiss = startupUpdate::dismissBanner,
+                                )
+                            }
+                            Box(Modifier.weight(1f)) { ToadNavHost(navController) }
+                        } else {
+                            OnboardingScreen(
+                                onGrant = { requestFileAccess() },
+                                onOpenSettings = { openAppSettings() },
                             )
                         }
-                        Box(Modifier.weight(1f)) { ToadNavHost(navController) }
-                    } else {
-                        OnboardingScreen(
-                            onGrant = { requestFileAccess() },
-                            onOpenSettings = { openAppSettings() },
-                        )
+                    }
+                    if (splashShowing) {
+                        ToadSplash(onFinished = { splashShowing = false })
                     }
                 }
             }
@@ -183,14 +195,8 @@ private fun OnboardingScreen(onGrant: () -> Unit, onOpenSettings: () -> Unit) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            IconButton(onClick = {}, enabled = false, modifier = Modifier.size(96.dp)) {
-                Icon(
-                    Icons.Outlined.Folder,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(88.dp),
-                )
-            }
+            // The mascot greets new users — same toad as the splash and launcher.
+            ToadFace(size = 112.dp, modifier = Modifier.padding(bottom = 20.dp))
             Spacer(Modifier.height(16.dp))
             Text("Welcome to toadFILES", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(12.dp))

@@ -7,7 +7,9 @@ import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
+import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.BackKeyAction
+import com.toadfiles.app.domain.MotionStyle
 import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
@@ -26,6 +28,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.Eagerly, ToadSettings())
 
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { container.settingsRepo.setThemeMode(mode) }
+    fun setAppTheme(theme: AppTheme) = viewModelScope.launch { container.settingsRepo.setAppTheme(theme) }
+    fun setMotionStyle(style: MotionStyle) = viewModelScope.launch { container.settingsRepo.setMotionStyle(style) }
     fun setDynamic(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setDynamicColor(enabled) }
     fun setAccent(accent: AccentColor) = viewModelScope.launch { container.settingsRepo.setAccentColor(accent) }
     fun setShowHidden(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setShowHidden(enabled) }
