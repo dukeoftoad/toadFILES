@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -102,6 +104,7 @@ import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.data.Clipboard
 import com.toadfiles.app.ui.components.TransferBar
 import com.toadfiles.app.ui.components.blinkTwice
+import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.BackKeyAction
@@ -130,7 +133,7 @@ import com.toadfiles.app.ui.components.SortMenu
 import com.toadfiles.app.util.Intents
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun BrowseScreen(
     initialDir: String,
@@ -183,18 +186,21 @@ fun BrowseScreen(
     /** An archive (.zip/.7z) the user tapped: offered the extract-or-open dialog
      *  instead of an open-with intent (v1.7.1 fix: archives never fall through to
      *  ACTION_VIEW). v1.7.3: the dialog only shows for tap action MENU — EXTRACT and
-     *  OPEN_WITH (Settings → Archive actions) are dispatched directly in openItem. */
-    var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
+     *  OPEN_WITH (Settings → Archive actions) are dispatched directly in openItem.
+     *  v1.11 flaw fix: carries the "here" destination too — a handed-over archive
+     *  that only exists in the cache extracts into [ArchiveTap.hereDest] (Download)
+     *  instead of an invisible cache folder, and the dialog also offers
+     *  "Extract to…" (anywhere the user navigates to). */
+    var pendingArchiveTap by remember { mutableStateOf<ArchiveTap?>(null) }
     /** Archive being routed through Browse so the user can choose its destination folder. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
 
     // ---- Incoming "Open with toadFILES" handoff (v1.11) ----
     // MainActivity resolved the handed-over uri to a real file and routed it here.
-    // Without archive_dest it gets the SAME extract-or-open dialog a row tap shows
-    // (extract next to the archive, or hand it to a viewer app); with archive_dest
-    // (stream copies that only exist in the cache) extraction goes straight into
-    // that user-visible folder, conflict dialog included. Consumed once, like the
-    // reveal pinpoint below, so rotation never replays it.
+    // Flaw fix: the handoff now ALWAYS opens the extract-or-open dialog — the
+    // archive_dest names what "here" means for a stream copy that only exists in
+    // the cache (Download), it never auto-starts the extraction. Consumed once,
+    // like the reveal pinpoint below, so rotation never replays it.
     var consumedOpenArchive by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(openArchivePath) {
         val target = openArchivePath?.takeIf { it != consumedOpenArchive } ?: return@LaunchedEffect
@@ -204,8 +210,8 @@ fun BrowseScreen(
             vm.requestToast("That file is no longer available")
             return@LaunchedEffect
         }
-        val dest = archiveDestPath
-        if (dest != null) vm.extractZipInto(archive, File(dest)) else pendingArchiveTap = archive
+        val dest = archiveDestPath?.let(::File)
+        pendingArchiveTap = ArchiveTap(archive, dest)
     }
 
     LaunchedEffect(state.toast) {
@@ -632,7 +638,7 @@ fun BrowseScreen(
                         item.name.lowercase().endsWith(".apk") -> pendingInstallApk = item.file
                         ArchiveOps.canExtract(item.name) -> when (vm.archiveTapAction(item.name)) {
                             // MENU: the v1.7.1 extract-or-open dialog (default).
-                            ArchiveTapAction.SHOW_MENU -> pendingArchiveTap = item.file
+                            ArchiveTapAction.SHOW_MENU -> pendingArchiveTap = ArchiveTap(item.file, null)
                             // EXTRACT: the same pipeline as the dialog / "Extract here"
                             // menu entry, including its target-exists handling.
                             ArchiveTapAction.EXTRACT -> vm.extractZip(item.file)
@@ -804,23 +810,52 @@ fun BrowseScreen(
             onDismiss = { vm.dismissZipOverwrite() },
         )
     }
-    // Tapping an archive (.zip/.7z) asks what to do: extract (most common) or open with
-    // a viewer app — never a silent ACTION_VIEW (v1.7.1 open-with fix).
-    pendingArchiveTap?.let { archive ->
+    // Tapping an archive (.zip/.7z) asks what to do (v1.7.1; never a silent
+    // ACTION_VIEW). v1.11 flaw fix: three choices instead of two — Extract here
+    // (or "Extract to <Download>" for handed-over stream copies that only exist
+    // in the cache), Extract to… (pick any folder by navigating) and Open.
+    pendingArchiveTap?.let { tap ->
+        val hereDest = tap.hereDest
         AlertDialog(
             onDismissRequest = { pendingArchiveTap = null },
-            title = { Text(archive.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-            text = { Text("Extract this archive into a new folder here, or open it with an app.") },
+            title = { Text(tap.archive.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Text(
+                    if (hereDest != null) {
+                        "This archive was handed to toadFILES as a stream and only exists " +
+                            "in the app cache. Extract it into a folder of your choice, " +
+                            "or open it with an app."
+                    } else {
+                        "Extract this archive into a new folder next to it, pick a " +
+                            "destination yourself, or open it with an app."
+                    }
+                )
+            },
             confirmButton = {
-                Row {
+                // FlowRow: three actions wrap to a second line on narrow screens
+                // instead of silently clipping the primary one.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     TextButton(onClick = {
                         pendingArchiveTap = null
-                        if (!Intents.openFile(context, archive)) vm.requestToast("No app can open this file")
+                        if (!Intents.openFile(context, tap.archive)) vm.requestToast("No app can open this file")
                     }) { Text("Open") }
                     TextButton(onClick = {
+                        val archive = tap.archive
                         pendingArchiveTap = null
-                        vm.extractZip(archive)
-                    }) { Text("Extract here") }
+                        // Same destination-picker flow the action sheet's "Extract to…"
+                        // arms: navigate anywhere, then "Choose this folder".
+                        vm.clearSelection()
+                        searchOpen = false
+                        if (state.query.isNotBlank()) vm.setQuery("")
+                        pendingExtractTo = archive
+                    }) { Text("Extract to…") }
+                    TextButton(onClick = {
+                        pendingArchiveTap = null
+                        if (hereDest != null) vm.extractZipInto(tap.archive, hereDest)
+                        else vm.extractZip(tap.archive)
+                    }) { Text(if (hereDest != null) "Extract to ${hereDest.name}" else "Extract here") }
                 }
             },
             dismissButton = { TextButton(onClick = { pendingArchiveTap = null }) { Text("Cancel") } },
@@ -836,30 +871,11 @@ fun BrowseScreen(
         )
     }
     pendingInstallApk?.let { apk ->
-        ConfirmDialog(
-            title = "Install \"${apk.name}\"?",
-            message = "toadFILES hands this APK to the Android package installer. " +
-                "Android may ask you to allow installs from toadFILES first.",
-            confirmLabel = "Install",
-            onConfirm = {
-                when (Intents.installApk(context, apk)) {
-                    Intents.InstallResult.STARTED -> Unit // the installer took over
-                    Intents.InstallResult.NEEDS_PERMISSION -> vm.requestToast(
-                        "Allow \"Install unknown apps\" for toadFILES, return here, then tap Install again"
-                    )
-                    Intents.InstallResult.SETTINGS_FAILED -> {
-                        // Settings never opened, so there is no toggle to come back from.
-                        vm.requestToast("Could not open Android's install-permission settings")
-                        pendingInstallApk = null
-                    }
-                    Intents.InstallResult.FAILED -> {
-                        vm.requestToast("Could not start the installer")
-                        pendingInstallApk = null
-                    }
-                }
-                if (Intents.hasInstallPermission(context)) pendingInstallApk = null
-            },
+        ApkInstallDialog(
+            apkName = apk.name,
+            launch = { Intents.installApk(context, apk) },
             onDismiss = { pendingInstallApk = null },
+            toast = vm::requestToast,
         )
     }
     state.pendingDelete?.let { files ->
@@ -1024,6 +1040,18 @@ fun BrowseScreen(
         )
     }
 }
+
+/**
+ * An archive awaiting the extract-or-open dialog.
+ *
+ * @param archive the .zip/.7z itself.
+ * @param hereDest what "here" means for [BrowseViewModel.extractZipInto]: null for a
+ *        normal tap (extract next to the archive); the user-visible destination
+ *        (Download) for "Open with → toadFILES" handoffs whose stream copy only
+ *        exists in the app cache — extracting "next to" a cache file would land
+ *        the files somewhere nobody can see.
+ */
+private data class ArchiveTap(val archive: File, val hereDest: File?)
 
 @Composable
 private fun Breadcrumbs(path: List<File>, onOpen: (File) -> Unit) {
