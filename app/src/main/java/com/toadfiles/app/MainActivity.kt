@@ -98,6 +98,14 @@ class MainActivity : ComponentActivity() {
             // Browse shows, so the handoff behaves like the in-app action. Waits for
             // storage access: a handoff that arrives during onboarding must survive
             // until the grant lands (onResume refreshes hasAllFilesAccess).
+            //
+            // Flaw fix (owner report): the handoff used to AUTO-EXTRACT stream-copied
+            // archives straight into Download — the user was dumped in a folder with
+            // no say at all. Now it always ASKS: Browse opens on a folder the user can
+            // actually see (the archive's own folder; Download for cache copies) and
+            // shows the extract-or-open dialog, with "Extract to…" alongside — the
+            // archive_dest only names the DEFAULT destination "here" means for a
+            // cache copy, it never triggers extraction by itself.
             LaunchedEffect(pendingViewUri, hasAllFilesAccess) {
                 val uri = pendingViewUri ?: return@LaunchedEffect
                 if (!hasAllFilesAccess) return@LaunchedEffect
@@ -120,17 +128,15 @@ class MainActivity : ComponentActivity() {
                     }
                     return@LaunchedEffect
                 }
-                val dir = resolved.file.parentFile?.absolutePath
+                val streamDest = if (resolved.fromStream) IncomingIntents.defaultExtractDest() else null
+                val dir = streamDest?.absolutePath
+                    ?: resolved.file.parentFile?.absolutePath
                     ?: Environment.getExternalStorageDirectory().absolutePath
                 navController.navigate(
                     Routes.browse(
                         dir,
                         openArchive = resolved.file.absolutePath,
-                        // Stream-copied archives live in the cache — "extract here"
-                        // would be invisible, so extraction goes to Download instead.
-                        archiveDest = if (resolved.fromStream) {
-                            IncomingIntents.defaultExtractDest().absolutePath
-                        } else null,
+                        archiveDest = streamDest?.absolutePath,
                     ),
                 ) { launchSingleTop = true }
             }
@@ -144,6 +150,7 @@ class MainActivity : ComponentActivity() {
                 themeMode = settings.value.themeMode,
                 accentColor = settings.value.accentColor,
                 motionStyle = settings.value.motionStyle,
+                appFont = settings.value.appFont,
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {

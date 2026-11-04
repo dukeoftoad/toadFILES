@@ -79,13 +79,17 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.theme.toadFileIconFor
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
+import com.toadfiles.app.ui.components.MediaTapRoute
 import com.toadfiles.app.ui.components.PasswordPromptDialog
+import com.toadfiles.app.ui.components.routeMediaTap
 import com.toadfiles.app.util.Intents
+import java.io.File
 
 /**
  * Recent files from the OS media library. Each row is fully actionable: tap opens the
@@ -100,12 +104,17 @@ fun RecentScreen(
     onBack: () -> Unit,
     onShowInFolder: (String) -> Unit,
     onOpenDrawer: (() -> Unit)? = null,
+    /** Flaw fix: extractable archives route into Browse's extract-or-open dialog
+     *  instead of a bare ACTION_VIEW that bounces back into toadFILES itself. */
+    onOpenArchive: (File) -> Unit = {},
     vm: RecentViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var actionSheetFor by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
+    /** APK awaiting the shared install-confirm dialog (row tap or sheet "Open"). */
+    var pendingInstallApk by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
     // Grouping is derived per state emission; grouping timestamps are only meaningful
     // to a second, so a stable key of (filter, entries, day bucket) is not needed.
     val grouped = remember(state.entries) { RecentGrouping.grouped(state.entries) }
@@ -134,6 +143,20 @@ fun RecentScreen(
 
     val inSelection = state.selection.isNotEmpty()
     BackHandler(enabled = inSelection) { vm.clearSelection() }
+
+    // The ONE tap-routing rule for this screen (see routeMediaTap): the system
+    // package installer for APKs (a notes app was hijacking plain ACTION_VIEWs),
+    // toadFILES' own extract flow for archives, an external viewer otherwise.
+    val openEntry: (MediaRepository.MediaEntry) -> Unit = { e ->
+        when (val route = routeMediaTap(e)) {
+            is MediaTapRoute.InstallApk -> pendingInstallApk = e
+            is MediaTapRoute.OpenArchive -> onOpenArchive(route.archive)
+            is MediaTapRoute.OpenExternal ->
+                if (!Intents.openContent(context, route.uri, route.mime)) {
+                    vm.requestToast("No app can open this file")
+                }
+        }
+    }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -257,10 +280,7 @@ fun RecentScreen(
                         state = state,
                         inSelection = inSelection,
                         onEntryTap = { e ->
-                            if (inSelection) vm.toggleSelection(e)
-                            else if (!Intents.openContent(context, e.uri, e.mime)) {
-                                vm.requestToast("No app can open this file")
-                            }
+                            if (inSelection) vm.toggleSelection(e) else openEntry(e)
                         },
                         onEntryLongPress = { e -> vm.toggleSelection(e) },
                         onEntryMore = { e -> actionSheetFor = e },
@@ -285,8 +305,8 @@ fun RecentScreen(
                             onClick = {
                                 if (inSelection) {
                                     vm.toggleSelection(e)
-                                } else if (!Intents.openContent(context, e.uri, e.mime)) {
-                                    vm.requestToast("No app can open this file")
+                                } else {
+                                    openEntry(e)
                                 }
                             },
                             // Press-and-hold starts multi-select, like Browse; the row's
@@ -316,17 +336,42 @@ fun RecentScreen(
     }
 
     // Long-press action sheet — the same one the Categories drill-in uses, with the
-    // shared wiring from ui/components (audit 7.3).
+    // shared wiring from ui/components (audit 7.3). "Open" follows the same routing
+    // as a row tap: installer for APKs, the extract flow for archives.
     MediaEntryActionSheet(
         entry = actionSheetFor,
         onDismiss = { actionSheetFor = null },
-        open = { e -> Intents.openContent(context, e.uri, e.mime) },
+        open = { e ->
+            when (val route = routeMediaTap(e)) {
+                is MediaTapRoute.InstallApk -> {
+                    pendingInstallApk = e
+                    true
+                }
+                is MediaTapRoute.OpenArchive -> {
+                    onOpenArchive(route.archive)
+                    true
+                }
+                is MediaTapRoute.OpenExternal ->
+                    Intents.openContent(context, route.uri, route.mime)
+            }
+        },
         onShowInFolder = onShowInFolder,
         toast = vm::requestToast,
         requestDelete = { e -> vm.requestDelete(listOf(e)) },
         onDetails = vm::requestDetails,
         onExtract = vm::extractZip,
     )
+
+    // APK install confirm: the shared dialog Browse shows, over the MediaStore uri —
+    // the package installer gets the handoff, never a generic VIEW resolver.
+    pendingInstallApk?.let { e ->
+        ApkInstallDialog(
+            apkName = e.name,
+            launch = { Intents.installApkFromUri(context, e.uri) },
+            onDismiss = { pendingInstallApk = null },
+            toast = vm::requestToast,
+        )
+    }
 
     state.pendingDelete?.let { entries ->
         AlertDialog(

@@ -7,6 +7,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.toadfiles.app.R
+import com.toadfiles.app.domain.AppFont
 
 /**
  * Bundled Manrope (SIL OFL) — a rounded, friendly geometric sans that carries the
@@ -21,6 +22,88 @@ val ManropeFamily = FontFamily(
     Font(R.font.manrope_semibold, FontWeight.SemiBold),
     Font(R.font.manrope_bold, FontWeight.Bold),
     Font(R.font.manrope_extrabold, FontWeight.ExtraBold),
+)
+
+/*
+ * The v1.11 font picker's other families. All are static instancing of Google
+ * Fonts variable TTFs, subsetted to Latin and de-hinted by
+ * scripts/make_toadfiles_fonts.py (sources + OFL texts: docs/licenses).
+ *
+ *  - Inter: the neutral screen workhorse; optical size pinned to 14 (text).
+ *  - Space Grotesk: quirky techy sans; its weight axis tops out at Bold, so
+ *    display styles asking for ExtraBold resolve to Bold via best-match.
+ *  - JetBrains Mono: monospace, same width for every glyph.
+ *  - Toad: Baloo 2 renamed per the OFL (Modified Version, Reserved Font Name) —
+ *    chunky and bouncy, the mascot as letterforms.
+ */
+val InterFamily = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold),
+    Font(R.font.inter_extrabold, FontWeight.ExtraBold),
+)
+
+val SpaceGroteskFamily = FontFamily(
+    Font(R.font.spacegrotesk_regular, FontWeight.Normal),
+    Font(R.font.spacegrotesk_medium, FontWeight.Medium),
+    Font(R.font.spacegrotesk_semibold, FontWeight.SemiBold),
+    Font(R.font.spacegrotesk_bold, FontWeight.Bold),
+)
+
+val JetBrainsMonoFamily = FontFamily(
+    Font(R.font.jetbrainsmono_regular, FontWeight.Normal),
+    Font(R.font.jetbrainsmono_medium, FontWeight.Medium),
+    Font(R.font.jetbrainsmono_semibold, FontWeight.SemiBold),
+    Font(R.font.jetbrainsmono_bold, FontWeight.Bold),
+    Font(R.font.jetbrainsmono_extrabold, FontWeight.ExtraBold),
+)
+
+/** The unique toad font — Baloo 2 (SIL OFL), renamed and rebranded for toadFILES. */
+val ToadFamily = FontFamily(
+    Font(R.font.toad_regular, FontWeight.Normal),
+    Font(R.font.toad_medium, FontWeight.Medium),
+    Font(R.font.toad_semibold, FontWeight.SemiBold),
+    Font(R.font.toad_bold, FontWeight.Bold),
+    Font(R.font.toad_extrabold, FontWeight.ExtraBold),
+)
+
+/** The [FontFamily] a picker entry renders with; [AppFont.SYSTEM] is the platform default. */
+fun fontFamilyFor(font: AppFont): FontFamily = when (font) {
+    AppFont.SYSTEM -> FontFamily.Default
+    AppFont.MANROPE -> ManropeFamily
+    AppFont.TOAD -> ToadFamily
+    AppFont.INTER -> InterFamily
+    AppFont.SPACE_GROTESK -> SpaceGroteskFamily
+    AppFont.JETBRAINS_MONO -> JetBrainsMonoFamily
+}
+
+/**
+ * The v1.11 font picker's entry point: the tuned scale above with the chosen
+ * family swapped into every role (weights keep their per-role tuning — the
+ * family only changes the letterforms). [AppFont.DEFAULT] reproduces the
+ * shipped Manrope look exactly.
+ */
+fun toadTypographyFor(font: AppFont): Typography =
+    withFamily(ToadTypography, fontFamilyFor(font))
+
+/** Swaps [family] into every M3 role of [t], keeping sizes, weights and tracking. */
+private fun withFamily(t: Typography, family: FontFamily): Typography = Typography(
+    displayLarge = t.displayLarge.copy(fontFamily = family),
+    displayMedium = t.displayMedium.copy(fontFamily = family),
+    displaySmall = t.displaySmall.copy(fontFamily = family),
+    headlineLarge = t.headlineLarge.copy(fontFamily = family),
+    headlineMedium = t.headlineMedium.copy(fontFamily = family),
+    headlineSmall = t.headlineSmall.copy(fontFamily = family),
+    titleLarge = t.titleLarge.copy(fontFamily = family),
+    titleMedium = t.titleMedium.copy(fontFamily = family),
+    titleSmall = t.titleSmall.copy(fontFamily = family),
+    bodyLarge = t.bodyLarge.copy(fontFamily = family),
+    bodyMedium = t.bodyMedium.copy(fontFamily = family),
+    bodySmall = t.bodySmall.copy(fontFamily = family),
+    labelLarge = t.labelLarge.copy(fontFamily = family),
+    labelMedium = t.labelMedium.copy(fontFamily = family),
+    labelSmall = t.labelSmall.copy(fontFamily = family),
 )
 
 /**

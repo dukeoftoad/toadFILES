@@ -13,22 +13,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.MotionStyle
 
 /**
- * App theme. Three layers of choice, all set on the Appearance tab:
+ * App theme. Four layers of choice, all set on the Appearance tab:
  *
  * 1. [AppTheme] — the visual identity. [AppTheme.MATERIAL_YOU] follows the wallpaper
  *    (dynamic color); [AppTheme.CLASSIC] keeps the original accent-color system; the
  *    other three are hand-tuned full palettes ([ToadThemes]).
  * 2. [ThemeMode] — light / dark / follow system, applied within every identity.
- * 3. [MotionStyle] — how the app moves, provided to every screen via
+ * 3. [AppFont] — the typeface ([Type.kt]'s tuned scale, re-skinned per family;
+ *    [AppFont.SYSTEM] follows the device font).
+ * 4. [MotionStyle] — how the app moves, provided to every screen via
  *    [LocalToadMotion] so springs, durations and nav transitions follow the user's
  *    taste without per-screen hard-coding.
  *
- * Typography (bundled Manrope — see [Type.kt]) and shapes are shared by every
- * identity so the visual rhythm stays coherent.
+ * Shapes are shared by every identity so the visual rhythm stays coherent.
  */
 @Composable
 fun ToadTheme(
@@ -36,6 +38,7 @@ fun ToadTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     accentColor: AccentColor = AccentColor.TOAD,
     motionStyle: MotionStyle = MotionStyle.DEFAULT,
+    appFont: AppFont = AppFont.DEFAULT,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -61,7 +64,7 @@ fun ToadTheme(
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = ToadTypography,
+            typography = toadTypographyFor(appFont),
             shapes = ToadShapes,
             content = content,
         )

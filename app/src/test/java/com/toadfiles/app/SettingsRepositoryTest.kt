@@ -8,6 +8,7 @@ import com.toadfiles.app.data.SettingsRepository
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.data.ToadSettings
 import com.toadfiles.app.domain.AccentColor
+import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.BackKeyAction
@@ -228,6 +229,39 @@ class SettingsRepositoryTest {
         repo.setShowHidden(true)
         repo.setSortMode(SortMode.SIZE)
         assertEquals(AccentColor.PURPLE, repo.settings.first().accentColor)
+    }
+
+    // ---- v1.11: font picker ----
+
+    @Test
+    fun `font defaults to Manrope on first launch - the shipped look`() = runTest {
+        assertEquals(AppFont.MANROPE, newRepo().settings.first().appFont)
+    }
+
+    @Test
+    fun `setAppFont persists the choice and reads it back`() = runTest {
+        val repo = newRepo()
+        repo.setAppFont(AppFont.TOAD)
+        assertEquals(AppFont.TOAD, repo.settings.first().appFont)
+        repo.setAppFont(AppFont.SYSTEM)
+        assertEquals(AppFont.SYSTEM, repo.settings.first().appFont)
+    }
+
+    @Test
+    fun `corrupt font value falls back to the default`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit { it[stringPreferencesKey("app_font")] = "NOT_A_FONT" }
+        assertEquals(AppFont.DEFAULT, repo.settings.first().appFont)
+    }
+
+    @Test
+    fun `font choice survives an unrelated write`() = runTest {
+        val repo = newRepo()
+        repo.setAppFont(AppFont.JETBRAINS_MONO)
+        repo.setShowHidden(true)
+        repo.setSortMode(SortMode.SIZE)
+        assertEquals(AppFont.JETBRAINS_MONO, repo.settings.first().appFont)
     }
 
     @Test

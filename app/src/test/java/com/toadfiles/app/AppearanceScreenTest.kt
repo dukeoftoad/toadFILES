@@ -138,4 +138,29 @@ class AppearanceScreenTest {
             )
         }
     }
+
+    @Test
+    fun `font picker lists every family in its own letterforms`() {
+        render()
+        // The Font card sits between the theme gallery and Motion; scroll the ONE
+        // vertical scroller to a label unique to the font rows (same targeted-scroll
+        // discipline as awaitNavigationCard — never an unqualified swipe).
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("JetBrains Mono").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("appearance_scroll")
+            .performScrollToNode(hasText("JetBrains Mono"))
+        compose.waitForIdle()
+
+        // Every family renders a row (persistence of the pick itself is covered by
+        // SettingsRepositoryTest's setAppFont cases; a click-through poll here would
+        // nest runBlocking inside waitUntil on the Robolectric main thread, which
+        // deadlocks the test JVM's dispatcher state for every later runBlocking).
+        listOf("System", "Manrope", "Toad", "Inter", "Space Grotesk", "JetBrains Mono")
+            .forEach { label ->
+                compose.waitUntil(5_000) {
+                    compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()
+                }
+            }
+    }
 }
