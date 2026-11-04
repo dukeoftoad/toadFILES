@@ -137,6 +137,10 @@ fun BrowseScreen(
     bottomPadding: Dp,
     onNavigateUp: () -> Unit,
     revealName: String? = null,
+    // v1.11: "Open with toadFILES" handoff — archive to open the extract-or-open
+    // dialog for, plus (cache-copied streams only) the real folder to extract into.
+    openArchivePath: String? = null,
+    archiveDestPath: String? = null,
     vm: BrowseViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -183,6 +187,26 @@ fun BrowseScreen(
     var pendingArchiveTap by remember { mutableStateOf<File?>(null) }
     /** Archive being routed through Browse so the user can choose its destination folder. */
     var pendingExtractTo by remember { mutableStateOf<File?>(null) }
+
+    // ---- Incoming "Open with toadFILES" handoff (v1.11) ----
+    // MainActivity resolved the handed-over uri to a real file and routed it here.
+    // Without archive_dest it gets the SAME extract-or-open dialog a row tap shows
+    // (extract next to the archive, or hand it to a viewer app); with archive_dest
+    // (stream copies that only exist in the cache) extraction goes straight into
+    // that user-visible folder, conflict dialog included. Consumed once, like the
+    // reveal pinpoint below, so rotation never replays it.
+    var consumedOpenArchive by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(openArchivePath) {
+        val target = openArchivePath?.takeIf { it != consumedOpenArchive } ?: return@LaunchedEffect
+        consumedOpenArchive = target
+        val archive = File(target)
+        if (!archive.isFile) {
+            vm.requestToast("That file is no longer available")
+            return@LaunchedEffect
+        }
+        val dest = archiveDestPath
+        if (dest != null) vm.extractZipInto(archive, File(dest)) else pendingArchiveTap = archive
+    }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {

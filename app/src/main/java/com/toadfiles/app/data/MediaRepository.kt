@@ -9,7 +9,9 @@ import android.provider.MediaStore
 import com.toadfiles.app.domain.CategorySummary
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
+import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.util.Intents
 import java.io.File
 
 /**
@@ -93,7 +95,9 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
                         name = c.getString(iName) ?: "?",
                         size = c.getLong(iSize),
                         dateModified = c.getLong(iDate) * 1000L,
-                        mime = c.getString(iMime) ?: "application/octet-stream",
+                        // Same honest mime as recent(): a blank/generic MediaStore mime
+                        // hides the real handler (the installer for an .apk).
+                        mime = recentMime(c.getString(iMime), c.getString(iName)),
                         category = category,
                         data = data,
                     )
@@ -158,21 +162,19 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
                 val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                 while (c.moveToNext() && out.size < limit) {
                     val id = c.getLong(iId)
-                    val type = c.getInt(iType)
-                    val category = when (type) {
-                        MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> FileCategory.IMAGES
-                        MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> FileCategory.VIDEOS
-                        MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO -> FileCategory.AUDIO
-                        else -> FileCategory.DOCS
-                    }
+                    val name = c.getString(iName) ?: "?"
+                    // v1.11: rows MediaStore leaves untyped (APKs, archives) used to be
+                    // lumped into DOCS, so the All tab and the type chips disagreed —
+                    // an APK matched no filter it belongs to ("unrecognised").
+                    val category = categoryForRecent(c.getInt(iType), name)
                     val data = if (iData >= 0) c.getString(iData) else null
                     fun entry(): MediaEntry = MediaEntry(
                         id = id,
                         uri = ContentUrisHelper.uriFor(category, id),
-                        name = c.getString(iName) ?: "?",
+                        name = name,
                         size = c.getLong(iSize),
                         dateModified = c.getLong(iDate) * 1000L,
-                        mime = c.getString(iMime) ?: "application/octet-stream",
+                        mime = recentMime(c.getString(iMime), name),
                         category = category,
                         data = data,
                     )
@@ -401,6 +403,41 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
         /** Volume roots as MediaStore DATA paths see them: "/storage/emulated/0",
          *  "/storage/0000-0001", … (see [com.toadfiles.app.data.FileRepository.roots]). */
         private val VOLUME_ROOT_PATTERN = "^/storage/(?:emulated/\\d+|[^/]+)"
+
+        /**
+         * Recent-tab typing for rows MediaStore does not put in a media bucket
+         * (MEDIA_TYPE_NONE — APKs, archives, plain files). The old "everything else
+         * is Docs" bucket made an APK list under no type filter it actually belongs
+         * to (owner report: an APK in Recent looked "unrecognised"). Reuses
+         * [FilterMode]'s extension sets, so a row the APKs/Archives FILTER matches is
+         * typed the same way here — one source of truth for both surfaces.
+         */
+        fun categoryForRecent(mediaType: Int, name: String): FileCategory = when (mediaType) {
+            MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> FileCategory.IMAGES
+            MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> FileCategory.VIDEOS
+            MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO -> FileCategory.AUDIO
+            else -> when {
+                FilterMode.APKS.matches(name) -> FileCategory.APKS
+                FilterMode.ARCHIVES.matches(name) -> FileCategory.ARCHIVES
+                else -> FileCategory.DOCS
+            }
+        }
+
+        /**
+         * MediaStore leaves sideloaded files (APKs, archives written by some tools)
+         * with a blank or generic mime; handing that to the system resolver hides the
+         * real handler — the package installer for an .apk (owner report: an APK in
+         * Recent opened as an "unrecognised" file). Blank/generic values fall back to
+         * the same extension mapping every open in the app uses ([Intents.mimeOf]).
+         */
+        fun recentMime(raw: String?, name: String): String {
+            val mime = raw?.trim()
+            return if (!mime.isNullOrEmpty() && !mime.equals("application/octet-stream", ignoreCase = true)) {
+                mime.lowercase()
+            } else {
+                Intents.mimeOf(File(name))
+            }
+        }
 
         /** The trash folder of any KNOWN volume root — exactly where [Trash] creates
          *  it. Root-scoped on purpose (D11): a user's own folder named
