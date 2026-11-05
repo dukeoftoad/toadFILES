@@ -318,15 +318,25 @@ val ToadFileGeneric: ImageVector = fileIcon("ToadFileGeneric") {
 /**
  * The file-type icon family used across Browse/Recent/Categories. Plain function
  * (no composition state) so non-composable helpers like `iconFor` can call it.
+ *
+ * Audit A18: the extension sets were rebuilt (6-7 allocations) on EVERY call — once
+ * per visible row per recomposition; they are top-level constants now.
  */
+private val IMAGE_EXTS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg")
+private val VIDEO_EXTS = setOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v")
+private val AUDIO_EXTS = setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "amr")
+private val ARCHIVE_EXTS = setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz")
+private val DOC_EXTS = setOf(
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "htm", "html",
+)
+
 fun toadFileIconFor(extension: String): ImageVector = when (extension.lowercase()) {
-    in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg") -> ToadFileImage
-    in setOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v") -> ToadFileVideo
-    in setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "amr") -> ToadFileAudio
-    in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz") -> ToadFileArchive
+    in IMAGE_EXTS -> ToadFileImage
+    in VIDEO_EXTS -> ToadFileVideo
+    in AUDIO_EXTS -> ToadFileAudio
+    in ARCHIVE_EXTS -> ToadFileArchive
     "apk" -> ToadFileApk
-    in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv",
-        "htm", "html") -> ToadFileDoc
+    in DOC_EXTS -> ToadFileDoc
     else -> ToadFileGeneric
 }
 

@@ -102,6 +102,8 @@ import com.toadfiles.app.ToadViewModelFactory
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.data.Clipboard
+import com.toadfiles.app.ui.Routes
+import com.toadfiles.app.ui.TabReselect
 import com.toadfiles.app.ui.components.TransferBar
 import com.toadfiles.app.ui.components.blinkTwice
 import com.toadfiles.app.ui.components.ApkInstallDialog
@@ -212,6 +214,14 @@ fun BrowseScreen(
         }
         val dest = archiveDestPath?.let(::File)
         pendingArchiveTap = ArchiveTap(archive, dest)
+    }
+    // v2.1.0 tab re-tap: the second tap on the active Browse tab jumps back to the
+    // folder this tab first opened (its top level), dropping any in-tree search.
+    // Switching tabs still restores the last folder — that behavior stays.
+    LaunchedEffect(Unit) {
+        TabReselect.events.collect { route ->
+            if (route == Routes.BROWSE) vm.resetToRoot()
+        }
     }
 
     LaunchedEffect(state.toast) {
@@ -332,7 +342,7 @@ fun BrowseScreen(
                     },
                     actions = {
                         TextButton(
-                            enabled = state.dir?.isDirectory == true && state.dir?.canWrite() == true,
+                            enabled = state.dirWritable,
                             onClick = {
                                 val archive = pendingExtractTo ?: return@TextButton
                                 val destination = state.dir ?: return@TextButton
@@ -706,7 +716,7 @@ fun BrowseScreen(
                                     isFavorite = item.file.path in state.favoritePaths,
                                     highlight = blinkOn && item.file.name == activeReveal,
                                     subtitle = if (item.isDir) null else
-                                        "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
+                                        "${Format.size(item.size)} · ${Format.dateTime(item.lastModified)}",
                                     onClick = { openItem(item) },
                                     onLongClick = { longPressItem(item) },
                                     onMore = { pendingActionSheet = item },

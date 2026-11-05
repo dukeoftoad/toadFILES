@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicLong
 
 data class RecentUiState(
     /** Active type filter; null = All. */
@@ -76,8 +77,10 @@ class RecentViewModel(
     private val _state = MutableStateFlow(RecentUiState())
     val state: StateFlow<RecentUiState> = _state
 
-    /** Monotonically increasing request id; only the newest query may apply its result. */
-    private var requestSeq = 0L
+    /** Monotonically increasing request id; only the newest query may apply its result.
+     *  Atomic (audit A8): op completions bump it from IO coroutines — the same
+     *  interleaved-increment hazard Categories' two Long tokens had. */
+    private val requestSeq = AtomicLong(0L)
     private var queryJob: Job? = null
 
     /** Monotonic id of the current undo offer; see [RecentUiState.undoOfferSeq]. */
@@ -104,7 +107,7 @@ class RecentViewModel(
     }
 
     fun refresh() {
-        val token = ++requestSeq
+        val token = requestSeq.incrementAndGet()
         val filter = _state.value.filter
         _state.update { it.copy(loading = true) }
         queryJob?.cancel()
@@ -122,7 +125,7 @@ class RecentViewModel(
                 // A slow older query must never overwrite a newer result: drop the
                 // outcome when a newer request started or the filter moved on while
                 // this one was in flight.
-                if (token != requestSeq || s.filter != filter) return@update s
+                if (token != requestSeq.get() || s.filter != filter) return@update s
                 // Drop selections that no longer exist after a refresh.
                 val live = entries.map { it.uri.toString() }.toSet()
                 s.copy(entries = entries, loading = false, selection = s.selection.intersect(live))
@@ -281,9 +284,14 @@ class RecentViewModel(
 
     private fun runExtract(file: File, target: File, replace: Boolean = false, password: CharArray? = null) {
         val progressTitle = "Extracting ${file.name}"
-        _state.update { it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
+        // Audit A2: the header parse is disk I/O — the overlay starts indeterminate;
+        // the op coroutine publishes the determinate total once the directory is read.
+        _state.update { it.copy(progress = progressTitle to OpProgress(0, -1, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.extract(file, target, replace, password = password, onProgress = onP) },
+            op = { onP ->
+                onP(OpProgress(0, ArchiveOps.entryCount(file) ?: -1, ""))
+                ArchiveOps.extract(file, target, replace, password = password, onProgress = onP)
+            },
             onProgress = { p -> _state.update { it.copy(progress = progressTitle to p) } },
             onDone = { r ->
                 if (r.passwordRequired) {
@@ -337,6 +345,18 @@ class RecentViewModel(
                 requestToast("Could not delete the archive")
             }
         }
+    }
+
+    // ---------- tab re-tap (v2.1.0) ----------
+
+    /**
+     * Tab re-tap: drop the type filter back to All (the tab's top level) and clear the
+     * selection. Switching tabs still restores the filtered view — this is the explicit
+     * "take me back up" gesture.
+     */
+    fun resetToRoot() {
+        clearSelection()
+        if (_state.value.filter != null) setFilter(null)
     }
 
     fun cancelOp() = ops.cancel { _state.update { it.copy(progress = null) } }

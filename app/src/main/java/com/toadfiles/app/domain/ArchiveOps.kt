@@ -38,11 +38,23 @@ enum class ArchiveFormat(val extension: String, val label: String) {
  * it is extractable when the stripped type is, [extract] enters the set through it, and
  * [compress] can split its own output via [volumeBytes]. A volume set with a gap fails
  * before anything is written.
+ *
+ * v2.1.0 (owner report): app bundles extract like the zip containers they are —
+ * .xapk / .apkm are ZIP archives holding the real .apk files (base + splits), and
+ * until now tapping one routed to a useless external viewer with no way to pull
+ * the APKs out. They are read-only targets: [compress] still refuses them (a bundle
+ * is never a compression SOURCE FORMAT), only [canExtract]/[isArchive]/[extract]
+ * grew. A plain .apk deliberately stays OFF the list — its honest action is the
+ * package installer, not unpacking dex/resources.
  */
 object ArchiveOps {
 
     /** Extensions toadFILES can extract. */
     private val EXTRACTABLE = setOf("zip", "7z")
+
+    /** App-bundle containers that are structurally zips — extraction dispatches to
+     *  the zip pipeline; creation does not apply. */
+    private val APP_BUNDLES = setOf("xapk", "apkm")
 
     private const val MERGE_BUFFER = 64 * 1024
 
@@ -55,13 +67,13 @@ object ArchiveOps {
      *  v1.8.0: also true for a volume START whose stripped type is extractable
      *  ("dcim.7z.001" → true; "dcim.7z.002" → false — the set is entered via ".001"). */
     fun canExtract(name: String): Boolean =
-        extension(name) in EXTRACTABLE ||
+        extension(name) in EXTRACTABLE || extension(name) in APP_BUNDLES ||
             (VolumeSupport.isVolumeStart(name) && extension(VolumeSupport.baseName(name)) in EXTRACTABLE)
 
     /** True when this name is itself an archive of a format we can create — v1.8.0:
      *  volume starts of such archives too, so long-press action sheets offer Extract. */
     fun isArchive(name: String): Boolean =
-        extension(name) == "zip" || extension(name) == "7z" ||
+        extension(name) in EXTRACTABLE || extension(name) in APP_BUNDLES ||
             (VolumeSupport.isVolumeStart(name) && extension(VolumeSupport.baseName(name)) in EXTRACTABLE)
 
     /** Total entry count when it is known upfront (zip central directory, 7z header),
@@ -80,7 +92,7 @@ object ArchiveOps {
             }
         }
         return when (extension(archive.name)) {
-            "zip" -> runCatching { java.util.zip.ZipFile(archive).use { it.size() } }.getOrNull()
+            "zip", in APP_BUNDLES -> runCatching { java.util.zip.ZipFile(archive).use { it.size() } }.getOrNull()
             "7z" -> SevenZipSupport.entryCount(archive)
             else -> null
         }
@@ -109,7 +121,8 @@ object ArchiveOps {
             return extractVolumes(archive, targetDir, replace, limits, password, onProgress)
         }
         return when (extension(archive.name)) {
-            "zip" -> ZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
+            "zip", in APP_BUNDLES ->
+                ZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
             "7z" -> SevenZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
             else -> OpResult(0, 0, 1, false, listOf("${archive.name}: unsupported archive type"))
         }

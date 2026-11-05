@@ -373,4 +373,51 @@ class RecentViewModelTest {
         relaunched.toggleLayout()
         await { relaunched.state.value.layout == com.toadfiles.app.domain.BrowseLayout.LIST }
     }
+
+    // ---------- v2.1.0: tab re-tap + A2 indeterminate start ----------
+
+    @Test
+    fun `resetToRoot drops the type filter and selection`() {
+        vm.toggleSelection(entry(1L, "note.txt"))
+        assertEquals(1, vm.state.value.selection.size)
+
+        vm.setFilter(FileCategory.DOCS)
+        await { vm.state.value.filter == FileCategory.DOCS }
+
+        vm.resetToRoot()
+        await { vm.state.value.filter == null }
+        assertEquals("the top level of Recent is All, unselected", 0, vm.state.value.selection.size)
+    }
+
+    @Test
+    fun `resetToRoot on the unfiltered tab only clears the selection`() {
+        vm.toggleSelection(entry(2L, "a.txt"))
+        assertEquals(1, vm.state.value.selection.size)
+
+        vm.resetToRoot()
+        await { vm.state.value.selection.isEmpty() }
+        assertNull("filter must stay All — it was never set", vm.state.value.filter)
+    }
+
+    @Test
+    fun `extract progress starts indeterminate on the caller thread - A2`() {
+        // Audit A2 regression: the archive header parse (entryCount) used to run on the
+        // tap handler BEFORE the progress overlay existed. The contract now: the tap
+        // returns with an INDETERMINATE overlay and the determinate total arrives from
+        // inside the op coroutine. A never-advanced scheduler freezes all IO — the
+        // indeterminate state must already be published.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val root = File(context.cacheDir, "a2-${System.nanoTime()}").apply { mkdirs() }
+        try {
+            val std = StandardTestDispatcher()
+            val frozen = RecentViewModel(container, ioDispatcher = std, media = RecordingMedia())
+            makeZip(File(root, "bundle.zip"), mapOf("a.txt" to "one".toByteArray()))
+            frozen.extractZip(File(root, "bundle.zip"))
+            val p = frozen.state.value.progress
+            assertNotNull("the overlay exists immediately, with no IO", p)
+            assertEquals(-1, p!!.second.total)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

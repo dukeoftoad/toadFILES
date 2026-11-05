@@ -42,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,7 +76,9 @@ import com.toadfiles.app.ui.theme.ToadFileVideo
 import com.toadfiles.app.ui.theme.ToadFolder
 import com.toadfiles.app.ui.theme.LocalToadMotion
 import com.toadfiles.app.ui.theme.toadFileIconFor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
 import coil3.compose.AsyncImage
 
@@ -171,7 +174,7 @@ fun FileRow(
                 )
                 Text(
                     subtitle ?: run {
-                        if (item.isDir) "Folder" else "${Format.size(item.size)} · ${Format.date(item.lastModified)}"
+                        if (item.isDir) "Folder" else "${Format.size(item.size)} · ${Format.dateTime(item.lastModified)}"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -220,11 +223,19 @@ fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
  * Video thumbnail from MediaMetadataRetriever with a tiny in-memory cache (no extra dependency).
  * The state keys on the file's identity stamp (path + mtime/size), so a video replaced in
  * place re-decodes its frame instead of showing a stale one (audit finding P3.2).
+ *
+ * Audit A6: [VideoThumbs.stampFor] is a Files.readAttributes stat — it moved out of
+ * composition onto IO (produceState); a recomposing grid cell no longer pays a syscall,
+ * it just reads the cached stamp state until the stat (one per distinct path) lands.
  */
 @Composable
 fun VideoThumb(path: String, modifier: Modifier = Modifier) {
-    val stamp = VideoThumbs.stampFor(path)
-    var bitmap by remember(path, stamp) { mutableStateOf(VideoThumbs.peek(path, stamp)) }
+    val stamp by produceState<String?>(initialValue = null, path) {
+        value = withContext(Dispatchers.IO) { VideoThumbs.stampFor(path) }
+    }
+    var bitmap by remember(path, stamp) {
+        mutableStateOf(stamp?.let { VideoThumbs.peek(path, it) })
+    }
     LaunchedEffect(path, stamp) {
         if (bitmap == null) bitmap = VideoThumbs.load(File(path))
     }

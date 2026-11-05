@@ -216,4 +216,77 @@ class ArchiveOpsTest {
         assertFalse(x.passwordRequired)
         assertEquals("zips can't encrypt here", File(target, "plain.txt").readText())
     }
+
+    // ---------- v2.1.0 app bundles (.xapk / .apkm) ----------
+
+    @Test
+    fun `app bundles are extractable, a plain apk is not`() {
+        // The bundle extensions ARE zip containers; a plain .apk deliberately is NOT —
+        // its honest action is the package installer, not unpacking dex/resources.
+        assertTrue(ArchiveOps.canExtract("app.xapk"))
+        assertTrue(ArchiveOps.canExtract("APP.APKM"))
+        assertTrue(ArchiveOps.isArchive("app.xapk"))
+        assertFalse(ArchiveOps.canExtract("game.apk"))
+        assertFalse(ArchiveOps.isArchive("game.apk"))
+        assertFalse(ArchiveOps.canExtract("c.rar"))
+    }
+
+    @Test
+    fun `app bundle entry count reads the zip central directory`() {
+        val dir = tmp.newFolder("xapk-count")
+        val bundle = File(dir, "bundle.xapk")
+        ZipOutputStream(FileOutputStream(bundle)).use { zos ->
+            listOf("manifest.json", "base.apk", "split_config.apk").forEach {
+                zos.putNextEntry(ZipEntry(it))
+                zos.write("x".toByteArray())
+                zos.closeEntry()
+            }
+        }
+        assertEquals(3, ArchiveOps.entryCount(bundle))
+    }
+
+    @Test
+    fun `extracting an app bundle yields the apk files inside, whole`() = runBlocking {
+        // THE v2.1.0 owner scenario, end to end: an app bundle that CONTAINS apks must
+        // extract those apks as intact files — never unpacked, never mangled.
+        val dir = tmp.newFolder("xapk-e2e")
+        val apkBytes = stubApkBytes() // a real zip playing the role of an apk
+        val bundle = File(dir, "App Bundle.xapk")
+        ZipOutputStream(FileOutputStream(bundle)).use { zos ->
+            zos.putNextEntry(ZipEntry("manifest.json"))
+            zos.write("""{"name":"App"}""".toByteArray())
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("App.apk"))
+            zos.write(apkBytes)
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("icon.png"))
+            zos.write(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+            zos.closeEntry()
+        }
+
+        assertEquals(3, ArchiveOps.entryCount(bundle))
+        val target = File(dir, "out").apply { mkdirs() }
+        val r = ArchiveOps.extract(bundle, target, replace = false)
+
+        assertEquals(0, r.failed)
+        assertEquals(3, r.succeeded)
+        assertTrue("App.apk must come out as ONE whole file", File(target, "App.apk").isFile)
+        assertEquals(apkBytes.size.toLong(), File(target, "App.apk").length())
+        assertTrue(apkBytes.contentEquals(File(target, "App.apk").readBytes()))
+        assertTrue(File(target, "manifest.json").isFile)
+    }
+
+    /** A minimal real zip (local file + central directory) standing in for an .apk. */
+    private fun stubApkBytes(): ByteArray {
+        val f = File.createTempFile("stub-apk", ".zip")
+        ZipOutputStream(FileOutputStream(f)).use { zos ->
+            zos.putNextEntry(ZipEntry("classes.dex"))
+            zos.write(ByteArray(2048) { (it % 251).toByte() })
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("AndroidManifest.xml"))
+            zos.write("<manifest/>".toByteArray())
+            zos.closeEntry()
+        }
+        return f.readBytes().also { f.delete() }
+    }
 }

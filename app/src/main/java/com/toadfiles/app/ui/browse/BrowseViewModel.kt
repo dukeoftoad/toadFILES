@@ -57,6 +57,10 @@ data class BrowseUiState(
     val loading: Boolean = false,
     val error: String? = null,
     val breadcrumbs: List<File> = emptyList(),
+    /** Writability of [dir], computed at listing time on IO (audit A6): the
+     *  destination-picker's "Choose this folder" used to stat during TopAppBar
+     *  composition on every recomposition. */
+    val dirWritable: Boolean = false,
     val selection: Set<File> = emptySet(),
     val query: String = "",
     val searching: Boolean = false,
@@ -239,18 +243,25 @@ class BrowseViewModel(
             )
         }
         loadJob?.cancel()
+        // Audit A9: a navigation also ends any in-tree search — the recursive
+        // searchTree otherwise keeps walking directories to its limit for a result
+        // that can never apply (the token guard only discards it afterwards).
+        searchJob?.cancel()
         loadJob = viewModelScope.launch(ioDispatcher) {
             if (!dir.isDirectory || !dir.canRead()) {
                 applyListing(dir, token, settings) {
-                    it.copy(loading = false, items = emptyList(), error = "Folder is not readable")
+                    it.copy(loading = false, items = emptyList(), error = "Folder is not readable", dirWritable = false)
                 }
                 return@launch
             }
+            // Audit A6: writability is one stat — take it here on IO where the listing
+            // already runs, instead of in TopAppBar composition on every recomposition.
+            val writable = dir.canWrite()
             val items = fileRepo.list(dir, settings.showHidden)
                 .sortedWith(Sorting.comparator(settings.sortMode, settings.sortOrder))
             ensureActive() // honour a cancel that arrived while the listing was read
             applyListing(dir, token, settings) {
-                it.copy(loading = false, items = items)
+                it.copy(loading = false, items = items, dirWritable = writable)
             }
         }
     }
@@ -299,6 +310,23 @@ class BrowseViewModel(
     }
 
     fun clearSelection() = _state.update { it.copy(selection = emptySet()) }
+
+    /**
+     * Tab re-tap (v2.1.0): back to the folder this Browse instance first opened — the
+     * tab's own top level — dropping any in-tree search on the way (load() cancels the
+     * search job). Still on the root, it only clears the selection / search, so a
+     * double-tap never reloads the same listing for nothing.
+     */
+    fun resetToRoot() {
+        val root = browseRoot ?: return
+        val current = _state.value.dir
+        if (current != null && current.path == root.path) {
+            if (_state.value.query.isNotBlank()) setQuery("") // restores the real listing
+            else clearSelection()
+            return
+        }
+        load(root)
+    }
 
     /** Selects only the items the user can actually see (respects the active filter). */
     fun selectAll() = _state.update { s ->
@@ -572,15 +600,20 @@ class BrowseViewModel(
 
     fun createFolder(name: String) {
         val dir = _state.value.dir ?: return
-        val created = fileRepo.newFolder(dir, name)
-        _state.update {
-            it.copy(
-                pendingNewFolder = false,
-                toast = if (created != null) "Folder \"${created.name}\" created"
-                else "Could not create folder \"${name.trim()}\"",
-            )
+        // Audit A3: mkdir is a disk write — dispatch it like every other op instead of
+        // blocking the tap handler on slow FUSE storage. The dialog closes right away;
+        // the toast and the re-list follow when the write actually completed.
+        _state.update { it.copy(pendingNewFolder = false) }
+        viewModelScope.launch(ioDispatcher) {
+            val created = fileRepo.newFolder(dir, name)
+            _state.update {
+                it.copy(
+                    toast = if (created != null) "Folder \"${created.name}\" created"
+                    else "Could not create folder \"${name.trim()}\"",
+                )
+            }
+            load(dir)
         }
-        load(dir)
     }
 
     fun requestRename(file: File) = _state.update { it.copy(pendingRename = file) }
@@ -755,7 +788,11 @@ class BrowseViewModel(
             it.copy(
                 progress = progressTitle to OpProgress(
                     0,
-                    if (kind == OpKind.ZIP_EXTRACT) ArchiveOps.entryCount(sources.first()) ?: 1 else sources.size,
+                    // Audit A2: the archive header parse moved off the tap handler —
+                    // the overlay starts indeterminate; the determinate total is
+                    // published from inside the op coroutine once the central
+                    // directory has been read on IO.
+                    if (kind == OpKind.ZIP_EXTRACT) -1 else sources.size,
                     "",
                 ),
             )
@@ -774,6 +811,9 @@ class BrowseViewModel(
                         File(parent, PathSafety.uniqueName(parent, target.name))
                     } else target
                     extractDest = dest
+                    // Audit A2: header parse on IO — publish the determinate total
+                    // before the first entry tick so the bar is honest from tick one.
+                    onP(OpProgress(0, ArchiveOps.entryCount(sources.first()) ?: -1, sources.first().name))
                     ArchiveOps.extract(sources.first(), dest, strategy == ConflictStrategy.REPLACE, password = null, onProgress = onP)
                 }
             }
@@ -1085,7 +1125,9 @@ class BrowseViewModel(
         val dir = _state.value.dir
         val separate = targets.size > 1
         val title = if (format == ArchiveFormat.SEVEN_Z) "Compressing" else "Zipping"
-        _state.update { it.copy(progress = title to OpProgress(0, files.size, "")) }
+        // Audit A4: the real totals are per-archive file counts — unknown without an
+        // IO walk, so the overlay starts indeterminate and the first tick fixes it.
+        _state.update { it.copy(progress = title to OpProgress(0, -1, "")) }
         opJob = viewModelScope.launch(ioDispatcher) {
             var succeeded = 0
             var skipped = 0
@@ -1095,15 +1137,21 @@ class BrowseViewModel(
             var base = 0
             for (i in targets.indices) {
                 val srcs = if (separate) listOf(files[i]) else files
+                var archiveTotal = 0
                 val r = ArchiveOps.compress(srcs, targets[i], format, level, password = password, volumeBytes = volumeBytes) { p ->
-                    _state.update { it.copy(progress = title to OpProgress(base + p.done, files.size, p.currentItem)) }
+                    // Audit A4: forward the pipeline's OWN totals — p.done counts files
+                    // added across every archive (p.total = that archive's file count);
+                    // substituting files.size (selected items) showed "37 of 1 items"
+                    // and clamped the bar at the first tick.
+                    archiveTotal = p.total
+                    _state.update { it.copy(progress = title to OpProgress(base + p.done, base + p.total, p.currentItem)) }
                 }
                 succeeded += r.succeeded
                 skipped += r.skipped
                 failed += r.failed
                 if (r.cancelled) cancelled = true
                 failures += r.failures
-                base += r.succeeded
+                base += archiveTotal
                 // Delete-after-compress honors the dialog checkbox (initialized from the
                 // persisted setting): per archive, only a fully successful run trashes
                 // that archive's own source — a failed sibling never deletes another's.
@@ -1225,10 +1273,15 @@ class BrowseViewModel(
         // The overlay names the archive — "Extracting" alone is ambiguous when several
         // archives sit in the same folder. resultTitle stays the short "Extracting".
         val progressTitle = "Extracting ${file.name}"
+        // Audit A2: the header parse is disk I/O — the overlay starts indeterminate and
+        // the coroutine publishes the determinate total once the directory is read.
         _state.update {
-            it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, ""))
+            it.copy(progress = progressTitle to OpProgress(0, -1, ""))
         }
         opJob = viewModelScope.launch(ioDispatcher) {
+            _state.update {
+                it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: -1, ""))
+            }
             val r = ArchiveOps.extract(file, target, replace, password = password) { p ->
                 _state.update { it.copy(progress = progressTitle to p) }
             }
