@@ -266,4 +266,36 @@ class IntentsTest {
         val cm = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         assertEquals(f.absolutePath, cm.primaryClip!!.getItemAt(0).text.toString())
     }
+
+    // ---- Audit A16: the URL handoff is https-only ----
+
+    @Test
+    fun `openUrl launches ACTION_VIEW for https links - A16`() {
+        assertTrue(Intents.openUrl(activity, "https://github.com/dukeoftoad/toadFILES"))
+        val intent = lastStartedIntent()
+        assertEquals(Intent.ACTION_VIEW, intent.action)
+        assertEquals("https://github.com/dukeoftoad/toadFILES", intent.data.toString())
+    }
+
+    @Test
+    fun `openUrl accepts uppercase https schemes - A16`() {
+        assertTrue(Intents.openUrl(activity, "HTTPS://github.com/dukeoftoad/toadFILES/releases"))
+        // The gate lowercases for the scheme check; the launched intent keeps the
+        // caller's original URL untouched.
+        assertEquals(
+            "HTTPS://github.com/dukeoftoad/toadFILES/releases",
+            lastStartedIntent().data.toString(),
+        )
+    }
+
+    @Test
+    fun `openUrl refuses cleartext http and non-web schemes - A16`() {
+        assertFalse(Intents.openUrl(activity, "http://github.com/dukeoftoad/toadFILES"))
+        assertFalse(Intents.openUrl(activity, "ftp://example.com/pub/tool.apk"))
+        assertFalse(Intents.openUrl(activity, "file:///etc/hosts"))
+        assertFalse(Intents.openUrl(activity, "content://media/external/images/1"))
+        assertFalse(Intents.openUrl(activity, "not a url at all"))
+        // None of the refused calls may have launched anything.
+        assertEquals(null, Shadows.shadowOf(activity).nextStartedActivity)
+    }
 }

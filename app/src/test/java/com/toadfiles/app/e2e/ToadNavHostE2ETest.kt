@@ -197,6 +197,65 @@ class ToadNavHostE2ETest {
         compose.onNodeWithContentDescription("Back").assertExists()
     }
 
+    // ---------- v2.1.1: owner regression — Browse tab → Home tab ----------
+
+    /**
+     * The owner's report: in Browse, tapping the Home tab "is not working".
+     * Walks the exact flow — Browse tab, drill INTO a folder, tap Home — and
+     * pins BOTH contracts: Home must come up, and coming back to Browse must
+     * restore the drill-in (the agreed keep-state feature).
+     */
+    @Test
+    fun `browse drill-in then home tab lands home and browse restores the drill-in`() {
+        val root = Environment.getExternalStorageDirectory()
+        root.mkdirs()
+        val folder = File(root, "e2e_nav_folder")
+        folder.mkdirs()
+        File(folder, "e2e_nested_note.txt").writeText("nested")
+        try {
+            compose.setContent { ToadTheme { ToadNavHost() } }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            compose.onNodeWithTag("tab_Browse").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("e2e_nav_folder").fetchSemanticsNodes().isNotEmpty()
+            }
+            // Drill INTO the folder (internal Browse navigation, no back-stack push).
+            compose.onNodeWithText("e2e_nav_folder").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("e2e_nested_note.txt").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            // THE regression: Browse tab → Home tab must land on Home.
+            compose.onNodeWithTag("tab_Home").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("tab_Home").assertIsSelected()
+
+            // Agreed feature: switching BACK to Browse restores the drill-in.
+            compose.onNodeWithTag("tab_Browse").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("e2e_nested_note.txt").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            // And a second leave still works.
+            compose.onNodeWithTag("tab_Home").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()
+            }
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
+    // Drawer mode has no symmetric contract to pin: Browse's top bar is a Back
+    // arrow (no hamburger), and a Back-arrow pop is DESTRUCTIVE by the Android
+    // navigation contract — it saves no state, so a drawer Browse re-open starts
+    // fresh at the tab's start folder. State restoration is a tab-switch feature.
+
     @Test
     fun `side menu mode has no bottom bar and carries every destination`() {
         setNavStyleBlocking(NavStyle.SIDE_MENU)

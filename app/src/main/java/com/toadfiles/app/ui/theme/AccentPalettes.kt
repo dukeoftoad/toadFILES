@@ -15,8 +15,47 @@ import com.toadfiles.app.domain.AccentColor
  *
  * `AccentColor.TOAD` exactly reproduces the v1.0–v1.3 moss/mud palette defined inline in
  * [Theme.kt] so existing users see no visual regression after upgrading.
+ *
+ * Audit A7 (v2.1.1): the redesigned UI reads the container roles (`surfaceContainer*`,
+ * `background`) — TransferBar's drag handle, Settings/Appearance cards. None of the
+ * accent schemes used to define them, so every scheme except the two TOAD ones fell
+ * back to the M3 *baseline* palette for those roles: purple-tinted grays that visibly
+ * clashed with warm CLASSIC surfaces in dark mode. Every scheme now derives `background`
+ * and the five `surfaceContainer*` tones from its own surface/surfaceVariant pair (same
+ * hue family, monotone in tone), so container surfaces stay in the accent's voice.
  */
 object AccentPalettes {
+
+    /** Linear interpolation a→b in sRGB; good enough for tone steps between two
+     *  already-harmonized scheme colors. */
+    private fun mix(a: Color, b: Color, t: Float): Color = Color(
+        red = a.red + (b.red - a.red) * t,
+        green = a.green + (b.green - a.green) * t,
+        blue = a.blue + (b.blue - a.blue) * t,
+        alpha = 1f,
+    )
+
+    /**
+     * A7: fills the container-role holes every scheme had. Tones follow the M3
+     * neutral ladder — light: lowest(100) low(96) container(94) high(92) highest(90)
+     * with the surface near 98; dark: lowest(4) low(10) container(12) high(17)
+     * highest(22) with the surface near 6–10 — approximated by mixing the scheme's
+     * own surface toward its surfaceVariant (same accent hue) or, for the dark
+     * lowest tone, toward black.
+     */
+    private fun ColorScheme.withDerivedSurfaces(dark: Boolean): ColorScheme {
+        val s = surface
+        val v = surfaceVariant
+        return copy(
+            background = s,
+            onBackground = onSurface,
+            surfaceContainerLowest = if (dark) mix(s, Color.Black, 0.30f) else mix(s, v, 0.15f),
+            surfaceContainerLow = mix(s, v, if (dark) 0.14f else 0.32f),
+            surfaceContainer = mix(s, v, if (dark) 0.22f else 0.45f),
+            surfaceContainerHigh = mix(s, v, if (dark) 0.36f else 0.60f),
+            surfaceContainerHighest = mix(s, v, if (dark) 0.52f else 0.80f),
+        )
+    }
 
     /** Original toad palette: damp moss greens with a warm mud accent. */
     private val ToadLight = lightColorScheme(
@@ -298,26 +337,29 @@ object AccentPalettes {
         outline = Color(0xFF9F8C90),
     )
 
-    fun schemeFor(accent: AccentColor, dark: Boolean): ColorScheme = if (dark) {
-        when (accent) {
-            AccentColor.TOAD -> ToadDark
-            AccentColor.BLUE -> BlueDark
-            AccentColor.PURPLE -> PurpleDark
-            AccentColor.GREEN -> GreenDark
-            AccentColor.ORANGE -> OrangeDark
-            AccentColor.RED -> RedDark
-            AccentColor.PINK -> PinkDark
+    fun schemeFor(accent: AccentColor, dark: Boolean): ColorScheme {
+        val base = if (dark) {
+            when (accent) {
+                AccentColor.TOAD -> ToadDark
+                AccentColor.BLUE -> BlueDark
+                AccentColor.PURPLE -> PurpleDark
+                AccentColor.GREEN -> GreenDark
+                AccentColor.ORANGE -> OrangeDark
+                AccentColor.RED -> RedDark
+                AccentColor.PINK -> PinkDark
+            }
+        } else {
+            when (accent) {
+                AccentColor.TOAD -> ToadLight
+                AccentColor.BLUE -> BlueLight
+                AccentColor.PURPLE -> PurpleLight
+                AccentColor.GREEN -> GreenLight
+                AccentColor.ORANGE -> OrangeLight
+                AccentColor.RED -> RedLight
+                AccentColor.PINK -> PinkLight
+            }
         }
-    } else {
-        when (accent) {
-            AccentColor.TOAD -> ToadLight
-            AccentColor.BLUE -> BlueLight
-            AccentColor.PURPLE -> PurpleLight
-            AccentColor.GREEN -> GreenLight
-            AccentColor.ORANGE -> OrangeLight
-            AccentColor.RED -> RedLight
-            AccentColor.PINK -> PinkLight
-        }
+        return base.withDerivedSurfaces(dark)
     }
 
     /** Solid representative swatch used by the Settings accent picker. */

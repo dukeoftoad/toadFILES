@@ -428,7 +428,11 @@ object FileOps {
     }
 
     private fun copyFileContents(src: File, dest: File, checkCancelled: () -> Unit): Boolean {
-        if (dest.exists() && dest.length() == src.length()) return true // already there
+        // Audit A29 (v2.1.1): the old "dest exists with the same length → already
+        // copied" shortcut treated a same-length, different-content destination as
+        // done. It was unreachable while every copy target is a freshly staged
+        // file, but it was a landmine the moment that discipline changed — copies
+        // are now unconditional and content-honest.
         FileInputStream(src).use { input ->
             FileOutputStream(dest).use { output ->
                 val buf = ByteArray(BUFFER)

@@ -9,8 +9,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -385,6 +387,18 @@ fun EmptyTrashArt(modifier: Modifier = Modifier, size: Dp = 148.dp) {
     Scene(modifier.size(size)) {
         val tint = MaterialTheme.colorScheme.primary
         val binColor = tint.copy(alpha = 0.75f)
+        // Audit A19 (v2.1.1): the tapered bin body used to be rebuilt as a new Path
+        // on every draw pass; the shape is resolution-independent, so it is built
+        // ONCE in unit space (0..1) and scaled at draw time instead.
+        val bodyPath = remember {
+            androidx.compose.ui.graphics.Path().apply {
+                moveTo(0.16f, 0.22f)
+                lineTo(0.84f, 0.22f)
+                lineTo(0.76f, 1f)
+                lineTo(0.24f, 1f)
+                close()
+            }
+        }
         // Bin body + lid, drawn as simple shapes.
         Canvas(Modifier.size(size * 0.44f).align(Alignment.BottomCenter).offset(y = -size * 0.14f)) {
             val w = this.size.width
@@ -397,22 +411,18 @@ fun EmptyTrashArt(modifier: Modifier = Modifier, size: Dp = 148.dp) {
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.05f),
             )
             drawCircle(color = binColor, radius = w * 0.07f, center = Offset(w * 0.5f, h * 0.06f))
-            // Body (tapered)
-            val bodyTop = h * 0.22f
-            val bodyPath = androidx.compose.ui.graphics.Path().apply {
-                moveTo(w * 0.16f, bodyTop)
-                lineTo(w * 0.84f, bodyTop)
-                lineTo(w * 0.76f, h)
-                lineTo(w * 0.24f, h)
-                close()
+            // Body (tapered) — unit-space path scaled into pixel space.
+            withTransform({
+                scale(w, h, pivot = Offset.Zero)
+            }) {
+                drawPath(bodyPath, binColor.copy(alpha = 0.55f))
             }
-            drawPath(bodyPath, binColor.copy(alpha = 0.55f))
             // Ribs
             for (i in 1..2) {
                 val x = w * (0.25f + 0.25f * i)
                 drawLine(
                     color = binColor,
-                    start = Offset(x, bodyTop + h * 0.06f),
+                    start = Offset(x, h * 0.22f + h * 0.06f),
                     end = Offset(x * (1f - 0.03f * i), h * 0.97f),
                     strokeWidth = w * 0.035f,
                     cap = StrokeCap.Round,
