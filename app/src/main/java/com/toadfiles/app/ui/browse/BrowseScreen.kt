@@ -165,12 +165,30 @@ fun BrowseScreen(
     // confirmation setting is on; cleared by the dialog's buttons.
     var pendingAbortConfirm by remember { mutableStateOf(false) }
 
-    val rootDir = remember(initialDir) {
+    // v2.1.1 (owner report): the Browse tab must reopen in the folder the user left
+    // it in. A tab switch pops this entry with saveState=true — rememberSaveable UI
+    // state survives, ViewModels do NOT — and the fresh screen used to re-open the
+    // static start folder right over the user's drill-in, so "Browse → Home →
+    // Browse" always landed back at the tab's top. Carrying the open folder in
+    // saved state restores it; the start folder is handed to the ViewModel
+    // separately (seedBrowseRoot) so re-tap's "back to the top" still points at
+    // the tab's own root, not at wherever the user happened to be when they left.
+    var lastOpenPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val startDir = remember {
         // Bottom-bar Browse passes an empty dir; default to the external storage root
         // so the tab opens to a real folder instead of an empty screen.
         if (initialDir.isNotBlank()) File(initialDir) else Environment.getExternalStorageDirectory()
     }
-    LaunchedEffect(rootDir) { vm.openDir(rootDir) }
+    LaunchedEffect(startDir) {
+        vm.seedBrowseRoot(startDir)
+        val target = lastOpenPath?.let(::File) ?: startDir
+        // Skip when the ViewModel is already showing the target (rotation keeps the
+        // ViewModel alive; a restored tab gets a fresh one with dir == null).
+        if (state.dir?.path != target.path) vm.openDir(target)
+    }
+    // Keep the saved pointer in step with the user's navigation. Never writes null,
+    // so a restored path cannot be wiped before the first listing lands.
+    LaunchedEffect(state.dir) { state.dir?.path?.let { lastOpenPath = it } }
 
     // The search field only exists while it is revealed from the overflow menu;
     // focus it as soon as it composes so typing can start immediately. Waiting one
@@ -218,9 +236,13 @@ fun BrowseScreen(
     // v2.1.0 tab re-tap: the second tap on the active Browse tab jumps back to the
     // folder this tab first opened (its top level), dropping any in-tree search.
     // Switching tabs still restores the last folder — that behavior stays.
+    // v2.1.1 fix: the bus carries the tab's BASE route ("browse"), while
+    // Routes.BROWSE is the full "browse?dir={dir}&…" pattern — comparing against
+    // the pattern never matched, so Browse's re-tap was a silent no-op. Compare
+    // base-to-base, the way the other tab collectors do.
     LaunchedEffect(Unit) {
         TabReselect.events.collect { route ->
-            if (route == Routes.BROWSE) vm.resetToRoot()
+            if (route.substringBefore('?') == Routes.BROWSE.substringBefore('?')) vm.resetToRoot()
         }
     }
 

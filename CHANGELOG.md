@@ -6,6 +6,61 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-11-05
+
+The come-back-where-you-were release: Browse finally survives a trip to
+another tab, its re-tap actually resets, and the second remediation wave of
+the v2.0.0 audit lands (nine more findings from docs/audits/AUDIT-v2.0.0.md)
+plus a fix for the flaky test that broke the v2.1.0 release gate.
+
+### Fixed
+- **The Browse tab keeps your place across tab switches** (owner report):
+  going Browse → (drill into a folder) → Home → Browse used to drop you back
+  at the tab's start folder every time — the open folder now travels in saved
+  UI state, which is exactly what a tab switch preserves (Navigation pops the
+  tab with `saveState`, which keeps saved state but rebuilds ViewModels).
+  Re-tap's "back to the top" is untouched: it still resets to the folder the
+  tab first opened, and re-tap Browse works again at all (the v2.1.0 signal
+  was compared against the full `"browse?dir={dir}&…"` route pattern and
+  silently never matched).
+- **A11** — the self-update installer path (`SystemUpdateDownloader`) has
+  tests now: enqueue request fields, the delete-before-enqueue retry rule,
+  the blank-URL guard, and the awaitDownload success/failure status mapping
+  (Robolectric `ShadowDownloadManager`).
+- **A13** — Recent's time buckets survive DST: "Yesterday"/"This week"
+  boundaries step real calendar days (`Calendar.add(DAY_OF_MONTH)`) instead
+  of fixed 24-hour subtractions, so a 23- or 25-hour transition day no
+  longer files yesterday's recordings under "This week".
+- **A14** — the launch splash no longer replays from the top on a
+  configuration change mid-animation: hop/veil flags and the animation
+  progress are saved with the activity state, as its own docs always claimed.
+- **A16** — the About screen's URL handoff is https-only; a non-https link
+  can no longer be talked into an ACTION_VIEW launch.
+- **A19** — the empty-trash illustration builds its bin shape once and scales
+  it at draw time instead of allocating a fresh `Path` on every draw pass.
+- **A28** — zip publication no longer silently overwrites a file that
+  appears between the exists-check and the move when replace is off: the
+  move runs without `REPLACE_EXISTING`, so the race surfaces as an honest
+  failure instead of data loss.
+- **A29** — the copy engine's "same length → already copied" shortcut is
+  gone; a same-length different-content destination is now copied
+  unconditionally.
+- **A30** — the archive entry-count walk is iterative, so a pathologically
+  deep folder tree can no longer overflow the stack while publishing a
+  progress total.
+- **Flaky release gate** — `AppIconSwitcherTest`'s ghost-alias test now seeds
+  every alias with an explicit PackageManager setting before probing; the
+  bare before/after snapshot it used could read Robolectric's lazily-resolved
+  manifest state differently across calls and fail the v2.1.0 gate spuriously.
+
+### Changed
+- **A7** — every accent scheme now derives `background` and the five
+  `surfaceContainer*` tones from its own surface pair. Under CLASSIC accents
+  those roles used to fall through to the M3 baseline palette (purple-tinted
+  grays), which visibly clashed with warm surfaces in dark mode — the
+  transfer bar, settings cards and appearance cards now stay in the accent's
+  own voice. The default TOAD look is byte-identical to before.
+
 ## [2.1.0] — 2026-11-05
 
 The checksum-and-time release: SHA-256 on every file's Properties sheet,

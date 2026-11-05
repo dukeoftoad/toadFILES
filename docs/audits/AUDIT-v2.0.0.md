@@ -194,10 +194,10 @@ Verified as correct during this pass (worth recording so future audits don't re-
 |---|---|---|---|
 | **Now (this audit's PR)** | A1 (OpRunner single-flight + cancel semantics + tests) | small, isolated | ✅ shipped in v2.0.0 (#29) |
 | Next reliability PR | A2, A3, A4, A5, A8, A9 (all op/VM lifecycle — one pass over three ViewModels + entryCount move) | medium | ✅ shipped in v2.1.0 |
-| UI perf pass | A6, A18, A19, A20, A21 | medium | A6, A18, A21 ✅ v2.1.0; A19, A20 open |
-| Theme pass | A7 (container roles), A24 | small | A24 ✅ v2.1.0; A7 open |
-| CI/test pass | A10 (emulator job or honest removal), A11 (ShadowDownloadManager), A12 (Kover + verifyRoborazzi), A27 | medium | open |
-| Hardening backlog | A13-A17, A22-A26, A28-A30 | opportunistic, tied to next touch of each file | A25 ✅ v2.1.0; rest open |
+| UI perf pass | A6, A18, A19, A20, A21 | medium | A6, A18, A19, A21 ✅ v2.1.0/v2.1.1; A20 open |
+| Theme pass | A7 (container roles), A24 | small | ✅ shipped in v2.1.0 (A24) / v2.1.1 (A7) |
+| CI/test pass | A10 (emulator job or honest removal), A11 (ShadowDownloadManager), A12 (Kover + verifyRoborazzi), A27 | medium | A11 ✅ v2.1.1; A10, A12, A27 open |
+| Hardening backlog | A13-A17, A22-A26, A28-A30 | opportunistic, tied to next touch of each file | A13, A14, A16, A19, A25, A28, A29, A30 ✅ v2.1.0/v2.1.1; A15, A17, A22, A23, A24-shipped, A26 open |
 
 *Everything above was verified by reading the code at the cited lines on the audited commit; static review only, no device run.*
 
@@ -231,3 +231,50 @@ Verified as correct during this pass (worth recording so future audits don't re-
   `sheetState.hide()` → dismiss → action so every row gets the swipe-dismiss exit
   animation; drawer divider renders after the Trash item; dead `RecentGrid(inSelection)`
   parameter removed.
+
+### 7.2 v2.1.1 remediation notes (wave two)
+
+- **A7** — `AccentPalettes.withDerivedSurfaces` derives `background`, `onBackground`
+  and the five `surfaceContainer*` tones for all 14 schemes from each scheme's own
+  `surface`/`surfaceVariant` pair (M3-neutral-ladder-shaped mixes; dark's lowest tone
+  mixes toward black). Pinned by `AccentPalettesTest.every scheme derives background
+  and container tones in its own voice - A7` (background==surface, no baseline leak,
+  monotone elevation ladder) plus a TOAD no-regression pin.
+- **A11** — `UpdateDownloaderTest` (new): enqueue field mapping via
+  `ShadowDownloadManager`, delete-before-enqueue retry rule, blank-URL IOException,
+  `awaitDownload` success→uri / failure→null status mapping.
+- **A13** — `RecentGrouping.calendarDayBefore` steps real calendar days via
+  `Calendar.add(DAY_OF_MONTH)` (wall-clock midnight survives 23/25-hour days). Pinned
+  by three America/New_York transition tests (fall-back early hours → Yesterday;
+  spring-forward previous evening → This week; 7-calendar-days-across-fall-back).
+- **A14** — `ToadSplash` timeline state (`hopStarted`, `veilVisible`, veil/blink
+  `Animatable`s through a value-preserving Saver) is `rememberSaveable` now, matching
+  MainActivity's documented contract.
+- **A16** — `Intents.openUrl` accepts https only; pinned by three `IntentsTest` cases
+  (https launch, uppercase-scheme acceptance, http/ftp/file/content/garbage refusal
+  with zero started intents).
+- **A19** — `EmptyTrashArt` builds the bin-body path once in unit space (remembered)
+  and scales it in the draw phase via `withTransform`; no per-draw `Path` allocation.
+  The pupil blink stays param-driven deliberately: it animates only during the splash
+  and reveal blinks, so the measure-per-frame cost is bounded and the draw-phase
+  refactor risk was not worth it for this release.
+- **A28** — `ZipSupport.publishMove` (new internal seam): replace moves carry
+  `REPLACE_EXISTING`; non-replace moves carry none, so a destination that materializes
+  after the exists() probe fails the item with `FileAlreadyExistsException` (mapped to
+  `counts.failed`) instead of silently overwriting it. Pinned by two `ZipSupportTest`
+  cases.
+- **A29** — `FileOps.copyFileContents` no longer treats a same-length destination as
+  already copied; copies are unconditional (all current destinations are freshly
+  staged, so this only removes the landmine).
+- **A30** — `ZipSupport.countFileEntries` walks with an explicit stack; identical
+  counting rules (file links count, unfollowable links skip) without recursion depth
+  limits. Pinned by a tree-shape `ZipSupportTest`.
+- **Release-gate flake** — `AppIconSwitcherTest`'s ghost-alias test (unrelated to an
+  A-number; broke the v2.1.0 `build` workflow) now seeds every alias with an explicit
+  `COMPONENT_ENABLED_STATE_DISABLED` before probing, so the "nothing changed" assert
+  reads the PackageManager's own setting map instead of lazily-resolved manifest state.
+
+Still open after wave two: A10 (CI emulator job or honest removal), A12 (Kover +
+verifyRoborazzi), A15 (password zeroization), A17 (release-signature pinning),
+A20 (trash-size/hidden-total walks), A22 (op-machinery dedup), A23 (VolumeChoice
+relocation), A26 (i18n/test-tag debt), A27 (test-suite nits).

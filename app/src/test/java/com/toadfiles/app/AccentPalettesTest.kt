@@ -1,7 +1,10 @@
 package com.toadfiles.app
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.ui.theme.AccentPalettes
 import org.junit.Assert.assertEquals
@@ -50,6 +53,57 @@ class AccentPalettesTest {
     fun `TOAD dark scheme preserves the v1 light-moss primary`() {
         val toadDark = AccentPalettes.schemeFor(AccentColor.TOAD, dark = true)
         assertEquals(Color(0xFFA5C89A), toadDark.primary)
+    }
+
+    @Test
+    fun `every scheme derives background and container tones in its own voice - A7`() {
+        AccentColor.entries.forEach { accent ->
+            listOf(false, true).forEach { dark ->
+                val s = AccentPalettes.schemeFor(accent, dark)
+                // A7: background anchors on the scheme's own surface pair, never on
+                // the M3 baseline.
+                assertEquals("background($accent, dark=$dark)", s.surface, s.background)
+                assertEquals("onBackground($accent, dark=$dark)", s.onSurface, s.onBackground)
+
+                // The container roles must NOT leak the M3 baseline palette (the
+                // purple-tinted grays CLASSIC accents used to clash with).
+                val baseline = if (dark) darkColorScheme() else lightColorScheme()
+                assertNotEquals(
+                    "surfaceContainer baseline leak ($accent, dark=$dark)",
+                    baseline.surfaceContainer, s.surfaceContainer,
+                )
+                assertNotEquals(
+                    "surfaceContainerHigh baseline leak ($accent, dark=$dark)",
+                    baseline.surfaceContainerHigh, s.surfaceContainerHigh,
+                )
+
+                // The five container tones form a monotone elevation ladder in
+                // luminance: light mode goes from nearly-white (lowest elevation)
+                // down; dark mode climbs from near-black up.
+                val ladder = listOf(
+                    s.surfaceContainerLowest, s.surfaceContainerLow, s.surfaceContainer,
+                    s.surfaceContainerHigh, s.surfaceContainerHighest,
+                )
+                val lums = ladder.map { it.luminance() }
+                if (dark) {
+                    assertTrue(
+                        "dark container ladder must brighten with elevation ($accent): $lums",
+                        lums.zipWithNext().all { (a, b) -> a < b },
+                    )
+                } else {
+                    assertTrue(
+                        "light container ladder must darken with elevation ($accent): $lums",
+                        lums.zipWithNext().all { (a, b) -> a > b },
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `TOAD light background stays the v1 moss-tinted surface - A7 no-regression`() {
+        val toadLight = AccentPalettes.schemeFor(AccentColor.TOAD, dark = false)
+        assertEquals(Color(0xFFF6FAF4), toadLight.background)
     }
 
     @Test
