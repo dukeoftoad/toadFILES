@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.ui.Routes
+import com.toadfiles.app.ui.TabReselect
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
@@ -72,6 +74,14 @@ fun TrashScreen(
         state.toast?.let {
             snackbar.showSnackbar(it)
             vm.consumeToast()
+        }
+    }
+
+    // v2.1.0 tab re-tap: the second tap on the active Trash tab clears the selection
+    // (Trash has no deeper hierarchy to unwind — that IS its top level).
+    LaunchedEffect(Unit) {
+        TabReselect.events.collect { route ->
+            if (route == Routes.TRASH) vm.clearSelection()
         }
     }
 

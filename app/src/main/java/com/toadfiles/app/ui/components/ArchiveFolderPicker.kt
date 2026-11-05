@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Minimal folder picker for the v1.7.3 "Archive folder" setting (no reusable
@@ -52,12 +55,19 @@ fun ArchiveFolderPicker(
     }
     var dir by remember { mutableStateOf(File(initial.ifBlank { root })) }
 
-    val subdirs = remember(dir) {
-        runCatching {
-            dir.listFiles()
-                ?.filter { it.isDirectory && it.canRead() }
-                ?.sortedBy { it.name.lowercase() }
-        }.getOrNull() ?: emptyList()
+    // Audit A6: the listing runs two syscalls per entry on the main thread whenever the
+    // user navigates — moved onto IO via LaunchedEffect. The previous folder's list
+    // stays visible until the fresh one lands (no blink), matching the pull-to-refresh
+    // discipline everywhere else in the app.
+    var subdirs by remember { mutableStateOf<List<File>>(emptyList()) }
+    LaunchedEffect(dir) {
+        subdirs = withContext(Dispatchers.IO) {
+            runCatching {
+                dir.listFiles()
+                    ?.filter { it.isDirectory && it.canRead() }
+                    ?.sortedBy { it.name.lowercase() }
+            }.getOrNull() ?: emptyList()
+        }
     }
     val canGoUp = dir.absolutePath != root
 

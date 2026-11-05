@@ -70,15 +70,27 @@ class MediaTapRoutingTest {
     }
 
     @Test
-    fun `xapk and apkm bundles stay with external viewers`() {
-        // They are zip containers, not installable packages — the installer would
-        // reject them, so a viewer (or toadFILES' own archive flow via the sheet) is
-        // the honest target.
+    fun `xapk and apkm bundles with a path route into the extract flow`() {
+        // v2.1.0 (owner report): app bundles ARE zip containers holding the real .apk
+        // files — the honest tap is toadFILES' own extract flow so the APKs inside can
+        // come out; the old external-viewer routing offered no way to get at them.
+        // They still never route to the installer (rule order: extension "apk" check
+        // above can't match ".xapk"/".apkm").
+        val xapk = routeMediaTap(
+            entry("app.xapk", mime = "application/octet-stream", data = "/tmp/toadfiles-test/app.xapk"),
+        )
+        assertTrue(xapk is MediaTapRoute.OpenArchive)
+        assertEquals(File("/tmp/toadfiles-test/app.xapk"), (xapk as MediaTapRoute.OpenArchive).archive)
+        val apkm = routeMediaTap(
+            entry("app.apkm", mime = "application/octet-stream", data = "/tmp/toadfiles-test/app.apkm"),
+        )
+        assertTrue(apkm is MediaTapRoute.OpenArchive)
+    }
+
+    @Test
+    fun `xapk and apkm without an on-disk path stay external`() {
         assertTrue(
             routeMediaTap(entry("app.xapk", mime = "application/octet-stream")) is MediaTapRoute.OpenExternal,
-        )
-        assertTrue(
-            routeMediaTap(entry("app.apkm", mime = "application/octet-stream")) is MediaTapRoute.OpenExternal,
         )
     }
 

@@ -75,6 +75,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.ui.Routes
+import com.toadfiles.app.ui.TabReselect
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.data.toFileItem
 import com.toadfiles.app.domain.ArchiveOps
@@ -148,6 +150,15 @@ fun CategoriesScreen(
         state.toast?.let {
             snackbar.showSnackbar(it)
             vm.consumeToast()
+        }
+    }
+
+    // v2.1.0 tab re-tap: the second tap on the active Categories tab closes the
+    // drill-in onto the grid; already on the grid, it clears the selection.
+    // Switching tabs still restores the drill-in — that behavior stays.
+    LaunchedEffect(Unit) {
+        TabReselect.events.collect { route ->
+            if (route == Routes.CATEGORIES) vm.resetToRoot()
         }
     }
 
@@ -672,7 +683,7 @@ private fun CategoryEntries(
                     item = e.toFileItem(),
                     selected = e.uri.toString() in state.selection,
                     isFavorite = false,
-                    subtitle = "${Format.size(e.size)} · ${Format.date(e.dateModified)}",
+                    subtitle = "${Format.size(e.size)} · ${Format.dateTime(e.dateModified)}",
                     onClick = { onEntryTap(e) },
                     onLongClick = { onEntryLongPress(e) },
                     onMore = { onEntryMore(e) },
