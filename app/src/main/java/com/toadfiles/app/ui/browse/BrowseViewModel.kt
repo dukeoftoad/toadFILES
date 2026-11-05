@@ -312,6 +312,20 @@ class BrowseViewModel(
     fun clearSelection() = _state.update { it.copy(selection = emptySet()) }
 
     /**
+     * v2.1.1: declares this Browse instance's top level BEFORE the first load. A
+     * tab round trip (Browse → Home → Browse) pops the entry with saveState=true,
+     * which rebuilds this ViewModel from scratch; without the explicit seed the
+     * first load would be the RESTORED folder and re-tap's "back to the top"
+     * (resetToRoot) would then point at wherever the user had been instead of the
+     * tab's start folder. The screen seeds the static start folder first, then
+     * opens the restored one. load()'s own first-open seeding stays as the
+     * fallback for callers that never seed (tests, deep pushes).
+     */
+    fun seedBrowseRoot(root: File) {
+        if (browseRoot == null) browseRoot = root
+    }
+
+    /**
      * Tab re-tap (v2.1.0): back to the folder this Browse instance first opened — the
      * tab's own top level — dropping any in-tree search on the way (load() cancels the
      * search job). Still on the root, it only clears the selection / search, so a

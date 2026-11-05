@@ -1,6 +1,7 @@
 package com.toadfiles.app.ui.components
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
@@ -10,6 +11,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -31,14 +34,24 @@ import kotlinx.coroutines.delay
  * by calling [onFinished] once the fade completes. [MainActivity] holds the
  * flag in a `rememberSaveable`, so a configuration change mid-splash finishes
  * the same animation instead of replaying it.
+ *
+ * Audit A14 (v2.1.1): the timeline state used to be plain `remember`, which
+ * contradicted that contract — on a configuration change mid-splash the hop
+ * reset to 0.55 scale, the veil jumped back to fully opaque and the whole
+ * sequence replayed from the top. The hop/veil flags and the veil/blink
+ * progress now survive via [rememberSaveable] (the Animatables through a
+ * value-preserving Saver), so a rotation continues the exact frame it left.
  */
+private val FloatAnimatableSaver: Saver<Animatable<Float, AnimationVector1D>, Float> =
+    Saver(save = { it.value }, restore = { Animatable(it) })
+
 @Composable
 fun ToadSplash(onFinished: () -> Unit) {
     val motion = LocalToadMotion.current
-    var hopStarted by remember { mutableStateOf(false) }
-    var veilVisible by remember { mutableStateOf(true) }
-    val veil = remember { Animatable(1f) }
-    val blink = remember { Animatable(0f) }
+    var hopStarted by rememberSaveable { mutableStateOf(false) }
+    var veilVisible by rememberSaveable { mutableStateOf(true) }
+    val veil = rememberSaveable(saver = FloatAnimatableSaver) { Animatable(1f) }
+    val blink = rememberSaveable(saver = FloatAnimatableSaver) { Animatable(0f) }
 
     LaunchedEffect(motion.style) {
         hopStarted = true

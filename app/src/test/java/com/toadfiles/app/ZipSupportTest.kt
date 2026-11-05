@@ -647,4 +647,53 @@ class ZipSupportTest {
         assertFalse("aborted extraction must not publish", File(dir, "out").exists())
         assertTrue(dir.listFiles()!!.none { it.name.contains(".staging-") })
     }
+
+    // ---- Audit A28/A30 hardening (v2.1.1) ----
+
+    @Test
+    fun `publishMove without replace refuses to overwrite a destination that exists`() {
+        // A28: without replace the move carries no REPLACE_EXISTING, so a file that
+        // appeared after the caller's exists() probe fails the move instead of being
+        // silently replaced.
+        val dir = tmp.newFolder("a28")
+        val child = File(dir, "child.txt").apply { writeText("new") }
+        val dest = File(dir, "dest.txt").apply { writeText("precious") }
+        try {
+            ZipSupport.publishMove(child, dest, replace = false)
+            org.junit.Assert.fail("publishMove must throw when dest exists and replace=false")
+        } catch (expected: java.nio.file.FileAlreadyExistsException) {
+            // expected
+        }
+        assertEquals("the raced-in destination must survive untouched", "precious", dest.readText())
+        assertEquals("the source stays for the caller to report", "new", child.readText())
+    }
+
+    @Test
+    fun `publishMove with replace overwrites the destination`() {
+        val dir = tmp.newFolder("a28r")
+        val child = File(dir, "child.txt").apply { writeText("new") }
+        val dest = File(dir, "dest.txt").apply { writeText("old") }
+        ZipSupport.publishMove(child, dest, replace = true)
+        assertEquals("new", dest.readText())
+        assertFalse("the source is consumed by the move", child.exists())
+    }
+
+    @Test
+    fun `countFileEntries counts the same tree iteratively - A30`() {
+        // Deep nesting would blow the old recursive walker's stack; the iterative
+        // one must count identical totals on a plain tree.
+        val root = tmp.newFolder("a30")
+        File(root, "a.txt").writeText("1")
+        val sub1 = File(root, "sub1").apply { mkdirs() }
+        File(sub1, "b.txt").writeText("2")
+        File(sub1, "c.txt").writeText("3")
+        val sub2 = File(sub1, "sub2").apply { mkdirs() }
+        File(sub2, "d.txt").writeText("4")
+        File(sub2, "empty").apply { mkdirs() }
+
+        assertEquals(4, ZipSupport.countFileEntries(root))
+        assertEquals(1, ZipSupport.countFileEntries(File(root, "a.txt")))
+        assertEquals(3, ZipSupport.countFileEntries(sub1))
+        assertEquals(0, ZipSupport.countFileEntries(File(sub2, "empty")))
+    }
 }

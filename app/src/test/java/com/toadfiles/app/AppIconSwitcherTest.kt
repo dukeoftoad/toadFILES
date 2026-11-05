@@ -141,17 +141,28 @@ class AppIconSwitcherTest {
         val all = AppIconDesign.entries.flatMap { d ->
             AppIconColor.entries.map { c -> ghost.componentNameFor(d, c) }
         }
-        // Compare against the pre-call states instead of a fixed expectation: some
-        // components carry a manifest-declared state (the shipped default alias is
-        // enabled=true), and the guard's promise is "nothing changes", not "all DEFAULT".
-        val before = all.associateWith { pm.getComponentEnabledSetting(it) }
+        // v2.1.1: seed every alias with an EXPLICIT setting before the probe.
+        // The previous bare before/after snapshot flaked in the v2.1.0 release
+        // gate: for UNSET components Robolectric's PackageManager resolves the
+        // manifest-declared state lazily, so an alias can read differently across
+        // calls and fail a "nothing changed" assert spuriously. With explicit
+        // settings every read comes from the PackageManager's own setting map —
+        // a guard failure would deterministically ENABLE the target first, and a
+        // healthy guard writes nothing at all.
+        all.forEach {
+            pm.setComponentEnabledSetting(
+                it,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
 
         ghost.apply(AppIconDesign.TOAD, AppIconColor.GREEN)
 
         for (component in all) {
             assertEquals(
                 "ghost guard must leave $component untouched",
-                before[component],
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 pm.getComponentEnabledSetting(component),
             )
         }

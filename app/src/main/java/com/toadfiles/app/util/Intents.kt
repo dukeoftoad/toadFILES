@@ -319,11 +319,13 @@ object Intents {
     }
 
     /**
-     * Opens an https/http URL in the user's browser (used by About → "View on GitHub").
+     * Opens an https URL in the user's browser (used by About → "View on GitHub").
      * No Custom Tabs dependency — the plain ACTION_VIEW launch resolves whatever
-     * browser the user has. User-initiated only; refuses non-web schemes so this
-     * helper can never be talked into launching file/content intents. Returns an
-     * honest false when the URL is not a web URL or nothing can handle it.
+     * browser the user has. User-initiated only; refuses everything that is not
+     * https (audit A16, v2.1.1) so this helper can never be talked into launching
+     * file/content intents or shipping the user to a cleartext http endpoint that
+     * a network hop could rewrite. Returns an honest false when the URL is not an
+     * https URL or nothing can handle it.
      */
     fun openUrl(context: Context, url: String): Boolean {
         val scheme = try {
@@ -331,7 +333,7 @@ object Intents {
         } catch (_: Exception) {
             null
         }
-        if (scheme != "https" && scheme != "http") return false
+        if (scheme != "https") return false
         return try {
             context.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
