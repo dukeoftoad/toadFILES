@@ -29,10 +29,20 @@ object RecentGrouping {
     fun groupOf(dateModifiedMs: Long, nowMs: Long = System.currentTimeMillis()): RecentGroup {
         val today = startOfDay(nowMs)
         val ts = startOfDay(dateModifiedMs)
+        // Audit A13 (v2.1.1): the boundaries used to be fixed 24-hour subtractions
+        // from today's midnight (today - DAY_MS, today - 7*DAY_MS). On DST-transition
+        // days a calendar day is 23 or 25 hours long, so the fixed subtraction landed
+        // an hour inside the neighbouring day and files bucketed wrongly (yesterday's
+        // file showing up in THIS_WEEK). Calendar.add(DAY_OF_MONTH) steps real
+        // calendar days — it keeps wall-clock midnight across the transition — so
+        // "yesterday" is the previous calendar day and "this week" the previous
+        // seven, whatever the clocks did in between.
+        val yesterday = calendarDayBefore(today, 1)
+        val weekAgo = calendarDayBefore(today, 7)
         return when {
             ts >= today -> RecentGroup.TODAY
-            ts >= today - DAY_MS -> RecentGroup.YESTERDAY
-            ts >= today - 7 * DAY_MS -> RecentGroup.THIS_WEEK
+            ts >= yesterday -> RecentGroup.YESTERDAY
+            ts >= weekAgo -> RecentGroup.THIS_WEEK
             else -> RecentGroup.OLDER
         }
     }
@@ -61,5 +71,13 @@ object RecentGrouping {
         return cal.timeInMillis
     }
 
-    private val DAY_MS = TimeUnit.DAYS.toMillis(1)
+    /** Midnight [days] calendar days before the midnight of [dayMs] — DST-safe:
+     *  [Calendar.add] steps the DATE field and keeps the wall clock at 00:00, so a
+     *  23- or 25-hour transition day never shifts the boundary into the wrong day. */
+    private fun calendarDayBefore(dayMs: Long, days: Int): Long {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = dayMs
+        cal.add(Calendar.DAY_OF_MONTH, -days)
+        return cal.timeInMillis
+    }
 }

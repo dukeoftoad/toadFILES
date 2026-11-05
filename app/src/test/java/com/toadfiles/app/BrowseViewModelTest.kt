@@ -1575,6 +1575,22 @@ class BrowseViewModelTest {
     }
 
     @Test
+    fun `seedBrowseRoot keeps re-tap pointed at the start folder across a restore v2-1-1`() {
+        // A tab round trip (Browse → Home → Browse) rebuilds this ViewModel: the
+        // screen seeds the START folder first, then opens the folder restored from
+        // saved UI state. Re-tap must still reset to the start folder, not to
+        // wherever the user happened to be when they left the tab.
+        val restored = File(dir, "restored-here").apply { mkdirs() }
+        vm.seedBrowseRoot(dir)
+        vm.openDir(restored)
+        await { vm.state.value.dir == restored && !vm.state.value.loading }
+
+        vm.resetToRoot()
+        await { vm.state.value.dir == dir && !vm.state.value.loading }
+        assertEquals("re-tap resets to the seeded start folder", dir, vm.state.value.dir)
+    }
+
+    @Test
     fun `resetToRoot on the starting folder only clears the selection`() {
         vm.openDir(dir)
         await { vm.state.value.dir == dir && !vm.state.value.loading }

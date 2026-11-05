@@ -12,6 +12,7 @@ import java.io.FileOutputStream
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
@@ -492,9 +493,18 @@ object ZipSupport {
                             continue
                         }
                         try {
-                            Files.move(child.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                            publishMove(child, dest, replace)
                             counts.moved++
                             if (!backedUp) published += dest
+                        } catch (e: FileAlreadyExistsException) {
+                            // Audit A28 (v2.1.1): a creator raced us between the
+                            // exists() probe above and the move. Without replace the
+                            // move now runs WITHOUT REPLACE_EXISTING, so the race
+                            // surfaces as a failed item instead of silently
+                            // overwriting the file that appeared.
+                            counts.failed++
+                            failures += "$rel: destination appeared during publish"
+                            if (replace) throw PublicationAbort()
                         } catch (e: Exception) {
                             counts.failed++
                             failures += "$rel: ${e.message ?: "publish failed"}"
@@ -530,6 +540,20 @@ object ZipSupport {
         val parent = item.parentFile ?: return null
         val backup = File(parent, PathSafety.uniqueName(parent, BACKUP_PREFIX + item.name))
         return if (item.renameTo(backup)) backup else null
+    }
+
+    /** Audit A28 (v2.1.1): the actual publish move, split out so the replace
+     *  contract is explicit and testable. With replace the move carries
+     *  REPLACE_EXISTING (the caller has already backed the old file up); without
+     *  replace it carries NO options — a destination that materialized after the
+     *  caller's exists() probe makes the move fail with
+     *  [FileAlreadyExistsException] instead of silently overwriting it. */
+    internal fun publishMove(child: File, dest: File, replace: Boolean) {
+        if (replace) {
+            Files.move(child.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } else {
+            Files.move(child.toPath(), dest.toPath())
+        }
     }
 
     /** [File.mkdirs] that remembers every level it had to create in [createdDirs] (top
@@ -645,14 +669,33 @@ object ZipSupport {
 
     /** File-entry count of what the creation walk stores for [file]: plain files (and
      *  links to files) count 1, folders count their contents; unfollowable links count 0.
-     *  Mirrors the add policy so zip AND 7z creation progress totals stay honest. */
+     *  Mirrors the add policy so zip AND 7z creation progress totals stay honest.
+     *
+     *  Audit A30 (v2.1.1): the walk used to recurse — a pathological tree deep
+     *  enough could overflow the stack during the "publish the progress total"
+     *  step. The explicit stack keeps the identical counting rules without the
+     *  recursion depth limit. */
     internal fun countFileEntries(file: File): Int {
         if (unfollowableLinkReason(file) != null) return 0
-        if (file.isFile) return 1
-        if (!file.isDirectory) return 0
-        val children = file.listFiles() ?: return 0
+        when {
+            file.isFile -> return 1
+            !file.isDirectory -> return 0
+        }
         var n = 0
-        for (c in children) n += countFileEntries(c) // folder links are skipped above: no cycles
+        val pending = ArrayDeque<File>()
+        pending.addLast(file)
+        while (pending.isNotEmpty()) {
+            val dir = pending.removeLast()
+            val children = dir.listFiles() ?: continue
+            for (c in children) {
+                // Folder links are unfollowable (no cycles), file links store content.
+                if (unfollowableLinkReason(c) != null) continue
+                when {
+                    c.isFile -> n++
+                    c.isDirectory -> pending.addLast(c)
+                }
+            }
+        }
         return n
     }
 
