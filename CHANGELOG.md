@@ -6,15 +6,82 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-11-05
+
+The checksum-and-time release: SHA-256 on every file's Properties sheet,
+timestamps that finally show the time, extraction for the app bundles that
+hold APKs — and the first remediation wave of the v2.0.0 full-repo audit
+(fourteen findings from docs/audits/AUDIT-v2.0.0.md).
+
+### Added
+- **File times now include the time** (owner request): every file row and
+  list subtitle — Browse, Home, Categories, Recent and the action-sheet
+  header — shows "Nov 4, 2025, 14:32" instead of a bare date, so files
+  modified on the same day are distinguishable at a glance. Trash keeps its
+  date-only "deleted …" label; Recent's tiny grid-cell stamp stays a date to
+  fit the cell.
+- **SHA-256 checksums on the Properties sheet** (owner request): files get a
+  "Checksum (SHA-256)" row — streamed on IO (1 MiB chunks, flat memory),
+  cancellable with the sheet, with a "Calculating…" state for big files and
+  the lowercase hex digest in a selection container so one long-press copies
+  it into a verifier.
+- **Tab re-tap jumps back to the top** (owner request): tapping the
+  already-active tab means "take me back up", the standard Android re-tap
+  contract. Browse returns to the folder its tab first opened (and drops any
+  in-tree search), Categories closes the drill-in onto the category grid,
+  Recent drops its type filter back to All, Trash clears the selection.
+  Switching tabs still restores each tab's state exactly as before — the
+  drill-in you left open is waiting when you come back; re-tap is the
+  explicit "un-nest me". Works for the drawer's active item too.
+
 ### Fixed
-- **Double-tapping an archive operation no longer runs two at once**
-  (full-repo audit v2.0.0, finding A1 — see docs/audits/AUDIT-v2.0.0.md). The
-  shared op engine behind Recent's and Categories' extract/zip/delete ops is
-  now single-flight: a new op cancels the previous one and waits for it to
-  unwind before starting, the older op can never overwrite the newer result
-  dialog, and cancelling actually stops the op before the progress overlay is
-  cleared — a cancelled op can no longer publish a result or resurrect the
-  overlay. Four new regression tests pin the behavior.
+- **App bundles (.xapk/.apkm) are now extractable** (owner request): they are
+  ZIP containers holding the real .apk files, but every surface routed them
+  to a useless external viewer with no way to pull the APKs out. Tapping a
+  bundle now opens the same extract-or-open dialog as a zip, the action
+  sheet offers Extract here / Extract to…, and the extraction yields the
+  APKs inside whole — byte-identical, never unpacked (pinned by an
+  end-to-end test). A plain .apk deliberately keeps going to the package
+  installer.
+- **Audit wave one — reliability** (docs/audits/AUDIT-v2.0.0.md):
+  - **A1** — the shared op engine behind Recent's and Categories' ops is
+    single-flight (fixes: double-tapping an archive operation no longer runs
+    two at once; a new op cancels the previous one and waits for it to
+    unwind, a cancelled op can no longer publish a result or resurrect the
+    overlay after it is cleared).
+  - **A2** — archive header parsing (entry counts) moved off the main
+    thread: a multi-GB archive can no longer ANR the app at the exact
+    moment the progress dialog should appear; the overlay starts
+    indeterminate and the determinate total arrives from inside the op.
+  - **A3** — "New folder" and the storage analyzer's top-level listing no
+    longer do blocking disk I/O on the main thread.
+  - **A4** — compress progress no longer mixes units: entries counted
+    against selected items showed "37 of 1 items" and clamped the bar at
+    the first tick; the pipeline's own totals are forwarded now.
+  - **A5** — Categories ops re-list in place: deleting one image no longer
+    snaps a LIST layout back to the category default, the list no longer
+    blinks empty mid-operation, and the redundant second MediaStore query
+    per op is gone.
+  - **A8** — Categories/Recent request tokens are `AtomicLong`s now: two
+    concurrent op completions could interleave non-atomic increments and
+    both pass the staleness guard, letting a stale result overwrite a
+    newer one.
+  - **A9** — navigating the Browse tree cancels an in-flight recursive
+    search instead of letting it walk directories to its limit for a
+    result that can never apply.
+- **Audit wave one — UI polish**:
+  - **A6** — composition-time filesystem I/O removed from hot paths: video
+    thumbnails no longer stat during every recomposition of every cell,
+    the archive-folder picker lists directories on IO, and the extract
+    destination picker's writability is carried in state instead of being
+    re-stat'd in every TopAppBar recomposition.
+  - **A18** — the file-type icon picker no longer rebuilds 6-7 sets per
+    visible row per recomposition (hoisted to constants).
+  - **A21** — action-sheet rows slide down like a swipe-to-dismiss instead
+    of popping out of composition with no animation.
+  - **A24** — the drawer divider sits between Trash and Settings, where it
+    was meant to be, instead of cutting Trash off from its group.
+  - **A25** — dead `RecentGrid(inSelection = …)` parameter removed.
 
 ## [2.0.0] — 2026-11-04
 

@@ -34,6 +34,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
+import kotlinx.coroutines.launch
 
 /**
  * The app's ONE per-file action sheet (Mi Files style), shared by Browse (FileItem rows)
@@ -80,6 +82,21 @@ fun FileActionSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+
+    /**
+     * Audit A21: every row slides the sheet DOWN first (sheetState.hide()), then
+     * dismisses and runs its action — the same exit animation a swipe-to-dismiss
+     * gets. Row callbacks call [onDismiss] themselves (idempotent state clearing),
+     * but that call used to pop the sheet out of composition instantly, so tapping
+     * a row and swiping it away looked nothing alike.
+     */
+    val perform: (() -> Unit) -> Unit = { action ->
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            onDismiss()
+            action()
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -110,7 +127,7 @@ fun FileActionSheet(
                         maxLines = 1,
                     )
                     Text(
-                        if (item.isDir) "Folder" else "${Format.size(item.size)} · ${Format.date(item.lastModified)}",
+                        if (item.isDir) "Folder" else "${Format.size(item.size)} · ${Format.dateTime(item.lastModified)}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -119,40 +136,40 @@ fun FileActionSheet(
             Spacer(Modifier.height(4.dp))
 
             // Primary actions: Open / Share / Rename
-            SheetRow(Icons.AutoMirrored.Outlined.OpenInNew, "Open", onClick = onOpen)
-            SheetRow(Icons.Outlined.Share, "Share", onClick = onShare)
+            SheetRow(Icons.AutoMirrored.Outlined.OpenInNew, "Open", onClick = { perform(onOpen) })
+            SheetRow(Icons.Outlined.Share, "Share", onClick = { perform(onShare) })
             if (onRename != null) {
-                SheetRow(Icons.Outlined.DriveFileRenameOutline, "Rename", onClick = onRename)
+                SheetRow(Icons.Outlined.DriveFileRenameOutline, "Rename", onClick = { perform(onRename) })
             }
 
             // Clipboard actions: Copy / Move (only where a screen has a paste target)
             if (onCopy != null) {
-                SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = onCopy)
+                SheetRow(Icons.Outlined.ContentCopy, "Copy to…", onClick = { perform(onCopy) })
             }
             if (onMove != null) {
-                SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = onMove)
+                SheetRow(Icons.AutoMirrored.Outlined.DriveFileMove, "Move to…", onClick = { perform(onMove) })
             }
 
             // Organize: Move to trash / Compress / Extract. Archives toadFILES can extract (.zip,
-            // .7z) get Extract actions instead of "Compress this file" — both formats are
-            // also creatable since v1.7.3 via the compress dialog's format chooser, but an
-            // existing archive is far more often extracted.
+            // .7z — and the .xapk/.apkm app bundles since v2.1.0) get Extract actions instead of
+            // "Compress this file" — both formats are also creatable since v1.7.3 via the compress
+            // dialog's format chooser, but an existing archive is far more often extracted.
             if (onDelete != null) {
-                SheetRow(Icons.Outlined.Delete, "Move to trash", destructive = true, onClick = onDelete)
+                SheetRow(Icons.Outlined.Delete, "Move to trash", destructive = true, onClick = { perform(onDelete) })
             }
             when {
                 item.isDir && onZip != null ->
-                    SheetRow(Icons.Outlined.Archive, "Compress this folder", onClick = onZip)
+                    SheetRow(Icons.Outlined.Archive, "Compress this folder", onClick = { perform(onZip) })
                 ArchiveOps.canExtract(item.name) && onExtract != null -> {
-                    SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = onExtract)
+                    SheetRow(Icons.Outlined.FolderZip, "Extract here", onClick = { perform(onExtract) })
                     // Destination picking is optional plumbing: hide the row when a screen
                     // can't handle it, like every other non-applicable action here.
                     if (onExtractTo != null) {
-                        SheetRow(Icons.Outlined.FolderOpen, "Extract to…", onClick = onExtractTo)
+                        SheetRow(Icons.Outlined.FolderOpen, "Extract to…", onClick = { perform(onExtractTo) })
                     }
                 }
                 onZip != null ->
-                    SheetRow(Icons.Outlined.Archive, "Compress this file", onClick = onZip)
+                    SheetRow(Icons.Outlined.Archive, "Compress this file", onClick = { perform(onZip) })
             }
 
             // Favorite / advanced
@@ -160,26 +177,26 @@ fun FileActionSheet(
                 SheetRow(
                     if (isFavorite) Icons.Outlined.Star else Icons.Outlined.StarBorder,
                     if (isFavorite) "Remove favorite" else "Add favorite",
-                    onClick = onToggleFavorite,
+                    onClick = { perform(onToggleFavorite) },
                 )
             }
             if (item.isDir && onTogglePin != null) {
                 SheetRow(
                     Icons.Outlined.PushPin,
                     if (pinnedToHome) "Unpin from Home" else "Pin to Home",
-                    onClick = onTogglePin,
+                    onClick = { perform(onTogglePin) },
                 )
             }
             // Read-only properties sheet; offered for files and folders alike.
-            SheetRow(Icons.Outlined.Info, "Properties", onClick = onDetails)
+            SheetRow(Icons.Outlined.Info, "Properties", onClick = { perform(onDetails) })
             if (onShowInFolder != null) {
-                SheetRow(Icons.Outlined.FolderOpen, "Show in folder", onClick = onShowInFolder)
+                SheetRow(Icons.Outlined.FolderOpen, "Show in folder", onClick = { perform(onShowInFolder) })
             }
             if (!item.isDir && onCopyPath != null) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onCopyPath)
+                        .clickable(onClick = { perform(onCopyPath) })
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -207,7 +224,7 @@ fun FileActionSheet(
                 }
             }
             if (!item.isDir && onOpenWith != null) {
-                SheetRow(Icons.Outlined.MoreHoriz, "Open with…", onClick = onOpenWith)
+                SheetRow(Icons.Outlined.MoreHoriz, "Open with…", onClick = { perform(onOpenWith) })
             }
 
             Spacer(Modifier.height(8.dp))

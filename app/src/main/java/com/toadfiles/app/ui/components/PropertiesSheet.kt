@@ -18,16 +18,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.toadfiles.app.domain.Checksums
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FileOps
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.PropertiesBuilder
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -150,6 +158,53 @@ fun PropertiesSheet(
             }
 
             DetailRow("Modified", Format.dateTime(file.lastModified()))
+            // v2.1.0 "Add SHA": a selectable SHA-256 for files, computed on IO while the
+            // sheet is open (cancels with it — the LaunchedEffect dies on dismiss). The
+            // hex lands in a selection container so a long-press copies it; big files
+            // show the same "Calculating…" treatment as folder sizes.
+            if (!file.isDirectory) {
+                var sha256 by remember(file.path) { mutableStateOf<String?>(null) }
+                var failed by remember(file.path) { mutableStateOf(false) }
+                LaunchedEffect(file.path) {
+                    runCatching { withContext(Dispatchers.IO) { Checksums.sha256(file) } }
+                        .onSuccess { sha256 = it }
+                        .onFailure { failed = true }
+                }
+                if (failed) {
+                    DetailRow("Checksum (SHA-256)", "Could not read the file", valueColor = MaterialTheme.colorScheme.error)
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                    ) {
+                        Text(
+                            "Checksum (SHA-256)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        if (sha256 == null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Calculating…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            SelectionContainer {
+                                Text(
+                                    sha256!!, // set one branch above — non-null here
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             // The app's hidden rule is dot-prefixed names (FileRepository.list); the row is
             // only shown when it actually applies — no invented attributes.
             if (file.name.startsWith(".")) {

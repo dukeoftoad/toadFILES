@@ -143,11 +143,18 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     val currentBase = backStackEntry?.destination?.route?.substringBefore('?')
     val openFromDrawer: (String) -> Unit = { route ->
         scope.launch { drawerState.close() }
-        // Same reselection semantics as the bottom bar: never stack duplicates.
-        navController.navigate(route) {
-            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-            launchSingleTop = true
-            restoreState = true
+        // Same reselection semantics as the bottom bar: never stack duplicates — and
+        // v2.1.0: re-tapping the drawer's ALREADY-ACTIVE item resets that tab to its
+        // top level (TabReselect) instead of a no-op navigation.
+        val base = route.substringBefore('?')
+        if (currentBase == base) {
+            TabReselect.reselect(base)
+        } else {
+            navController.navigate(route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
         }
     }
     // Hamburger affordance — passed to top-level screens ONLY in SIDE_MENU mode.
@@ -186,6 +193,15 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     NavigationBarItem(
                         selected = currentBase == baseRoute,
                         onClick = {
+                            // v2.1.0 tab re-tap: tapping the ALREADY-ACTIVE tab means
+                            // "take me back up" — Browse returns to its starting folder,
+                            // Categories closes the drill-in, Recent drops its filter,
+                            // Trash clears the selection (see TabReselect). Switching
+                            // tabs still keeps every tab's state as before.
+                            if (currentBase == baseRoute) {
+                                TabReselect.reselect(baseRoute)
+                                return@NavigationBarItem
+                            }
                             // Navigate with the BASE route ("browse"), never the raw pattern
                             // ("browse?dir={dir}") — navigating the pattern makes Navigation
                             // parse the literal "{dir}" as the argument value, which sent the
@@ -385,9 +401,6 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     HorizontalDivider()
                     drawerDestinations.forEach { dest ->
                         val base = dest.route.substringBefore('?')
-                        if (dest.route == drawerDividerAfter) {
-                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                        }
                         NavigationDrawerItem(
                             label = { Text(dest.label) },
                             icon = { Icon(dest.icon, null) },
@@ -397,6 +410,13 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                                 .testTag("drawer_${dest.label}")
                                 .padding(NavigationDrawerItemDefaults.ItemPadding),
                         )
+                        // Audit A24: the divider renders AFTER the item it follows — it
+                        // used to render BEFORE ("dividerAfter" matched on the way in),
+                        // cutting Trash off from its primary group while Settings/About
+                        // sat undivided below.
+                        if (dest.route == drawerDividerAfter) {
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        }
                     }
                 }
             },

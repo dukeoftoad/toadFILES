@@ -190,13 +190,44 @@ Verified as correct during this pass (worth recording so future audits don't re-
 
 ## 7. Remediation plan
 
-| Batch | Findings | Effort |
-|---|---|---|
-| **Now (this audit's PR)** | A1 (OpRunner single-flight + cancel semantics + tests) | small, isolated |
-| Next reliability PR | A2, A3, A4, A5, A8, A9 (all op/VM lifecycle — one pass over three ViewModels + entryCount move) | medium |
-| UI perf pass | A6, A18, A19, A20, A21 | medium |
-| Theme pass | A7 (container roles), A24 | small |
-| CI/test pass | A10 (emulator job or honest removal), A11 (ShadowDownloadManager), A12 (Kover + verifyRoborazzi), A27 | medium |
-| Hardening backlog | A13-A17, A22-A26, A28-A30 | opportunistic, tied to next touch of each file |
+| Batch | Findings | Effort | Status |
+|---|---|---|---|
+| **Now (this audit's PR)** | A1 (OpRunner single-flight + cancel semantics + tests) | small, isolated | ✅ shipped in v2.0.0 (#29) |
+| Next reliability PR | A2, A3, A4, A5, A8, A9 (all op/VM lifecycle — one pass over three ViewModels + entryCount move) | medium | ✅ shipped in v2.1.0 |
+| UI perf pass | A6, A18, A19, A20, A21 | medium | A6, A18, A21 ✅ v2.1.0; A19, A20 open |
+| Theme pass | A7 (container roles), A24 | small | A24 ✅ v2.1.0; A7 open |
+| CI/test pass | A10 (emulator job or honest removal), A11 (ShadowDownloadManager), A12 (Kover + verifyRoborazzi), A27 | medium | open |
+| Hardening backlog | A13-A17, A22-A26, A28-A30 | opportunistic, tied to next touch of each file | A25 ✅ v2.1.0; rest open |
 
 *Everything above was verified by reading the code at the cited lines on the audited commit; static review only, no device run.*
+
+### 7.1 v2.1.0 remediation notes
+
+- **A2** — all four call sites now publish an indeterminate `OpProgress(0, -1, "")`
+  immediately and move `ArchiveOps.entryCount` inside the op coroutine (Browse `startOp`/
+  `startExtract`, Categories/Recent `startExtract`/`runExtract`). Pinned by
+  `RecentViewModelTest.extract progress starts indeterminate on the caller thread - A2`.
+- **A3** — `BrowseViewModel.createFolder` dispatches the mkdir to IO (dialog closes
+  immediately); `StorageViewModel.analyzeTopLevel` publishes `analyzing = true` before
+  the `listFiles` stat walk, which now runs inside the IO coroutine (unreadable root →
+  honest reset, no stuck spinner).
+- **A4** — both `zipAll` engines forward the pipeline's own totals
+  (`base + p.done, base + p.total`, `base += p.total` per archive) and start
+  indeterminate. Verified against the existing zip progress tests (tick totals reach the
+  real file-entry count).
+- **A5** — the five op-completion sites in Categories call `refresh()` only; the
+  entries leg of `refresh()` is the in-place re-list (keeps layout, no blink, one query
+  per lane). `open()` remains user navigation only. Pinned by two new tests
+  (layout survives an op; entries never flash empty).
+- **A6** — `VideoThumb` stamps via `produceState` on IO; `ArchiveFolderPicker` lists on
+  IO inside a `LaunchedEffect` (previous folder's list stays until the new one lands);
+  Browse carries `dirWritable` in `BrowseUiState` computed at listing time, and the
+  destination-picker's TopAppBar reads that instead of stat'ing per recomposition.
+- **A8** — `summariesSeq`/`entriesSeq` (Categories) and `requestSeq` (Recent) are
+  `AtomicLong`s, matching Browse's documented pattern.
+- **A9** — `BrowseViewModel.load()` cancels `searchJob` (and `onCleared` already did);
+  the recursive walk no longer outlives navigation.
+- **A18/A21/A24/A25** — icon-set constants; `FileActionSheet` rows run
+  `sheetState.hide()` → dismiss → action so every row gets the swipe-dismiss exit
+  animation; drawer divider renders after the Trash item; dead `RecentGrid(inSelection)`
+  parameter removed.

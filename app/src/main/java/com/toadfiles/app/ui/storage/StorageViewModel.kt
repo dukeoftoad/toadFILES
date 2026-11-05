@@ -84,11 +84,19 @@ class StorageViewModel(
 
     fun analyzeTopLevel(root: File) {
         if (_state.value.analyzing) return
-        val dirs = root.listFiles { f -> f.isDirectory && !f.name.startsWith(".") } ?: return
+        // Audit A3: listFiles stats every entry — publish the progress state FIRST and
+        // do the listing inside the IO coroutine, so the heaviest work never runs on
+        // the caller (main) thread before the "Analyzing" UI exists.
         _state.update {
             it.copy(analyzing = true, analyzedBytes = 0L, usages = emptyList(), analyzedRoot = root)
         }
         analyzeJob = viewModelScope.launch(ioDispatcher) {
+            val dirs = root.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+            if (dirs == null) {
+                // Unreadable root (vanished / permissions): nothing to analyze.
+                _state.update { it.copy(analyzing = false, analyzedRoot = null) }
+                return@launch
+            }
             val result = mutableListOf<DirUsage>()
             var progress = 0L
             try {
