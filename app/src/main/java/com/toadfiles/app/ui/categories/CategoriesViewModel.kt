@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import java.nio.file.Files
 import kotlin.coroutines.coroutineContext
 
@@ -130,9 +131,13 @@ class CategoriesViewModel(
     private val _state = MutableStateFlow(CategoriesUiState())
     val state: StateFlow<CategoriesUiState> = _state
 
-    /** Request ids + live jobs per query lane: the grid summaries and the drill-in entries. */
-    private var summariesSeq = 0L
-    private var entriesSeq = 0L
+    /** Request ids + live jobs per query lane: the grid summaries and the drill-in entries.
+     *  Atomic (audit A8): op completions bump [entriesSeq] from IO coroutines — two
+     *  concurrent finishers could interleave non-atomic increments and both pass the
+     *  staleness guard, letting a stale result overwrite a newer one. Browse fixed
+     *  exactly this with AtomicLong and documents why. */
+    private val summariesSeq = AtomicLong(0L)
+    private val entriesSeq = AtomicLong(0L)
     private var summariesJob: Job? = null
     private var entriesJob: Job? = null
 
@@ -150,21 +155,22 @@ class CategoriesViewModel(
     }
 
     fun refresh() {
-        val token = ++summariesSeq
+        val token = summariesSeq.incrementAndGet()
         _state.update { it.copy(loading = true) }
         summariesJob?.cancel()
         summariesJob = viewModelScope.launch(ioDispatcher) {
             val summaries = runCatching { media.summaries() }.getOrDefault(emptyList())
-            if (token != summariesSeq) return@launch // superseded by a newer refresh
+            if (token != summariesSeq.get()) return@launch // superseded by a newer refresh
             _state.update { it.copy(summaries = summaries, loading = false) }
         }
         // Pull-to-refresh with a category open must also re-query the visible drill-in
         // list in place — the same shared entriesSeq/entriesJob race guard as open(),
         // but without clearing the rows or raising entriesLoading: the current entries
-        // stay on screen until the fresh list lands.
+        // stay on screen until the fresh list lands. Ops re-list through here too
+        // (audit A5): this leg keeps the user's layout choice and never blinks.
         val selected = _state.value.selected
         if (selected != null) {
-            val entriesToken = ++entriesSeq
+            val entriesToken = entriesSeq.incrementAndGet()
             entriesJob?.cancel()
             entriesJob = viewModelScope.launch(ioDispatcher) {
                 val entries = runCatching { media.list(selected, limit = QUERY_LIMIT) }.getOrDefault(emptyList())
@@ -173,7 +179,7 @@ class CategoriesViewModel(
                     // this is still the newest query for the category still on screen
                     // (a newer open() bumps entriesSeq and discards this result, and
                     // this leg's bump discards a still-in-flight open() query).
-                    if (entriesToken != entriesSeq || s.selected != selected) return@update s
+                    if (entriesToken != entriesSeq.get() || s.selected != selected) return@update s
                     s.copy(
                         entries = sortEntries(entries),
                         entriesLoading = false,
@@ -186,7 +192,7 @@ class CategoriesViewModel(
     }
 
     fun open(category: FileCategory) {
-        val token = ++entriesSeq
+        val token = entriesSeq.incrementAndGet()
         _state.update {
             it.copy(
                 selected = category,
@@ -206,7 +212,7 @@ class CategoriesViewModel(
             _state.update { s ->
                 // Rapid category switches can finish out of order — apply only when this
                 // is still the newest drill-in request for the category still on screen.
-                if (token != entriesSeq || s.selected != category) return@update s
+                if (token != entriesSeq.get() || s.selected != category) return@update s
                 s.copy(entries = sortEntries(entries), entriesLoading = false)
             }
         }
@@ -214,7 +220,17 @@ class CategoriesViewModel(
 
     /** Leaves the drill-in list and returns to the category grid. */
     fun close() {
+        entriesJob?.cancel()
         _state.update { it.copy(selected = null, entries = emptyList(), selection = emptySet()) }
+    }
+
+    /**
+     * Tab re-tap (v2.1.0): the drill-in closes onto the category grid; already on the
+     * grid, it only clears the selection. Tab switching itself still restores the
+     * drill-in — this is the explicit "take me back up" gesture.
+     */
+    fun resetToRoot() {
+        if (_state.value.selected != null) close() else clearSelection()
     }
 
     // ---------- sort / layout (Browse parity, session-local) ----------
@@ -297,7 +313,10 @@ class CategoriesViewModel(
                     toast = MediaTrashOps.toastFor(result),
                 )
             }
-            _state.value.selected?.let { open(it) }
+            // Audit A5: ops re-list through refresh() alone — its entries leg re-queries
+            // the open category IN PLACE (keeps the user's layout choice, never blinks
+            // the rows empty). open() here used to snap the layout back to the category
+            // default and re-query the same lane twice.
             refresh()
         }
     }
@@ -339,7 +358,7 @@ class CategoriesViewModel(
                     },
                 )
             }
-            _state.value.selected?.let { open(it) }
+            // Audit A5: re-list in place via refresh() — see confirmDelete.
             refresh()
         }
     }
@@ -378,7 +397,7 @@ class CategoriesViewModel(
                     else "Renamed to \"${dest.name}\"",
                 )
             }
-            _state.value.selected?.let { open(it) }
+            // Audit A5: re-list in place via refresh() — see confirmDelete.
             refresh()
         }
     }
@@ -577,7 +596,9 @@ class CategoriesViewModel(
     ) {
         val separate = targets.size > 1
         val title = if (format == ArchiveFormat.SEVEN_Z) "Compressing" else "Zipping"
-        _state.update { it.copy(progress = title to OpProgress(0, files.size, "")) }
+        // Audit A4: real totals are per-archive file counts — unknown without an IO
+        // walk, so the overlay starts indeterminate and the first tick fixes it.
+        _state.update { it.copy(progress = title to OpProgress(0, -1, "")) }
         ops.run(
             op = { onP ->
                 var succeeded = 0
@@ -588,15 +609,20 @@ class CategoriesViewModel(
                 var base = 0
                 for (i in targets.indices) {
                     val srcs = if (separate) listOf(files[i]) else files
+                    var archiveTotal = 0
                     val r = ArchiveOps.compress(srcs, targets[i], format, level, password = password, volumeBytes = volumeBytes) { p ->
-                        onP(OpProgress(base + p.done, files.size, p.currentItem))
+                        // Audit A4: forward the pipeline's OWN totals (p.done counts files
+                        // added; p.total = that archive's file count) — substituting
+                        // files.size showed "37 of 1 items" and clamped the bar.
+                        archiveTotal = p.total
+                        onP(OpProgress(base + p.done, base + p.total, p.currentItem))
                     }
                     succeeded += r.succeeded
                     skipped += r.skipped
                     failed += r.failed
                     if (r.cancelled) cancelled = true
                     failures += r.failures
-                    base += r.succeeded
+                    base += archiveTotal
                     // Delete-after-compress honors the dialog checkbox (initialized from
                     // the persisted setting): per archive, only a fully successful run
                     // trashes that archive's own source.
@@ -614,8 +640,7 @@ class CategoriesViewModel(
             onDone = { r ->
                 _state.update { it.copy(progress = null, result = r, resultTitle = title) }
                 // The new archives land outside the media index until the next scan; a
-                // refresh keeps the grid honest either way.
-                _state.value.selected?.let { open(it) }
+                // refresh keeps the grid honest either way (audit A5: re-list in place).
                 refresh()
             },
         )
@@ -689,9 +714,14 @@ class CategoriesViewModel(
 
     private fun startExtract(file: File, target: File, overwrite: Boolean = false, password: CharArray? = null) {
         val progressTitle = "Extracting ${file.name}"
-        _state.update { it.copy(progress = progressTitle to OpProgress(0, ArchiveOps.entryCount(file) ?: 1, "")) }
+        // Audit A2: the header parse is disk I/O — the overlay starts indeterminate;
+        // the op coroutine publishes the determinate total once the directory is read.
+        _state.update { it.copy(progress = progressTitle to OpProgress(0, -1, "")) }
         ops.run(
-            op = { onP -> ArchiveOps.extract(file, target, overwrite, password = password, onProgress = onP) },
+            op = { onP ->
+                onP(OpProgress(0, ArchiveOps.entryCount(file) ?: -1, ""))
+                ArchiveOps.extract(file, target, overwrite, password = password, onProgress = onP)
+            },
             onProgress = { p -> _state.update { it.copy(progress = progressTitle to p) } },
             onDone = { r ->
                 if (r.passwordRequired) {
@@ -708,9 +738,8 @@ class CategoriesViewModel(
                 }
                 _state.update { it.copy(progress = null, result = r, resultTitle = "Extracting") }
                 if (r.fullySucceeded) trashArchiveAfterExtract(file)
-                // Re-list the open category + summaries, like confirmDelete does, so any
-                // newly scanned files show up where the user is looking.
-                _state.value.selected?.let { open(it) }
+                // Re-list the open category + summaries (audit A5: in place via
+                // refresh()) so any newly scanned files show up where the user is looking.
                 refresh()
             },
         )

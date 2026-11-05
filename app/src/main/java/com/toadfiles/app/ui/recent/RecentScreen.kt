@@ -75,6 +75,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.ui.Routes
+import com.toadfiles.app.ui.TabReselect
 import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.BrowseLayout
 import com.toadfiles.app.domain.FileCategory
@@ -123,6 +125,15 @@ fun RecentScreen(
         state.toast?.let {
             snackbar.showSnackbar(it)
             vm.consumeToast()
+        }
+    }
+
+    // v2.1.0 tab re-tap: the second tap on the active Recent tab drops back to the
+    // tab's top level — type filter to All, selection cleared. Switching tabs still
+    // restores the filtered view — that behavior stays.
+    LaunchedEffect(Unit) {
+        TabReselect.events.collect { route ->
+            if (route == Routes.RECENT) vm.resetToRoot()
         }
     }
 
@@ -278,7 +289,6 @@ fun RecentScreen(
                     RecentGrid(
                         grouped = grouped,
                         state = state,
-                        inSelection = inSelection,
                         onEntryTap = { e ->
                             if (inSelection) vm.toggleSelection(e) else openEntry(e)
                         },
@@ -492,7 +502,7 @@ private fun RecentRow(
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(
-                    "${Format.size(e.size)} · ${Format.date(e.dateModified)}",
+                    "${Format.size(e.size)} · ${Format.dateTime(e.dateModified)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -526,7 +536,6 @@ private fun RecentRow(
 private fun RecentGrid(
     grouped: List<Pair<RecentGroup, List<MediaRepository.MediaEntry>>>,
     state: RecentUiState,
-    inSelection: Boolean,
     onEntryTap: (MediaRepository.MediaEntry) -> Unit,
     onEntryLongPress: (MediaRepository.MediaEntry) -> Unit,
     onEntryMore: (MediaRepository.MediaEntry) -> Unit,

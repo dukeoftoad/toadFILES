@@ -751,7 +751,7 @@ private fun RecentPreviewRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${Format.size(e.size)} · ${Format.date(e.dateModified)}",
+                    "${Format.size(e.size)} · ${Format.dateTime(e.dateModified)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

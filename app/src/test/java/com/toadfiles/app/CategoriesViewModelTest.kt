@@ -282,6 +282,75 @@ class CategoriesViewModelTest {
         assertEquals("Moved 0 to trash · 1 had no on-disk path", vm.state.value.toast)
     }
 
+    // ---------- v2.1.0: A5 in-place re-list + tab re-tap ----------
+
+    @Test
+    fun `op re-list keeps the user's layout choice - A5`() {
+        // Audit A5 regression: ops used to re-list via open(), which hard-reset the
+        // layout to the category default — a user on LIST who deleted one image got
+        // snapped back to GRID. The re-list now goes through refresh()'s in-place leg.
+        vm.open(FileCategory.IMAGES) // opens as GRID (visual category default)
+        await { vm.state.value.selected == FileCategory.IMAGES && !vm.state.value.entriesLoading }
+        vm.toggleLayout()
+        assertEquals(
+            com.toadfiles.app.domain.BrowseLayout.LIST,
+            vm.state.value.layout,
+        )
+
+        vm.requestDelete(listOf(entry(1, "pic.jpg", data = null)))
+        vm.confirmDelete()
+        await { vm.state.value.toast != null }
+        assertEquals(
+            "the layout the user picked survives the op",
+            com.toadfiles.app.domain.BrowseLayout.LIST,
+            vm.state.value.layout,
+        )
+    }
+
+    @Test
+    fun `op re-list never blinks the list empty mid-op - A5`() {
+        // With a category open, an op completion re-queries IN PLACE: the rows stay on
+        // screen (entriesLoading must not flip back on) until the fresh list lands.
+        vm = CategoriesViewModel(container, ioDispatcher = dispatcher, media = SortedFakeMedia())
+        vm.open(FileCategory.DOCS)
+        await { vm.state.value.selected == FileCategory.DOCS && !vm.state.value.entriesLoading }
+        assertFalse(vm.state.value.entries.isEmpty())
+
+        // A real rename on a real file: completion re-lists through refresh(), which
+        // must NOT clear entries or raise the loading flag (the old open(it) did both).
+        val src = java.io.File(container.fileRepo.primaryRoot(), "rename-src.pdf")
+        src.parentFile.mkdirs()
+        src.writeText("rename me")
+        try {
+            vm.rename(entry(1, "rename-src.pdf", data = src.absolutePath), "renamed.pdf")
+            await { vm.state.value.toast != null }
+            assertTrue("entries survive the op visually", vm.state.value.entries.isNotEmpty())
+            assertFalse("no loading flash between old and new list", vm.state.value.entriesLoading)
+        } finally {
+            src.delete()
+        }
+    }
+
+    @Test
+    fun `resetToRoot closes the drill-in onto the grid`() {
+        vm.open(FileCategory.DOCS)
+        await { vm.state.value.selected == FileCategory.DOCS && !vm.state.value.entriesLoading }
+
+        vm.resetToRoot()
+        assertNull("re-tap = back to the category grid", vm.state.value.selected)
+        assertTrue(vm.state.value.entries.isEmpty())
+    }
+
+    @Test
+    fun `resetToRoot on the grid only clears the selection`() {
+        vm.toggleSelection(entry(1, "a.pdf"))
+        assertEquals(1, vm.state.value.selection.size)
+
+        vm.resetToRoot()
+        assertEquals(0, vm.state.value.selection.size)
+        assertNull("no drill-in was open, none should appear", vm.state.value.selected)
+    }
+
     /** Records row-hygiene args so the "stale entries are never row-dropped" rule is assertable. */
     private class RecordingMedia : MediaQuerySource {
         val deleteStaleArgs = mutableListOf<List<MediaRepository.MediaEntry>>()

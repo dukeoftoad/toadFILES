@@ -1558,4 +1558,57 @@ class BrowseViewModelTest {
         assertNull(vm.state.value.pendingProperties)
         assertNull(vm.state.value.propertiesDetail)
     }
+
+    // ---------- v2.1.0: tab re-tap resets ----------
+
+    @Test
+    fun `resetToRoot returns to the folder the tab first opened`() {
+        vm.openDir(dir)
+        await { vm.state.value.dir == dir && !vm.state.value.loading }
+        val sub = File(dir, "deep").apply { mkdirs() }
+        vm.openDir(sub)
+        await { vm.state.value.dir == sub && !vm.state.value.loading }
+
+        vm.resetToRoot()
+        await { vm.state.value.dir == dir && !vm.state.value.loading }
+        assertEquals("re-tap lands on the tab's starting folder", dir, vm.state.value.dir)
+    }
+
+    @Test
+    fun `resetToRoot on the starting folder only clears the selection`() {
+        vm.openDir(dir)
+        await { vm.state.value.dir == dir && !vm.state.value.loading }
+        val f = File(dir, "select-me.txt").apply { writeText("x") }
+        vm.openDir(dir) // re-list to pick the file up
+        await { !vm.state.value.loading && vm.state.value.items.isNotEmpty() }
+        vm.toggleSelection(vm.state.value.items.first())
+        assertEquals(1, vm.state.value.selection.size)
+
+        vm.resetToRoot()
+        await { vm.state.value.selection.isEmpty() }
+        assertEquals("already on the root — no reload churn", dir, vm.state.value.dir)
+    }
+
+    @Test
+    fun `resetToRoot clears an active in-tree search`() = runTest {
+        val sub = File(dir, "haystack").apply { mkdirs() }
+        File(sub, "needle.txt").writeText("find me")
+        vm.openDir(dir)
+        await { vm.state.value.dir == dir && !vm.state.value.loading }
+
+        vm.setQuery("needle")
+        // Same debounce dance as the setQuery tests above: virtual-time past the 300 ms.
+        testScheduler.advanceTimeBy(301)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.state.value.items.any { it.name == "needle.txt" })
+
+        vm.resetToRoot()
+        testScheduler.advanceUntilIdle()
+        await { vm.state.value.query.isEmpty() && !vm.state.value.loading }
+        assertTrue(
+            "the folder listing is back, not the search results",
+            vm.state.value.items.any { it.name == "haystack" },
+        )
+        assertTrue(vm.state.value.items.none { it.name == "needle.txt" })
+    }
 }
