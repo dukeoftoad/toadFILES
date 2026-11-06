@@ -552,7 +552,15 @@ fun ConflictDialog(
 }
 
 @Composable
-fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, onCancel: () -> Unit) {
+fun ProgressOverlay(
+    text: String,
+    done: Int,
+    total: Int,
+    currentItem: String?,
+    onCancel: () -> Unit,
+    bytesDone: Long = -1L,
+    bytesTotal: Long = -1L,
+) {
     AlertDialog(
         modifier = Modifier.testTag("overlay_progress"),
         onDismissRequest = {},
@@ -561,9 +569,18 @@ fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, o
             Column {
                 if (total > 0) {
                     // Determinate: a smooth bar plus the two signals a bare bar withholds
-                    // — how far along (percent) and what is happening ("2 of 4 items",
-                    // with the entry name when the pipeline reports one).
-                    val target = (done.toFloat() / total).coerceIn(0f, 1f)
+                    // — how far along (percent) and what is happening. Byte-level ops
+                    // (zip extraction, owner report "441 of 2") drive the percent from
+                    // bytes: an archive of a couple of huge files made the item-derived
+                    // bar jump 0 → 50% → 100% while nothing seemed to happen; bytes move
+                    // it every buffer. Item-count ops (copy, move, compress) keep the
+                    // item-derived percent.
+                    val hasBytes = bytesTotal > 0
+                    val target = if (hasBytes) {
+                        (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f)
+                    } else {
+                        (done.toFloat() / total).coerceIn(0f, 1f)
+                    }
                     val animated by animateFloatAsState(
                         targetValue = target,
                         animationSpec = tween(durationMillis = 250),
@@ -583,17 +600,42 @@ fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, o
                     }
                     Spacer(Modifier.height(8.dp))
                     val item = currentItem?.takeIf { it.isNotBlank() }
-                    Text(
-                        buildString {
-                            append(done).append(" of ").append(total)
-                            append(if (total == 1) " item" else " items")
-                            if (item != null) append(" — ").append(item)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (hasBytes) {
+                        // Line 1: the byte tally with the live entry (middle-ellipsis —
+                        // the meaningful tail of a name survives long res/… paths).
+                        Text(
+                            buildString {
+                                append(Format.size(bytesDone))
+                                append(" of ").append(Format.size(bytesTotal))
+                                if (item != null) append(" — ").append(item)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.MiddleEllipsis,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        // Line 2: the item count, so "how many files" stays answered.
+                        Text(
+                            "File $done of $total",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        Text(
+                            buildString {
+                                append(done).append(" of ").append(total)
+                                append(if (total == 1) " item" else " items")
+                                if (item != null) append(" — ").append(item)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.MiddleEllipsis,
+                        )
+                    }
                 } else {
                     // Unknown total (zip-volume merge, listing-driven ops): indeterminate.
                     Row(verticalAlignment = Alignment.CenterVertically) {

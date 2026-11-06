@@ -935,6 +935,8 @@ fun BrowseScreen(
             done = p.done,
             total = p.total,
             currentItem = p.currentItem,
+            bytesDone = p.bytesDone,
+            bytesTotal = p.bytesTotal,
             onCancel = {
                 // v1.7.3 abortConfirm: ask before killing a running archive operation
                 // unless the user turned the confirmation off in Settings.

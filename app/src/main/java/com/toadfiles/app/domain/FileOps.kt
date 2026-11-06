@@ -16,7 +16,19 @@ import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
 
-data class OpProgress(val done: Int, val total: Int, val currentItem: String)
+/**
+ * One progress tick. [done]/[total] count items; [bytesDone]/[bytesTotal] carry the
+ * byte-level signal for ops that stream a few huge items (zip extraction, owner report
+ * "441 of 2" — bytes move the bar every buffer where items jump in huge strides).
+ * Both byte fields stay -1 for item-only ops, which is every pre-existing caller.
+ */
+data class OpProgress(
+    val done: Int,
+    val total: Int,
+    val currentItem: String,
+    val bytesDone: Long = -1L,
+    val bytesTotal: Long = -1L,
+)
 
 data class OpResult(
     val succeeded: Int,
