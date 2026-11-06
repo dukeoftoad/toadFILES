@@ -59,6 +59,7 @@ import com.toadfiles.app.ui.whatsnew.WhatsNewScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.theme.LocalToadMotion
 import com.toadfiles.app.ui.theme.ToadFace
@@ -117,27 +118,35 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     // v1.11: nav transitions follow the user's motion style (Springy toad / Calm /
     // Cinematic), chosen on the Appearance tab.
     val motion = LocalToadMotion.current
-    val destinations = listOf(
-        BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) },
-        BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) },
-        BottomDestination(Routes.CATEGORIES, "Categories") { Icon(Icons.Outlined.Category, null) },
-        BottomDestination(Routes.SETTINGS, "Settings") { Icon(Icons.Outlined.Settings, null) },
-    )
+    // Lite (docs/LITE_EDITION_PLAN.md §3 phase 2): the Categories media screens are a
+    // full-edition tab — lite never registers the route, so the tab row hides it and
+    // R8 strips the screen's code from the release build.
+    val destinations = buildList {
+        add(BottomDestination(Routes.HOME, "Home") { Icon(Icons.Outlined.Home, null) })
+        add(BottomDestination(Routes.BROWSE, "Browse") { Icon(Icons.Outlined.Folder, null) })
+        if (!IS_LITE) {
+            add(BottomDestination(Routes.CATEGORIES, "Categories") { Icon(Icons.Outlined.Category, null) })
+        }
+        add(BottomDestination(Routes.SETTINGS, "Settings") { Icon(Icons.Outlined.Settings, null) })
+    }
 
-    // Full destination set for the side drawer. Home and Categories were missing in
-    // v1.7.3, making them unreachable in SIDE_MENU mode; About sits below a divider.
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    val drawerDestinations = listOf(
-        DrawerDestination(Routes.HOME, "Home", Icons.Outlined.Home),
-        DrawerDestination(Routes.BROWSE, "Browse", Icons.Outlined.Folder),
-        DrawerDestination(Routes.CATEGORIES, "Categories", Icons.Outlined.Category),
-        DrawerDestination(Routes.RECENT, "Recent", Icons.Outlined.History),
-        DrawerDestination(Routes.TRASH, "Trash", Icons.Outlined.Delete),
+    // Full destination set for the side drawer. Home and Categories were missing in
+    // v1.7.3, making them unreachable in SIDE_MENU mode; About sits below a divider.
+    // Lite drops Categories with the tab (Storage never was a primary destination).
+    val drawerDestinations = buildList {
+        add(DrawerDestination(Routes.HOME, "Home", Icons.Outlined.Home))
+        add(DrawerDestination(Routes.BROWSE, "Browse", Icons.Outlined.Folder))
+        if (!IS_LITE) {
+            add(DrawerDestination(Routes.CATEGORIES, "Categories", Icons.Outlined.Category))
+        }
+        add(DrawerDestination(Routes.RECENT, "Recent", Icons.Outlined.History))
+        add(DrawerDestination(Routes.TRASH, "Trash", Icons.Outlined.Delete))
         // ---- secondary group ----
-        DrawerDestination(Routes.SETTINGS, "Settings", Icons.Outlined.Settings),
-        DrawerDestination(Routes.ABOUT, "About", Icons.Outlined.Info),
-    )
+        add(DrawerDestination(Routes.SETTINGS, "Settings", Icons.Outlined.Settings))
+        add(DrawerDestination(Routes.ABOUT, "About", Icons.Outlined.Info))
+    }
     val drawerDividerAfter = Routes.TRASH
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentBase = backStackEntry?.destination?.route?.substringBefore('?')
@@ -293,22 +302,27 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenArchive = openArchive,
                 )
             }
-            composable(Routes.CATEGORIES) {
-                CategoriesScreen(
-                    bottomPadding = padding.calculateBottomPadding(),
-                    onBack = { navController.popBackStack() },
-                    onShowInFolder = { path ->
-                        // Same pinpoint as Recent: hand Browse the file name to flash.
-                        val f = File(path)
-                        val parent = f.parentFile
-                        if (parent != null && parent.isDirectory) {
-                            navController.navigateSingleTop(
-                                Routes.browse(parent.absolutePath, reveal = f.name)
-                            )
-                        }
-                    },
-                    onOpenArchive = openArchive,
-                )
+            if (!IS_LITE) {
+                // Full edition only: per-category media library (per-category directory
+                // scans + cursor churn + large grid state — lite's heaviest runtime
+                // cut after video thumbnails).
+                composable(Routes.CATEGORIES) {
+                    CategoriesScreen(
+                        bottomPadding = padding.calculateBottomPadding(),
+                        onBack = { navController.popBackStack() },
+                        onShowInFolder = { path ->
+                            // Same pinpoint as Recent: hand Browse the file name to flash.
+                            val f = File(path)
+                            val parent = f.parentFile
+                            if (parent != null && parent.isDirectory) {
+                                navController.navigateSingleTop(
+                                    Routes.browse(parent.absolutePath, reveal = f.name)
+                                )
+                            }
+                        },
+                        onOpenArchive = openArchive,
+                    )
+                }
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(
@@ -331,15 +345,21 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 AboutScreen(
                     bottomPadding = padding.calculateBottomPadding(),
                     onBack = { navController.popBackStack() },
-                    onOpenWhatsNew = { navController.navigateSingleTop(Routes.WHATS_NEW) },
+                    // Lite ships no changelog asset and no update checker — the About
+                    // screen hides both cards there and never calls this.
+                    onOpenWhatsNew = { if (!IS_LITE) navController.navigateSingleTop(Routes.WHATS_NEW) },
                 )
             }
 
-            composable(Routes.WHATS_NEW) {
-                WhatsNewScreen(
-                    bottomPadding = padding.calculateBottomPadding(),
-                    onBack = { navController.popBackStack() },
-                )
+            if (!IS_LITE) {
+                // Full edition only: the bundled-changelog What's New page. Lite skips
+                // the route and the syncChangelog asset copy (plan §3 phase 2).
+                composable(Routes.WHATS_NEW) {
+                    WhatsNewScreen(
+                        bottomPadding = padding.calculateBottomPadding(),
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
 
             composable(Routes.TRASH) {
@@ -349,25 +369,30 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenDrawer = openDrawer,
                 )
             }
-            composable(Routes.STORAGE) {
-                StorageScreen(
-                    bottomPadding = padding.calculateBottomPadding(),
-                    onBack = { navController.popBackStack() },
-                    onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
-                    onOpenAnalyzer = { navController.navigateSingleTop(Routes.storageAnalyzer()) },
-                )
-            }
+            if (!IS_LITE) {
+                // Full edition only: per-volume storage + the biggest-folders analyzer
+                // (a full-tree walk of the volume — the heaviest single operation in
+                // the app; lite's Home card is hidden with it, plan §3 phase 2).
+                composable(Routes.STORAGE) {
+                    StorageScreen(
+                        bottomPadding = padding.calculateBottomPadding(),
+                        onBack = { navController.popBackStack() },
+                        onOpenFolder = { navController.navigateSingleTop(Routes.browse(it)) },
+                        onOpenAnalyzer = { navController.navigateSingleTop(Routes.storageAnalyzer()) },
+                    )
+                }
 
-            composable(
-                route = Routes.STORAGE_ANALYZER,
-                arguments = listOf(navArgument("root") { type = NavType.StringType; defaultValue = "" }),
-            ) { entry ->
-                StorageAnalyzerScreen(
-                    bottomPadding = padding.calculateBottomPadding(),
-                    onBack = { navController.popBackStack() },
-                    onOpenFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
-                    initialRoot = entry.arguments?.getString("root").orEmpty(),
-                )
+                composable(
+                    route = Routes.STORAGE_ANALYZER,
+                    arguments = listOf(navArgument("root") { type = NavType.StringType; defaultValue = "" }),
+                ) { entry ->
+                    StorageAnalyzerScreen(
+                        bottomPadding = padding.calculateBottomPadding(),
+                        onBack = { navController.popBackStack() },
+                        onOpenFolder = { dir -> navController.navigateSingleTop(Routes.browse(dir)) },
+                        initialRoot = entry.arguments?.getString("root").orEmpty(),
+                    )
+                }
             }
         }
     }

@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  toadFILES Lite flavor manifest (docs/LITE_EDITION_PLAN.md §3):
+
+  1. NO INTERNET permission — lite has no update checker at all, so the README's
+     "no internet permission at all" pride applies to lite without exception. The
+     line below strips the main manifest's permission at merge time.
+  2. ZIP-only VIEW filter — the app never advertises what it can't do, and lite
+     can't extract 7z (commons-compress + xz are not on the lite classpath).
+  3. Exactly ONE launcher entry — all 42 full-edition activity-aliases are removed
+     at merge time (smaller manifest, no PackageManager alias work at startup) and
+     a single LauncherLite alias carries the MAIN/LAUNCHER filter. The unused
+     mipmap/foreground resources are stripped from the release APK by the
+     resource shrinker.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove" />
+
+    <application>
+
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-zip" />
+                <data android:mimeType="application/x-compressed" />
+                <data android:mimeType="multipart/x-zip" />
+            </intent-filter>
+        </activity>
+
+        <!-- LauncherClassicGreen -->
+        <activity-alias
+            android:name=".LauncherClassicGreen"
+            tools:node="remove" />
+        <!-- LauncherClassicTeal -->
+        <activity-alias
+            android:name=".LauncherClassicTeal"
+            tools:node="remove" />
+        <!-- LauncherClassicBlue -->
+        <activity-alias
+            android:name=".LauncherClassicBlue"
+            tools:node="remove" />
+        <!-- LauncherClassicLilac -->
+        <activity-alias
+            android:name=".LauncherClassicLilac"
+            tools:node="remove" />
+        <!-- LauncherClassicAmber -->
+        <activity-alias
+            android:name=".LauncherClassicAmber"
+            tools:node="remove" />
+        <!-- LauncherClassicRose -->
+        <activity-alias
+            android:name=".LauncherClassicRose"
+            tools:node="remove" />
+        <!-- LauncherFaceGreen -->
+        <activity-alias
+            android:name=".LauncherFaceGreen"
+            tools:node="remove" />
+        <!-- LauncherFaceTeal -->
+        <activity-alias
+            android:name=".LauncherFaceTeal"
+            tools:node="remove" />
+        <!-- LauncherFaceBlue -->
+        <activity-alias
+            android:name=".LauncherFaceBlue"
+            tools:node="remove" />
+        <!-- LauncherFaceLilac -->
+        <activity-alias
+            android:name=".LauncherFaceLilac"
+            tools:node="remove" />
+        <!-- LauncherFaceAmber -->
+        <activity-alias
+            android:name=".LauncherFaceAmber"
+            tools:node="remove" />
+        <!-- LauncherFaceRose -->
+        <activity-alias
+            android:name=".LauncherFaceRose"
+            tools:node="remove" />
+        <!-- LauncherDocGreen -->
+        <activity-alias
+            android:name=".LauncherDocGreen"
+            tools:node="remove" />
+        <!-- LauncherDocTeal -->
+        <activity-alias
+            android:name=".LauncherDocTeal"
+            tools:node="remove" />
+        <!-- LauncherDocBlue -->
+        <activity-alias
+            android:name=".LauncherDocBlue"
+            tools:node="remove" />
+        <!-- LauncherDocLilac -->
+        <activity-alias
+            android:name=".LauncherDocLilac"
+            tools:node="remove" />
+        <!-- LauncherDocAmber -->
+        <activity-alias
+            android:name=".LauncherDocAmber"
+            tools:node="remove" />
+        <!-- LauncherDocRose -->
+        <activity-alias
+            android:name=".LauncherDocRose"
+            tools:node="remove" />
+        <!-- LauncherCrownGreen -->
+        <activity-alias
+            android:name=".LauncherCrownGreen"
+            tools:node="remove" />
+        <!-- LauncherCrownTeal -->
+        <activity-alias
+            android:name=".LauncherCrownTeal"
+            tools:node="remove" />
+        <!-- LauncherCrownBlue -->
+        <activity-alias
+            android:name=".LauncherCrownBlue"
+            tools:node="remove" />
+        <!-- LauncherCrownLilac -->
+        <activity-alias
+            android:name=".LauncherCrownLilac"
+            tools:node="remove" />
+        <!-- LauncherCrownAmber -->
+        <activity-alias
+            android:name=".LauncherCrownAmber"
+            tools:node="remove" />
+        <!-- LauncherCrownRose -->
+        <activity-alias
+            android:name=".LauncherCrownRose"
+            tools:node="remove" />
+        <!-- LauncherPixelGreen -->
+        <activity-alias
+            android:name=".LauncherPixelGreen"
+            tools:node="remove" />
+        <!-- LauncherPixelTeal -->
+        <activity-alias
+            android:name=".LauncherPixelTeal"
+            tools:node="remove" />
+        <!-- LauncherPixelBlue -->
+        <activity-alias
+            android:name=".LauncherPixelBlue"
+            tools:node="remove" />
+        <!-- LauncherPixelLilac -->
+        <activity-alias
+            android:name=".LauncherPixelLilac"
+            tools:node="remove" />
+        <!-- LauncherPixelAmber -->
+        <activity-alias
+            android:name=".LauncherPixelAmber"
+            tools:node="remove" />
+        <!-- LauncherPixelRose -->
+        <activity-alias
+            android:name=".LauncherPixelRose"
+            tools:node="remove" />
+        <!-- LauncherSdGreen -->
+        <activity-alias
+            android:name=".LauncherSdGreen"
+            tools:node="remove" />
+        <!-- LauncherSdTeal -->
+        <activity-alias
+            android:name=".LauncherSdTeal"
+            tools:node="remove" />
+        <!-- LauncherSdBlue -->
+        <activity-alias
+            android:name=".LauncherSdBlue"
+            tools:node="remove" />
+        <!-- LauncherSdLilac -->
+        <activity-alias
+            android:name=".LauncherSdLilac"
+            tools:node="remove" />
+        <!-- LauncherSdAmber -->
+        <activity-alias
+            android:name=".LauncherSdAmber"
+            tools:node="remove" />
+        <!-- LauncherSdRose -->
+        <activity-alias
+            android:name=".LauncherSdRose"
+            tools:node="remove" />
+        <!-- LauncherToadGreen -->
+        <activity-alias
+            android:name=".LauncherToadGreen"
+            tools:node="remove" />
+        <!-- LauncherToadTeal -->
+        <activity-alias
+            android:name=".LauncherToadTeal"
+            tools:node="remove" />
+        <!-- LauncherToadBlue -->
+        <activity-alias
+            android:name=".LauncherToadBlue"
+            tools:node="remove" />
+        <!-- LauncherToadLilac -->
+        <activity-alias
+            android:name=".LauncherToadLilac"
+            tools:node="remove" />
+        <!-- LauncherToadAmber -->
+        <activity-alias
+            android:name=".LauncherToadAmber"
+            tools:node="remove" />
+        <!-- LauncherToadRose -->
+        <activity-alias
+            android:name=".LauncherToadRose"
+            tools:node="remove" />
+
+        <!-- The one and only lite launcher entry. -->
+        <activity-alias
+            android:name=".LauncherLite"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+    </application>
+</manifest>

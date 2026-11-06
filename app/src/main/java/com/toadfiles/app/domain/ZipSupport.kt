@@ -4,7 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import org.apache.commons.compress.PasswordRequiredException
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -237,16 +236,22 @@ object ZipSupport {
                         fail++
                         failures += ab.message ?: "aborted"
                         break
-                    } catch (e: PasswordRequiredException) {
-                        // Only reachable if a commons-compress stream is ever wired in;
-                        // java.util.zip declines encryption with its own "encrypt" message
-                        // instead. Never reported as passwordRequired for zip: prompting
-                        // can't help, java.util.zip cannot decrypt anything.
-                        fail++
-                        failures += "$name: $PASSWORD_UNSUPPORTED"
                     } catch (e: Exception) {
                         fail++
-                        failures += "$name: ${friendlyArchiveError(e)}"
+                        // commons-compress's PasswordRequiredException (checked by
+                        // class name — the library is a full-flavor-only dependency
+                        // since the Lite edition split, so this file must not import
+                        // it) is only reachable if a commons-compress stream is ever
+                        // wired into this zip pipeline; java.util.zip declines
+                        // encryption with its own "encrypt" message instead. Either
+                        // way it is never reported as passwordRequired for zip:
+                        // prompting can't help, java.util.zip cannot decrypt anything.
+                        failures += "$name: " +
+                            if (e.javaClass.name == "org.apache.commons.compress.PasswordRequiredException") {
+                                PASSWORD_UNSUPPORTED
+                            } else {
+                                friendlyArchiveError(e)
+                            }
                     } finally {
                         onProgress(OpProgress(entries, total, name, totalBytes, bytesTotal))
                     }

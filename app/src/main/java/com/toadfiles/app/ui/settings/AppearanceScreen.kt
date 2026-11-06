@@ -62,6 +62,7 @@ import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppIconColor
 import com.toadfiles.app.domain.AppIconDesign
+import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.BackKeyAction
@@ -152,8 +153,13 @@ fun AppearanceScreen(
             }
             Spacer(Modifier.height(12.dp))
 
-            // One card per visual identity.
-            AppTheme.entries.forEach { theme ->
+            // One card per visual identity. Lite collapses the set to CLASSIC +
+            // system dark (docs/LITE_EDITION_PLAN.md §3 phase 2): the hand-tuned
+            // palettes are full-edition polish. A persisted non-classic pick still
+            // renders (ToadTheme resolves any AppTheme); the tab just stops offering
+            // new ones in lite.
+            val themeChoices = if (IS_LITE) listOf(AppTheme.CLASSIC) else AppTheme.entries.toList()
+            themeChoices.forEach { theme ->
                 ThemeCard(
                     theme = theme,
                     selected = settings.appTheme == theme,
@@ -162,8 +168,9 @@ fun AppearanceScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            // The accent-color picker belongs to the Classic identity only.
-            if (settings.appTheme == AppTheme.CLASSIC) {
+            // The accent-color picker belongs to the Classic identity only — and to
+            // the full edition: lite keeps the default Toad accent (plan §3).
+            if (!IS_LITE && settings.appTheme == AppTheme.CLASSIC) {
                 Spacer(Modifier.height(8.dp))
                 Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
@@ -198,34 +205,49 @@ fun AppearanceScreen(
 
             Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    AppFont.entries.forEachIndexed { index, font ->
+                    // Lite lists SYSTEM and TOAD only (plan §3 phase 1): the other
+                    // four families don't ship in the lite APK, so their rows would
+                    // promise letterforms the edition can't deliver. A persisted
+                    // full-edition pick degrades gracefully (Type.kt's fallback to
+                    // the system typeface), so nothing else changes.
+                    val fontChoices =
+                        if (IS_LITE) listOf(AppFont.SYSTEM, AppFont.TOAD) else AppFont.entries.toList()
+                    fontChoices.forEachIndexed { index, font ->
                         FontRow(
                             font = font,
                             selected = settings.appFont == font,
                             onClick = { vm.setAppFont(font) },
                         )
-                        if (index != AppFont.entries.lastIndex) {
+                        if (index != fontChoices.lastIndex) {
                             HorizontalDivider(Modifier.padding(horizontal = 4.dp))
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(32.dp))
 
-            Text("Motion", style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+            // ---- Motion ----
+            // Full edition only: lite is MotionStyle.NONE by construction — the
+            // edition's MainActivity pins it, so a picker with one real choice would
+            // be a lie. The card is constant-folded out of the lite build entirely
+            // (plan §3 phase 2, "Motion in Lite").
+            if (!IS_LITE) {
+                Spacer(Modifier.height(32.dp))
 
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    MotionStyle.entries.forEachIndexed { index, style ->
-                        SelectableRow(
-                            title = style.label,
-                            subtitle = style.description,
-                            selected = settings.motionStyle == style,
-                            onClick = { vm.setMotionStyle(style) },
-                        )
-                        if (index != MotionStyle.entries.lastIndex) {
-                            HorizontalDivider(Modifier.padding(horizontal = 4.dp))
+                Text("Motion", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+
+                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        MotionStyle.entries.forEachIndexed { index, style ->
+                            SelectableRow(
+                                title = style.label,
+                                subtitle = style.description,
+                                selected = settings.motionStyle == style,
+                                onClick = { vm.setMotionStyle(style) },
+                            )
+                            if (index != MotionStyle.entries.lastIndex) {
+                                HorizontalDivider(Modifier.padding(horizontal = 4.dp))
+                            }
                         }
                     }
                 }
@@ -256,53 +278,60 @@ fun AppearanceScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(32.dp))
+            // ---- App icon ----
+            // Full edition only: lite ships exactly one launcher alias (the lite
+            // manifest removes the other 42 at merge time and adds LauncherLite), so
+            // there is nothing to switch and no PackageManager work to do. The whole
+            // section constant-folds out of the lite build (plan §3 phase 2).
+            if (!IS_LITE) {
+                Spacer(Modifier.height(32.dp))
 
-            Text("App icon", style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+                Text("App icon", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
 
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Design", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "The drawing inside the icon. Classic is the original.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(AppIconDesign.entries) { d ->
-                            IconDesignTile(
-                                design = d,
-                                // Live preview: every design is rendered on the CURRENT
-                                // background tint, so picking a color re-tints all tiles.
-                                previewColor = settings.appIconColor,
-                                selected = settings.appIconDesign == d,
-                                onClick = { vm.setAppIconDesign(d) },
-                            )
+                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Design", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "The drawing inside the icon. Classic is the original.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(AppIconDesign.entries) { d ->
+                                IconDesignTile(
+                                    design = d,
+                                    // Live preview: every design is rendered on the CURRENT
+                                    // background tint, so picking a color re-tints all tiles.
+                                    previewColor = settings.appIconColor,
+                                    selected = settings.appIconDesign == d,
+                                    onClick = { vm.setAppIconDesign(d) },
+                                )
+                            }
                         }
-                    }
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Text("Background", style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(10.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(AppIconColor.entries) { c ->
-                            IconColorSwatch(
-                                color = c,
-                                selected = settings.appIconColor == c,
-                                onClick = { vm.setAppIconColor(c) },
-                            )
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                        Text("Background", style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.height(10.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(AppIconColor.entries) { c ->
+                                IconColorSwatch(
+                                    color = c,
+                                    selected = settings.appIconColor == c,
+                                    onClick = { vm.setAppIconColor(c) },
+                                )
+                            }
                         }
+                        Text(
+                            "The launcher may take a moment to show the new icon.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
                     }
-                    Text(
-                        "The launcher may take a moment to show the new icon.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
                 }
+                Spacer(Modifier.height(32.dp))
             }
-            Spacer(Modifier.height(32.dp))
         }
     }
 }

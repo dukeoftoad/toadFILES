@@ -36,27 +36,16 @@
             android:windowSoftInputMode="adjustResize">
 
             <!-- v1.11: toadFILES never appeared in the system "Open with" sheet —
-                 the activity declared no VIEW filter at all, so a file manager with a
-                 full extract pipeline was invisible exactly where users hand archives
-                 over (owner report: opening a .zip from Recent offered everything but
-                 toadFILES itself). The filter covers ONLY the types ArchiveOps can
-                 really extract (zip family + 7z) — deliberately no octet-stream
-                 catch-all, the app never advertises what it can't do. The handed-over
-                 uri is resolved by IncomingIntents and routed into Browse's archive
-                 flow (extract-or-open dialog) by MainActivity.
+                 the activity declared no VIEW filter at all. The VIEW filter covering
+                 ONLY the types ArchiveOps can really extract lives in the FLAVOR
+                 manifests: src/full advertises the zip family + 7z; src/lite ships
+                 ZIP-only (7z support is stripped there — docs/LITE_EDITION_PLAN.md
+                 §3 phase 2 — and the app never advertises what it can't do). The
+                 handed-over uri is resolved by IncomingIntents and routed into
+                 Browse's archive flow (extract-or-open dialog) by MainActivity.
                  singleTask: picking toadFILES while it is already open delivers
                  onNewIntent to the existing task instead of stacking a second
                  MainActivity between the user and their file. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="application/zip" />
-                <data android:mimeType="application/x-zip-compressed" />
-                <data android:mimeType="application/x-zip" />
-                <data android:mimeType="application/x-compressed" />
-                <data android:mimeType="multipart/x-zip" />
-                <data android:mimeType="application/x-7z-compressed" />
-            </intent-filter>
         </activity>
 
         <activity-alias

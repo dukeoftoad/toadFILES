@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full flavor: the VIEW handoff filter with EVERY type ArchiveOps can extract
+     (zip family + 7z). Lite declares ZIP-only — see src/lite/AndroidManifest.xml
+     and docs/LITE_EDITION_PLAN.md §3 phase 2. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-zip" />
+                <data android:mimeType="application/x-compressed" />
+                <data android:mimeType="multipart/x-zip" />
+                <data android:mimeType="application/x-7z-compressed" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

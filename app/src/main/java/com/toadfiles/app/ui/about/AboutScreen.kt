@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.ui.whatsnew.Changelog
 import com.toadfiles.app.ui.whatsnew.ChangelogRelease
 import com.toadfiles.app.util.Intents
@@ -123,13 +124,25 @@ fun AboutScreen(
                     VersionRow("Package", BuildConfig.APPLICATION_ID)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "toadFILES works entirely on this device: every file operation, " +
-                            "favorite and setting stays local. The only network use is the " +
-                            "optional update check — one silent request to api.github.com per " +
-                            "app open, repeated only if you tap \"Check for updates\" below. An " +
-                            "update APK is downloaded only after you tap \"Download & install\". " +
-                            "No telemetry, no ads, no accounts — nothing about your files ever " +
-                            "leaves the device.",
+                        // Full edition's privacy story names its one network use;
+                        // lite has none at all (no update checker, no INTERNET
+                        // permission — docs/LITE_EDITION_PLAN.md §3 phase 2).
+                        if (IS_LITE) {
+                            "toadFILES Lite works entirely on this device: every file " +
+                                "operation, favorite and setting stays local. It has no " +
+                                "network access at all — the Lite edition ships without the " +
+                                "update checker, so it never contacts anything. No " +
+                                "telemetry, no ads, no accounts — nothing about your files " +
+                                "ever leaves the device."
+                        } else {
+                            "toadFILES works entirely on this device: every file operation, " +
+                                "favorite and setting stays local. The only network use is the " +
+                                "optional update check — one silent request to api.github.com per " +
+                                "app open, repeated only if you tap \"Check for updates\" below. An " +
+                                "update APK is downloaded only after you tap \"Download & install\". " +
+                                "No telemetry, no ads, no accounts — nothing about your files ever " +
+                                "leaves the device."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -142,54 +155,62 @@ fun AboutScreen(
             // v1.8.1: the "Storage on this device" and "Files on this device" data
             // cards were removed from About — that live storage/usage information lives
             // on the Home storage card and the Storage page, where it belongs.
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Updates", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "toadFILES contacts GitHub Releases once per app open (silently, in " +
-                            "the background) and whenever you tap the button below. Nothing " +
-                            "about this device is sent, and nothing downloads without a tap.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    VersionRow("Installed", BuildConfig.VERSION_NAME)
-                    Spacer(Modifier.height(10.dp))
-                    UpdatePanel(
-                        update = state.update,
-                        onCheck = vm::checkForUpdates,
-                        onDownloadInstall = { vm.downloadAndInstall(context) },
-                        onDismiss = vm::clearUpdateState,
-                    )
+            // Lite hides the whole card (plan §3 phase 2): there is no checker, no
+            // permission to run one, and updates arrive by sideloading instead.
+            if (!IS_LITE) {
+                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("Updates", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "toadFILES contacts GitHub Releases once per app open (silently, in " +
+                                "the background) and whenever you tap the button below. Nothing " +
+                                "about this device is sent, and nothing downloads without a tap.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        VersionRow("Installed", BuildConfig.VERSION_NAME)
+                        Spacer(Modifier.height(10.dp))
+                        UpdatePanel(
+                            update = state.update,
+                            onCheck = vm::checkForUpdates,
+                            onDownloadInstall = { vm.downloadAndInstall(context) },
+                            onDismiss = vm::clearUpdateState,
+                        )
+                    }
                 }
             }
 
             Spacer(Modifier.height(16.dp))
 
             // ---- Inline changelog (parsed from the bundled CHANGELOG.md asset) ----
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("What's new", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    val latest = changelog?.firstOrNull()
-                    if (latest != null) {
-                        Text(
-                            "v${latest.version}" + (latest.date?.let { " · $it" } ?: ""),
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        latest.allItems.take(LATEST_CHANGELOG_ITEMS).forEach { line ->
-                            ChangelogBullet(line)
-                        }
+            // Lite ships no changelog asset and no What's New route (plan §3 phase 2);
+            // the syncChangelog task only fills src/full/assets.
+            if (!IS_LITE) {
+                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("What's new", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = onOpenWhatsNew) { Text("See all changes") }
-                    } else {
-                        Text(
-                            "No changelog was bundled with this build — see CHANGELOG.md in " +
-                                "the toadFILES repository.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        val latest = changelog?.firstOrNull()
+                        if (latest != null) {
+                            Text(
+                                "v${latest.version}" + (latest.date?.let { " · $it" } ?: ""),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            latest.allItems.take(LATEST_CHANGELOG_ITEMS).forEach { line ->
+                                ChangelogBullet(line)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(onClick = onOpenWhatsNew) { Text("See all changes") }
+                        } else {
+                            Text(
+                                "No changelog was bundled with this build — see CHANGELOG.md in " +
+                                    "the toadFILES repository.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

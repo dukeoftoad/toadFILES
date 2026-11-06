@@ -74,6 +74,7 @@ import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
+import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.ui.components.EmptyState
 import com.toadfiles.app.ui.theme.toadFileIconFor
@@ -144,7 +145,12 @@ fun HomeScreen(
         }
 
         // ---- Hero storage card ----
-        item {
+        // Full edition only (docs/LITE_EDITION_PLAN.md §3 phase 2): the card deep-links
+        // into the Storage screen + analyzer (a full-tree walk of the volume — the
+        // heaviest operation in the app), and lite registers neither route. Hiding the
+        // card removes the dead-end tap; the LazyColumn's other items keep their own
+        // spacing, so nothing else changes shape in lite.
+        if (!IS_LITE) item {
             val stats = state.storage
             Card(
                 Modifier

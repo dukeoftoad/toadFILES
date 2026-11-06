@@ -90,13 +90,15 @@ jobs:
       - name: Lint and unit tests (gate the release)
         run: |
           ./gradlew :app:lintRelease --stacktrace
+          # The full edition's unit suite (the lite flavor's delta is deletion —
+          # assemble below builds and signs both APKs).
           # The Robolectric ghost-alias guard test has flaked two release gates at a
           # low rate (static component-settings state leaking across sandboxed test
           # classes; CI-only, never reproduced locally). One bounded full-suite
           # re-run keeps the gate honest: a real regression fails both passes,
           # a known-flaky shadow read survives exactly one.
-          ./gradlew :app:testDebugUnitTest --stacktrace || \
-            ./gradlew :app:testDebugUnitTest --rerun-tasks --stacktrace
+          ./gradlew :app:testFullDebugUnitTest --stacktrace || \
+            ./gradlew :app:testFullDebugUnitTest --rerun-tasks --stacktrace
 
       - name: Decode release keystore
         env:
@@ -105,7 +107,7 @@ jobs:
           echo "$TOADFILES_KEYSTORE_BASE64" | base64 --decode > ${{ runner.temp }}/toadfiles-release.jks
           echo "Keystore bytes: $(wc -c < ${{ runner.temp }}/toadfiles-release.jks)"
 
-      - name: Assemble signed release APK
+      - name: Assemble signed release APKs (both editions)
         env:
           TOADFILES_KEYSTORE_FILE: ${{ runner.temp }}/toadfiles-release.jks
           TOADFILES_KEYSTORE_PASSWORD: ${{ secrets.TOADFILES_KEYSTORE_PASSWORD }}
@@ -113,10 +115,14 @@ jobs:
           TOADFILES_KEY_PASSWORD: ${{ secrets.TOADFILES_KEY_PASSWORD }}
         run: ./gradlew :app:assembleRelease --stacktrace
 
-      - name: Rename APK to include tag
+      - name: Rename APKs to include tag
+        # With the edition flavors (docs/LITE_EDITION_PLAN.md §2) assembleRelease
+        # produces BOTH APKs: full keeps the plain toadFILES-<tag> name users know;
+        # lite ships side-by-side as toadFILES-lite-<tag>.
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk "artifact/toadfiles-${{ steps.meta.outputs.tag }}.apk"
+          cp app/build/outputs/apk/full/release/app-full-release.apk "artifact/toadfiles-${{ steps.meta.outputs.tag }}.apk"
+          cp app/build/outputs/apk/lite/release/app-lite-release.apk "artifact/toadfiles-lite-${{ steps.meta.outputs.tag }}.apk"
           ls -la artifact
 
       - name: Create GitHub Release
@@ -127,5 +133,7 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-          files: artifact/toadfiles-${{ steps.meta.outputs.tag }}.apk
+          files: |
+            artifact/toadfiles-${{ steps.meta.outputs.tag }}.apk
+            artifact/toadfiles-lite-${{ steps.meta.outputs.tag }}.apk
           fail_on_unmatched_files: true

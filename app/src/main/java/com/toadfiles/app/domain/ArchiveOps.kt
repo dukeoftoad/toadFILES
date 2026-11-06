@@ -5,7 +5,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import java.io.File
 import java.io.FileOutputStream
 
@@ -49,8 +48,10 @@ enum class ArchiveFormat(val extension: String, val label: String) {
  */
 object ArchiveOps {
 
-    /** Extensions toadFILES can extract. */
-    private val EXTRACTABLE = setOf("zip", "7z")
+    /** Extensions toadFILES can extract. Lite declares ZIP-only
+     *  (docs/LITE_EDITION_PLAN.md §3 phase 2) — the .7z extension joins only in the
+     *  full flavor, so no surface ever offers an action lite cannot perform. */
+    private val EXTRACTABLE = if (IS_LITE) setOf("zip") else setOf("zip", "7z")
 
     /** App-bundle containers that are structurally zips — extraction dispatches to
      *  the zip pipeline; creation does not apply. */
@@ -83,17 +84,13 @@ object ArchiveOps {
     fun entryCount(archive: File): Int? {
         if (VolumeSupport.isVolumeStart(archive.name)) {
             return when (extension(VolumeSupport.baseName(archive.name))) {
-                "7z" -> runCatching {
-                    VolumeSupport.seekableChannel(archive).use { ch ->
-                        SevenZFile(ch).use { it.entries.toList().size }
-                    }
-                }.getOrNull()
+                "7z" -> SevenZipImpl.volumeEntryCount(archive)
                 else -> null
             }
         }
         return when (extension(archive.name)) {
             "zip", in APP_BUNDLES -> runCatching { java.util.zip.ZipFile(archive).use { it.size() } }.getOrNull()
-            "7z" -> SevenZipSupport.entryCount(archive)
+            "7z" -> SevenZipImpl.entryCount(archive)
             else -> null
         }
     }
@@ -124,7 +121,7 @@ object ArchiveOps {
             return when (extension(archive.name)) {
                 "zip", in APP_BUNDLES ->
                     ZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
-                "7z" -> SevenZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
+                "7z" -> SevenZipImpl.extract(archive, targetDir, replace, limits, password, onProgress)
                 else -> OpResult(0, 0, 1, false, listOf("${archive.name}: unsupported archive type"))
             }
         } finally {
@@ -152,7 +149,7 @@ object ArchiveOps {
         }
         return when (extension(VolumeSupport.baseName(archive.name))) {
             "7z" -> VolumeSupport.seekableChannel(archive).use { ch ->
-                SevenZipSupport.extract(
+                SevenZipImpl.extract(
                     ch, VolumeSupport.totalSize(archive), targetDir, replace, limits, password, onProgress,
                 )
             }
@@ -221,7 +218,7 @@ object ArchiveOps {
     ): OpResult {
         val created = when (format) {
             ArchiveFormat.ZIP -> ZipSupport.zip(sources, outFile, level, onProgress)
-            ArchiveFormat.SEVEN_Z -> SevenZipSupport.create7z(
+            ArchiveFormat.SEVEN_Z -> SevenZipImpl.create7z(
                 sources, outFile, level, password = password, onProgress = onProgress,
             )
         }

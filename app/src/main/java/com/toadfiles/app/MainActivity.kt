@@ -47,6 +47,8 @@ import com.toadfiles.app.util.Intents
 import com.toadfiles.app.update.StartupUpdateCheck
 import com.toadfiles.app.update.UpdateBanner
 import com.toadfiles.app.domain.ArchiveOps
+import com.toadfiles.app.domain.IS_LITE
+import com.toadfiles.app.domain.MotionStyle
 import com.toadfiles.app.ui.Routes
 import com.toadfiles.app.ui.ToadNavHost
 import kotlinx.coroutines.Dispatchers
@@ -85,8 +87,12 @@ class MainActivity : ComponentActivity() {
 
             // v1.7.1 OTA: one silent update check per app process, fired on open —
             // never periodic, never a download. Failures (airplane mode etc.) stay silent.
+            // Lite (docs/LITE_EDITION_PLAN.md §3 phase 2) never checks at all: the
+            // edition ships without the update checker and without the INTERNET
+            // permission, so the constant-folded branch below removes the check (and
+            // R8 strips StartupUpdateCheck's callers) from the lite build entirely.
             val startupUpdate = remember { StartupUpdateCheck.instance }
-            LaunchedEffect(Unit) { startupUpdate.checkOnce(appScope) }
+            LaunchedEffect(Unit) { if (!IS_LITE) startupUpdate.checkOnce(appScope) }
             val updateBanner by startupUpdate.banner.collectAsStateWithLifecycle()
             val bannerDismissed by startupUpdate.bannerDismissed.collectAsStateWithLifecycle()
 
@@ -149,16 +155,24 @@ class MainActivity : ComponentActivity() {
                 appTheme = settings.value.appTheme,
                 themeMode = settings.value.themeMode,
                 accentColor = settings.value.accentColor,
-                motionStyle = settings.value.motionStyle,
+                // Lite is "Performance mode, baked into the build" (plan §2): NONE is
+                // the only motion the edition ever sees — the ToadMotion provided
+                // here drives the splash early-return and every transition — and
+                // performance mode reads as ON for the whole UI, so VideoThumb skips
+                // the MediaMetadataRetriever pipeline app-wide. Both sides are
+                // compile-time constants for the lite flavor; R8 folds them away.
+                motionStyle = if (IS_LITE) MotionStyle.NONE else settings.value.motionStyle,
                 appFont = settings.value.appFont,
-                performanceMode = settings.value.performanceMode,
+                performanceMode = settings.value.performanceMode || IS_LITE,
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         if (hasFileAccess()) {
                             // File browsing depends only on storage permission. The update
                             // banner is optional and must never gate the main app UI.
-                            if (updateBanner != null && !bannerDismissed) {
+                            // (Also constant-folded out of lite: the banner state stays
+                            // null there because checkOnce never runs.)
+                            if (!IS_LITE && updateBanner != null && !bannerDismissed) {
                                 UpdateBanner(
                                     release = updateBanner,
                                     onOpenUpdateFlow = {
@@ -273,14 +287,27 @@ private fun OnboardingScreen(onGrant: () -> Unit, onOpenSettings: () -> Unit) {
             Text("Welcome to toadFILES", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(12.dp))
             Text(
-                "toadFILES manages the files on this device locally. " +
-                    "It never uploads anything, and nothing runs in the background.\n\n" +
-                    "Its only network use is the update check, which runs once when you " +
-                    "open the app and when you tap \"Check for updates\" on the About " +
-                    "page, and talks to GitHub Releases.\n\n" +
-                    "To browse and organise your files, grant \"All files access\" " +
-                    "in the next screen. Android requires this special permission for " +
-                    "file managers to work on modern versions.",
+                // Lite's privacy story is even stronger than full's: no update checker,
+                // no INTERNET permission — the app physically cannot phone out.
+                if (IS_LITE) {
+                    "toadFILES Lite manages the files on this device locally. " +
+                        "It never uploads anything, and nothing runs in the background.\n\n" +
+                        "It has no network access at all — the Lite edition ships without " +
+                        "the update checker, so updates arrive the same way the app did: " +
+                        "by sideloading a newer release.\n\n" +
+                        "To browse and organise your files, grant \"All files access\" " +
+                        "in the next screen. Android requires this special permission for " +
+                        "file managers to work on modern versions."
+                } else {
+                    "toadFILES manages the files on this device locally. " +
+                        "It never uploads anything, and nothing runs in the background.\n\n" +
+                        "Its only network use is the update check, which runs once when you " +
+                        "open the app and when you tap \"Check for updates\" on the About " +
+                        "page, and talks to GitHub Releases.\n\n" +
+                        "To browse and organise your files, grant \"All files access\" " +
+                        "in the next screen. Android requires this special permission for " +
+                        "file managers to work on modern versions."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
