@@ -4,7 +4,11 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
-## [Unreleased]
+## [2.3.0] — 2026-11-06
+
+The release-hardening wave: the "441 of 2 items" extraction bug dies at the root,
+the ratio guard stops punishing honest archives, and the UI gains a zero-cost
+motion setting plus a one-toggle Performance mode.
 
 ### Fixed
 - **Ratio guard false-positives on ultra-compressible entries (caught by CI,
