@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
                 accentColor = settings.value.accentColor,
                 motionStyle = settings.value.motionStyle,
                 appFont = settings.value.appFont,
+                performanceMode = settings.value.performanceMode,
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {

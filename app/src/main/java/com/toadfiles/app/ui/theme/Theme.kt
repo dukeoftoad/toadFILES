@@ -9,6 +9,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.toadfiles.app.data.ThemeMode
@@ -30,6 +31,11 @@ import com.toadfiles.app.domain.MotionStyle
  *    [LocalToadMotion] so springs, durations and nav transitions follow the user's
  *    taste without per-screen hard-coding.
  *
+ * [performanceMode] (Settings, "Performance mode") is the one-knob overload switch:
+ * it forces [MotionStyle.NONE] regardless of the Appearance choice and publishes
+ * [LocalPerformanceMode] so screens can skip their own recurring costs (video
+ * thumbnail decoding, decorative art) without per-feature settings.
+ *
  * Shapes are shared by every identity so the visual rhythm stays coherent.
  */
 @Composable
@@ -39,6 +45,7 @@ fun ToadTheme(
     accentColor: AccentColor = AccentColor.TOAD,
     motionStyle: MotionStyle = MotionStyle.DEFAULT,
     appFont: AppFont = AppFont.DEFAULT,
+    performanceMode: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -60,7 +67,10 @@ fun ToadTheme(
             ?: AccentPalettes.schemeFor(accentColor, dark = darkTheme)
     }
     CompositionLocalProvider(
-        LocalToadMotion provides ToadMotion.forStyle(motionStyle),
+        LocalToadMotion provides ToadMotion.forStyle(
+            if (performanceMode) MotionStyle.NONE else motionStyle,
+        ),
+        LocalPerformanceMode provides performanceMode,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
@@ -79,3 +89,7 @@ private val ToadShapes = Shapes(
     large = RoundedCornerShape(26.dp),
     extraLarge = RoundedCornerShape(34.dp),
 )
+
+/** True while the user's "Performance mode" is on: screens read this to skip
+ *  recurring work the motion specs can't cover (video thumbnails, decorations). */
+val LocalPerformanceMode = staticCompositionLocalOf { false }

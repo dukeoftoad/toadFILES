@@ -81,6 +81,10 @@ data class ToadSettings(
     val abortConfirm: Boolean = true,
     /** Confirmation dialog when extraction would overwrite existing files. */
     val overwriteConfirm: Boolean = true,
+    /** One-knob overload switch (v2.2.1): forces MotionStyle.NONE app-wide (no
+     *  animations, no splash) and skips recurring heavy work (video thumbnail
+     *  decoding) — trades the polish for lower CPU, RAM and battery draw. */
+    val performanceMode: Boolean = false,
     /** Default folder for archives (compression output AND extraction destination).
      *  Blank string = "same folder as the source" (v1.7.2 behavior). */
     val archiveFolder: String = "",
@@ -137,6 +141,7 @@ class SettingsRepository(
         val DELETE_AFTER_EXTRACT = booleanPreferencesKey("delete_after_extract")
         val ABORT_CONFIRM = booleanPreferencesKey("abort_confirm")
         val OVERWRITE_CONFIRM = booleanPreferencesKey("overwrite_confirm")
+        val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
         val ARCHIVE_FOLDER = stringPreferencesKey("archive_folder")
         val APP_ICON_DESIGN = stringPreferencesKey("app_icon_design")
         val APP_ICON_COLOR = stringPreferencesKey("app_icon_color")
@@ -184,6 +189,7 @@ class SettingsRepository(
             deleteAfterExtract = p[Keys.DELETE_AFTER_EXTRACT] ?: false,
             abortConfirm = p[Keys.ABORT_CONFIRM] ?: true,
             overwriteConfirm = p[Keys.OVERWRITE_CONFIRM] ?: true,
+            performanceMode = p[Keys.PERFORMANCE_MODE] ?: false,
             archiveFolder = p[Keys.ARCHIVE_FOLDER] ?: "",
             appIconDesign = p[Keys.APP_ICON_DESIGN]?.let { runCatching { AppIconDesign.valueOf(it) }.getOrNull() }
                 ?: AppIconDesign.TOAD,
@@ -215,6 +221,7 @@ class SettingsRepository(
     suspend fun setDeleteAfterExtract(enabled: Boolean) = store.edit { it[Keys.DELETE_AFTER_EXTRACT] = enabled }
     suspend fun setAbortConfirm(enabled: Boolean) = store.edit { it[Keys.ABORT_CONFIRM] = enabled }
     suspend fun setOverwriteConfirm(enabled: Boolean) = store.edit { it[Keys.OVERWRITE_CONFIRM] = enabled }
+    suspend fun setPerformanceMode(enabled: Boolean) = store.edit { it[Keys.PERFORMANCE_MODE] = enabled }
     suspend fun setArchiveFolder(path: String) = store.edit { it[Keys.ARCHIVE_FOLDER] = path.trim() }
     suspend fun setAppIconDesign(design: AppIconDesign) = store.edit { it[Keys.APP_ICON_DESIGN] = design.name }
     suspend fun setAppIconColor(color: AppIconColor) = store.edit { it[Keys.APP_ICON_COLOR] = color.name }

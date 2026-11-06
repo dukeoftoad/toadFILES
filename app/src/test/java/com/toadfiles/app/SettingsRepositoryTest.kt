@@ -727,4 +727,17 @@ class SettingsRepositoryTest {
         assertEquals(AppIconDesign.TOAD, s.appIconDesign)
         assertEquals(AppIconColor.GREEN, s.appIconColor)
     }
+
+    @Test
+    fun `performance mode defaults off and persists`() = runTest {
+        val repo = newRepo()
+        assertEquals(false, repo.settings.first().performanceMode)
+
+        repo.setPerformanceMode(true)
+        assertEquals(true, repo.settings.first().performanceMode)
+
+        // A corrupt value can't exist for a boolean key; an absent key falls back to off.
+        repo.setPerformanceMode(false)
+        assertEquals(false, repo.settings.first().performanceMode)
+    }
 }

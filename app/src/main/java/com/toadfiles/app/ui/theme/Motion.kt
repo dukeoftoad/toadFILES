@@ -8,6 +8,7 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +29,11 @@ import com.toadfiles.app.domain.MotionStyle
  *
  * All float specs are for 0..1 progress animations (alpha, scale); the slide specs
  * animate IntOffset lambdas and therefore use Int-based specs.
+ *
+ * [MotionStyle.NONE] is the degenerate member: every float spec is [snap] (lands in
+ * one frame) and every nav transition is `EnterTransition.None`/`ExitTransition.None`,
+ * so an animated value never runs — the choreographer has nothing to animate and the
+ * UI thread (read: CPU, RAM, battery) pays nothing for motion.
  */
 @Immutable
 data class ToadMotion(
@@ -116,6 +122,22 @@ data class ToadMotion(
                     fadeIn(tween(180)),
                 barExit = slideOutVertically(tween(260)) { it } + fadeOut(tween(200)),
                 splashHoldMs = 1250,
+            )
+
+            MotionStyle.NONE -> ToadMotion(
+                style = style,
+                // snap(): zero-duration finite spec — animated values settle in one frame.
+                standard = snap(),
+                emphasized = snap(),
+                spatial = snap(),
+                // None: no transition nodes are even created for navigation.
+                screenEnter = EnterTransition.None,
+                screenExit = ExitTransition.None,
+                popEnter = EnterTransition.None,
+                popExit = ExitTransition.None,
+                barEnter = EnterTransition.None,
+                barExit = ExitTransition.None,
+                splashHoldMs = 0,
             )
         }
     }
