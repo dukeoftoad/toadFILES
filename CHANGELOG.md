@@ -6,6 +6,16 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+### Fixed
+- **Release gate — the ghost-alias test can no longer flake**: Robolectric's
+  component-settings map is static per sandbox, so the ghost test's
+  "every read is exactly DISABLED" assertion could read leftover state written by
+  other test classes in the same JVM and fail CI-only, at a low rate (v2.1.0's
+  gate and again v2.1.1's fix wasn't enough). The assertion now pins the guard's
+  actual contract — no alias may end up ENABLED after a ghost apply — which is
+  deterministic in both directions, and the release workflow's test gate gains a
+  single bounded suite re-run as a second belt.
+
 ## [2.2.0] — 2026-11-06
 
 The wave-three release: the third remediation batch of the v2.0.0 full-repo audit
