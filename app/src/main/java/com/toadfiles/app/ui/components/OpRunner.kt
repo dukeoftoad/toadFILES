@@ -132,6 +132,8 @@ fun MediaOpOverlays(
             total = p.total,
             currentItem = p.currentItem,
             onCancel = onCancel,
+            bytesDone = p.bytesDone,
+            bytesTotal = p.bytesTotal,
         )
     }
     result?.let { r ->

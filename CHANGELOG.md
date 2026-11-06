@@ -7,6 +7,21 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 ## [Unreleased]
 
 ### Fixed
+- **ZIP extraction walks the central directory — nested archives can never explode
+  ("441 of 2 items")**: extracting a zip that holds an APK + its .sha256 sidecar
+  could produce 441 files instead of 2. The extractor streamed with ZipInputStream,
+  which trusts LOCAL file headers; an outer zip written by a streamed tool can carry
+  an entry whose local header lies about its sizes, and the stream then re-synced
+  into the APK's OWN local file headers — publishing res/…, META-INF/… as if they
+  were top-level entries ("441 of 2 items — res/drawable-hdpi-v4/…"). Extraction now
+  iterates the central directory (java.util.zip.ZipFile) — the entries every honest
+  unzip tool sees — and copies each one verbatim: a nested zip's structures are
+  payload, and an extracted file is never re-opened or sniffed. The entry-count cap
+  is enforced before anything is written, the CRC/size guard moved from closeEntry
+  into the copy loop (ZipFile streams don't self-verify), and the progress overlay
+  gains byte-level progress ("42.9 MB of 76.2 MB — …", "File 1 of 2") so archives of
+  few huge files no longer jump the bar in two strides. Regression:
+  ZipSupportNestedResyncTest hand-builds the hostile archive byte by byte.
 - **Release gate — the ghost-alias test can no longer flake**: Robolectric's
   component-settings map is static per sandbox, so the ghost test's
   "every read is exactly DISABLED" assertion could read leftover state written by

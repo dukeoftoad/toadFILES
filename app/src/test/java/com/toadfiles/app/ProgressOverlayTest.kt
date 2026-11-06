@@ -32,7 +32,14 @@ class ProgressOverlayTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun render(done: Int, total: Int, currentItem: String? = null, onCancel: () -> Unit = {}) {
+    private fun render(
+        done: Int,
+        total: Int,
+        currentItem: String? = null,
+        onCancel: () -> Unit = {},
+        bytesDone: Long = -1L,
+        bytesTotal: Long = -1L,
+    ) {
         compose.setContent {
             ToadTheme {
                 ProgressOverlay(
@@ -41,6 +48,8 @@ class ProgressOverlayTest {
                     total = total,
                     currentItem = currentItem,
                     onCancel = onCancel,
+                    bytesDone = bytesDone,
+                    bytesTotal = bytesTotal,
                 )
             }
         }
@@ -67,6 +76,34 @@ class ProgressOverlayTest {
         assertTrue(hasText("1 of 1 item"))
         assertFalse(hasText("1 of 1 items"))
         assertTrue(hasText("100%"))
+    }
+
+    @Test
+    fun byteProgressDrivesPercentAndShowsTallyPlusFileCount() {
+        // Zip extraction reports bytes (owner report "441 of 2"): the percent comes from
+        // bytes, the tally line carries the live entry, and the item count stays on its
+        // own line so "how many files" is still answered.
+        render(
+            done = 1,
+            total = 2,
+            currentItem = "toadGALLERY-0.4.5-alpha-engine-debug.apk",
+            bytesDone = 45_000_000L,
+            bytesTotal = 79_900_000L,
+        )
+
+        assertTrue(hasText("42.9 MB of 76.2 MB — toadGALLERY-0.4.5-alpha-engine-debug.apk"))
+        assertTrue(hasText("File 1 of 2"))
+        assertTrue(hasText("56%"))
+        assertFalse(hasText("1 of 2 items"))
+    }
+
+    @Test
+    fun itemCountOpsKeepTheItemDerivedPercent() {
+        // Copy/move/compress pass no bytes: the item count stays the percent source.
+        render(done = 2, total = 4, currentItem = "photos/day1.jpg")
+
+        assertTrue(hasText("2 of 4 items — photos/day1.jpg"))
+        assertTrue(hasText("50%"))
     }
 
     @Test

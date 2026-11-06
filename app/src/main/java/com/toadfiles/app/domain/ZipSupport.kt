@@ -5,28 +5,33 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.PasswordRequiredException
-import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.FilterInputStream
 import java.io.IOException
-import java.io.InputStream
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.Collections
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
  * Safe ZIP creation and extraction.
  *
  * Extraction protections (per the project security requirements and audit P1.2 / P2.11 / P3.1):
+ *  - Central-directory truth (owner report "441 of 2 items"): the loop walks
+ *    [java.util.zip.ZipFile]'s central directory — exactly the entries the archive
+ *    declares — and copies each one verbatim. Nested archives inside an entry (an APK
+ *    is a zip) are payload: their internal headers are never parsed and an extracted
+ *    file is never re-opened or sniffed, so a lying local header can no longer make
+ *    the stream re-sync into a nested archive and publish its internals.
  *  - ZIP-slip: entry names are validated AND final paths are canonical-checked.
- *  - Zip bombs: entry count, total bytes actually emitted and the expansion ratio are
- *    enforced from the bytes really read/written, never from header fields, so
- *    data-descriptor entries with unknown sizes cannot bypass the caps. Arithmetic is
+ *  - Zip bombs: the entry count is capped from the central directory before anything
+ *    is written; the total bytes actually emitted are capped while copying (the
+ *    authority — header fields can lie), and the per-entry expansion ratio is judged
+ *    against the compressed size the central directory recorded. Arithmetic is
  *    overflow-safe Long math.
  *  - Staged extraction: entries land in a fresh hidden staging directory next to the
  *    destination (each entry first in its own temp file, promoted only after its stream
@@ -56,39 +61,12 @@ object ZipSupport {
         val maxRatio: Long = 200,
     )
 
-    /** Slack added to the compressed-byte count when judging the expansion ratio. */
-    private const val RATIO_OVERHEAD = 64L
-
     /** Sentinel for global abort conditions; its message is reported verbatim. */
     internal class ArchiveAbort(message: String) : IOException(message)
 
     /** Internal control-flow signal: a replace-mode publication item failed and the run
      *  must roll back. The specific failure is already recorded in the failures list. */
     internal class PublicationAbort : IOException("publication aborted")
-
-    /** Input stream that counts every byte actually consumed from the archive. */
-    private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
-        var count: Long = 0
-            private set
-
-        override fun read(): Int {
-            val r = super.read()
-            if (r >= 0) count++
-            return r
-        }
-
-        override fun read(b: ByteArray, off: Int, len: Int): Int {
-            val r = super.read(b, off, len)
-            if (r > 0) count += r
-            return r
-        }
-
-        override fun skip(n: Long): Long {
-            val s = super.skip(n)
-            if (s > 0) count += s
-            return s
-        }
-    }
 
     internal class Counts(var moved: Int = 0, var skipped: Int = 0, var failed: Int = 0)
 
@@ -121,29 +99,42 @@ object ZipSupport {
         var cancelled = false
         var abort = false
         var entries = 0
+        var total = -1
         var totalBytes = 0L
         val counts = Counts()
-        // Determinate progress (v1.7.1): the central directory gives the entry count
-        // upfront; streaming archives that can't be opened this way fall back to -1
-        // (indeterminate), exactly like the old behaviour.
-        val total = runCatching { java.util.zip.ZipFile(zipFile).use { it.size() } }.getOrDefault(-1)
+        // Byte-level progress (owner report "441 of 2"): item counts are a coarse
+        // signal for archives of few huge files — bytes move the bar every buffer.
+        var bytesTotal = -1L
 
         try {
-            // The chain order matters (audit P2.3): the 64 KiB buffer prefetches from the
-            // file BELOW the counter, so `raw.count` advances only for bytes the ZIP layer
-            // actually consumes — the per-entry ratio delta stays real even when a whole
-            // small archive sits inside a single buffer.
-            val raw = CountingInputStream(BufferedInputStream(FileInputStream(zipFile), BUFFER_SIZE))
-            ZipInputStream(raw).use { zis ->
-                while (true) {
-                    val entry = zis.nextEntry ?: break
+            // OWNER BUG REPORT ("Extracting … 441 of 2 items", destination littered with
+            // res/drawable-hdpi-v4/… files): the old loop drove extraction with
+            // ZipInputStream, which walks LOCAL file headers one after another and trusts
+            // what each header declares. An outer zip written by a streamed tool can
+            // carry a nested archive (an APK IS a zip) whose local header lies about its
+            // sizes — the stream then consumed nothing for that entry, "closed" it, and
+            // re-synced into the nested archive's OWN local file headers, extracting its
+            // internals (res/…, META-INF/…) as if they were top-level entries: 2 declared
+            // entries ballooned to 441 walked and published. The CENTRAL directory is the
+            // only source of truth — it is what every honest unzip tool walks, it names
+            // exactly the entries that exist, and ZipFile serves each entry's bytes from
+            // the offsets it recorded. A nested zip's structures are payload here: they
+            // can never be re-parsed as entries, and an extracted file is never re-opened
+            // or sniffed — the APK stays the byte-copied file it was in the archive.
+            java.util.zip.ZipFile(zipFile).use { zip ->
+                val declared = Collections.list(zip.entries())
+                total = declared.size
+                if (total > limits.maxEntries) {
+                    throw ArchiveAbort("Aborted: more than ${limits.maxEntries} entries (possible zip bomb)")
+                }
+                bytesTotal = declared
+                    .takeIf { list -> list.all { it.size >= 0 } }
+                    ?.sumOf { it.size } ?: -1L
+                for (entry in declared) {
                     val name = entry.name ?: ""
                     try {
                         currentCoroutineContext().ensureActive()
                         entries++
-                        if (entries > limits.maxEntries) {
-                            throw ArchiveAbort("Aborted: more than ${limits.maxEntries} entries (possible zip bomb)")
-                        }
                         if (!PathSafety.isSafeEntryName(name)) {
                             skip++; continue
                         }
@@ -158,50 +149,62 @@ object ZipSupport {
                         if (finalFile.exists() && !replace) { skip++; continue }
                         stagedFile.parentFile?.let { if (!it.isDirectory) it.mkdirs() }
 
-                        // Fail fast when the header declares more than the remaining budget;
-                        // the actual-byte accounting below is the authority either way.
+                        // Fail fast when the central directory declares more than the
+                        // remaining budget; the actual-byte accounting below is the
+                        // authority either way.
                         if (entry.size > 0 && entry.size > limits.maxTotalBytes - totalBytes) {
                             throw ArchiveAbort(
                                 "Aborted: exceeds ${Format.size(limits.maxTotalBytes)} uncompressed (possible zip bomb)"
                             )
                         }
 
-                        // Stream into a temp file; promote it inside staging only after the
-                        // entry closed cleanly (incl. CRC verification), so no partial or
-                        // corrupt entry file survives an error.
+                        // Stream into a temp file; promote it inside staging only after
+                        // the entry copied cleanly (incl. the CRC/size guard below), so
+                        // no partial or corrupt entry file survives an error.
                         val partFile = File(stagedFile.parentFile, "${stagedFile.name}.part-${System.nanoTime()}")
-                        val compressedAtStart = raw.count
                         try {
+                            val crc = CRC32()
+                            var written = 0L
                             FileOutputStream(partFile).use { fos ->
-                                val buf = ByteArray(BUFFER_SIZE)
-                                var written = 0L
-                                while (true) {
-                                    currentCoroutineContext().ensureActive()
-                                    val n = zis.read(buf)
-                                    if (n == -1) break
-                                    written += n
-                                    totalBytes += n
-                                    if (totalBytes > limits.maxTotalBytes) {
-                                        throw ArchiveAbort(
-                                            "Aborted: exceeds ${Format.size(limits.maxTotalBytes)} uncompressed (possible zip bomb)"
-                                        )
-                                    }
-                                    // Ratio guard from bytes actually consumed: header sizes are
-                                    // -1 for data-descriptor entries, so never trust them.
-                                    if (limits.maxRatio > 0) {
-                                        val compressed = raw.count - compressedAtStart + RATIO_OVERHEAD
-                                        if (compressed in 1..(Long.MAX_VALUE / limits.maxRatio) &&
-                                            written > compressed * limits.maxRatio
+                                zip.getInputStream(entry).use { input ->
+                                    val buf = ByteArray(BUFFER_SIZE)
+                                    while (true) {
+                                        currentCoroutineContext().ensureActive()
+                                        val n = input.read(buf)
+                                        if (n == -1) break
+                                        written += n
+                                        totalBytes += n
+                                        crc.update(buf, 0, n)
+                                        if (totalBytes > limits.maxTotalBytes) {
+                                            throw ArchiveAbort(
+                                                "Aborted: exceeds ${Format.size(limits.maxTotalBytes)} uncompressed (possible zip bomb)"
+                                            )
+                                        }
+                                        // Ratio guard against the compressed size the
+                                        // central directory recorded. The total-bytes cap
+                                        // above stays the authority — a hostile central
+                                        // directory could lie about the ratio, but not
+                                        // about bytes actually emitted.
+                                        if (limits.maxRatio > 0 && entry.compressedSize > 0 &&
+                                            entry.compressedSize <= Long.MAX_VALUE / limits.maxRatio &&
+                                            written > entry.compressedSize * limits.maxRatio
                                         ) {
                                             throw ArchiveAbort(
                                                 "Aborted: suspicious expansion ratio in $name (possible zip bomb)"
                                             )
                                         }
+                                        fos.write(buf, 0, n)
                                     }
-                                    fos.write(buf, 0, n)
                                 }
                             }
-                            zis.closeEntry() // verifies CRC + sizes; throws on corrupt entries
+                            // ZipFile's streams don't CRC-verify the way ZipInputStream's
+                            // closeEntry did — the honest corrupt-entry guard moved here.
+                            if (entry.crc != -1L && crc.value != entry.crc) {
+                                throw IOException("invalid entry CRC (expected ${entry.crc}, got ${crc.value})")
+                            }
+                            if (entry.size != -1L && written != entry.size) {
+                                throw IOException("unexpected entry size (expected ${entry.size}, got $written)")
+                            }
                             if (stagedFile.exists()) stagedFile.delete()
                             if (!partFile.renameTo(stagedFile)) {
                                 throw IOException("could not stage $name")
@@ -228,7 +231,7 @@ object ZipSupport {
                         fail++
                         failures += "$name: ${friendlyArchiveError(e)}"
                     } finally {
-                        onProgress(OpProgress(entries, total, name))
+                        onProgress(OpProgress(entries, total, name, totalBytes, bytesTotal))
                     }
                 }
             }
@@ -239,9 +242,9 @@ object ZipSupport {
             fail++
             failures += ab.message ?: "aborted"
         } catch (e: Exception) {
-            // Stream-level death (truncated/corrupt archive — or an encrypted one, which
-            // java.util.zip declines at the very first entry): nothing after this point
-            // can be trusted, so nothing gets published.
+            // Archive-level death (unreadable/truncated central directory — or an
+            // encrypted one, which java.util.zip declines up front): nothing after this
+            // point can be trusted, so nothing gets published.
             abort = true
             fail++
             failures += "${zipFile.name}: ${friendlyArchiveError(e)}"
