@@ -31,6 +31,37 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
   deterministic in both directions, and the release workflow's test gate gains a
   single bounded suite re-run as a second belt.
 
+### Added
+- **Motion "None" (Appearance tab)**: a fourth MotionStyle that turns every
+  animation off — nav transitions become `EnterTransition.None`/`ExitTransition.None`
+  (no transition nodes are created at all), every animated value settles in one frame
+  via snap specs, and the launch splash is skipped entirely (`splashHoldMs` 0 + a
+  zero-node early return). Zero animation work on the UI thread for low-end or
+  battery-starved devices. The Appearance tab renders the enum automatically, so the
+  card lists four choices now; the persisted enum-name round-trip already tolerated
+  unknown values, so older installs upgrade cleanly.
+- **Performance mode (Settings)**: one toggle that removes the recurring overload the
+  motion choice can't cover — it forces `MotionStyle.NONE` app-wide regardless of the
+  Appearance pick and publishes `LocalPerformanceMode`, which `VideoThumb` reads to
+  skip the `MediaMetadataRetriever` stat/decode pipeline entirely (generic videocam
+  icon instead). Lower CPU, RAM and battery; persisted as `performance_mode` in
+  DataStore (defaults off; pinned by a SettingsRepositoryTest round-trip).
+- **docs/LITE_EDITION_PLAN.md**: the lightweight-edition proposal — a `lite` Gradle
+  flavor (separate APK, `applicationIdSuffix .lite`) that strips fonts (1.9 MB = 41%
+  of the APK), the 24 extra launcher aliases, video thumbnails + coil-video,
+  Categories/Analyzer screens, the update checker and 7z (commons-compress + xz),
+  targeting ~2.5–3.0 MB APK, instant cold start and zero animation frames, with a
+  three-PR sequencing plan.
+
+### Changed
+- **CI cleanup**: the Android CI unit-test step gains the same bounded suite re-run
+  the release gate already had (Nov 2026 saw 4+ green commits painted red by a
+  DIFFERENT random Robolectric/Compose flake each time); the Release workflow keys
+  its concurrency group on the resolved tag, so a tag push and a UI-published
+  release for the same tag cancel each other instead of double-building in parallel
+  (v2.2.0 built twice 1s apart, the loser failing its gate); 163 stale workflow runs
+  deleted from the Actions history.
+
 ## [2.2.0] — 2026-11-06
 
 The wave-three release: the third remediation batch of the v2.0.0 full-repo audit

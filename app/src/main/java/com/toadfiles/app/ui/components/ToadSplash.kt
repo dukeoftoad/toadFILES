@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.toadfiles.app.domain.MotionStyle
 import com.toadfiles.app.ui.theme.LocalToadMotion
 import com.toadfiles.app.ui.theme.ToadFace
 import kotlinx.coroutines.delay
@@ -48,6 +49,13 @@ private val FloatAnimatableSaver: Saver<Animatable<Float, AnimationVector1D>, Fl
 @Composable
 fun ToadSplash(onFinished: () -> Unit) {
     val motion = LocalToadMotion.current
+    // MotionStyle.NONE (and Performance mode, which forces it): no animations at all
+    // means no splash — emit zero nodes and finish immediately instead of playing a
+    // 1.4 s mascot timeline the user explicitly turned off.
+    if (motion.style == MotionStyle.NONE) {
+        LaunchedEffect(Unit) { onFinished() }
+        return
+    }
     var hopStarted by rememberSaveable { mutableStateOf(false) }
     var veilVisible by rememberSaveable { mutableStateOf(true) }
     val veil = rememberSaveable(saver = FloatAnimatableSaver) { Animatable(1f) }

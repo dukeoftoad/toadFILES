@@ -64,7 +64,14 @@ jobs:
         run: ./gradlew :app:lintRelease --stacktrace
 
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        # Same bounded re-run policy as the release gate: CI-only Robolectric flakes
+        # (component statics leaking across sandboxed test classes, Compose timeouts
+        # on loaded runners) must not paint main red — they failed 4+ green-commit
+        # builds in Nov 2026 with a DIFFERENT random test each time. A real
+        # regression fails both passes and keeps the run red.
+        run: |
+          ./gradlew :app:testDebugUnitTest --stacktrace || \
+            ./gradlew :app:testDebugUnitTest --rerun-tasks --stacktrace
 
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderZip
@@ -130,6 +131,18 @@ fun SettingsScreen(
                         onClick = { onOpenAppearance?.invoke() },
                     )
                 }
+            }
+
+            SectionHeader("Performance")
+            SettingsCard {
+                SwitchRow(
+                    icon = Icons.Outlined.Bolt,
+                    title = "Performance mode",
+                    subtitle = "Smooth and light: no animations, no splash, no video " +
+                        "thumbnails — lower CPU, RAM and battery use",
+                    checked = settings.performanceMode,
+                    onChange = { vm.setPerformanceMode(it) },
+                )
             }
 
             SectionHeader("Browsing")

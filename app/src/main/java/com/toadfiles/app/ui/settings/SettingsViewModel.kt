@@ -60,6 +60,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.settingsRepo.setAbortConfirm(enabled) }
     fun setOverwriteConfirm(enabled: Boolean) =
         viewModelScope.launch { container.settingsRepo.setOverwriteConfirm(enabled) }
+    fun setPerformanceMode(enabled: Boolean) =
+        viewModelScope.launch { container.settingsRepo.setPerformanceMode(enabled) }
     fun setArchiveFolder(path: String) =
         viewModelScope.launch { container.settingsRepo.setArchiveFolder(path) }
 

@@ -24,6 +24,15 @@ on:
 permissions:
   contents: write   # required to create a Release and upload assets
 
+# A tag push and a UI-published release for the same tag BOTH trigger this workflow
+# (see `on:`). Keying the group on the resolved tag means the duplicate event — and
+# any manual dispatch racing it — is cancelled instead of building the same tag
+# twice in parallel (v2.2.0, Nov 2026: two Release runs started 1s apart and the
+# second one failed its gate, painting the tag red next to the green one).
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   release:
     # Publishing a release through softprops (as github-actions[bot]) fires the

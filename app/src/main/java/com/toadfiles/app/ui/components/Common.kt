@@ -75,6 +75,7 @@ import com.toadfiles.app.ui.theme.ToadFileGeneric
 import com.toadfiles.app.ui.theme.ToadFileImage
 import com.toadfiles.app.ui.theme.ToadFileVideo
 import com.toadfiles.app.ui.theme.ToadFolder
+import com.toadfiles.app.ui.theme.LocalPerformanceMode
 import com.toadfiles.app.ui.theme.LocalToadMotion
 import com.toadfiles.app.ui.theme.toadFileIconFor
 import kotlinx.coroutines.Dispatchers
@@ -231,14 +232,22 @@ fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
  */
 @Composable
 fun VideoThumb(path: String, modifier: Modifier = Modifier) {
-    val stamp by produceState<String?>(initialValue = null, path) {
-        value = withContext(Dispatchers.IO) { VideoThumbs.stampFor(path) }
+    // Performance mode: MediaMetadataRetriever decode + LruCache bitmap churn are
+    // exactly the recurring CPU/RAM cost the mode exists to remove — keep the
+    // generic videocam icon and never touch the retriever.
+    val performanceMode = LocalPerformanceMode.current
+    val stamp by produceState<String?>(initialValue = null, path, performanceMode) {
+        if (performanceMode) {
+            value = null
+        } else {
+            value = withContext(Dispatchers.IO) { VideoThumbs.stampFor(path) }
+        }
     }
     var bitmap by remember(path, stamp) {
         mutableStateOf(stamp?.let { VideoThumbs.peek(path, it) })
     }
-    LaunchedEffect(path, stamp) {
-        if (bitmap == null) bitmap = VideoThumbs.load(File(path))
+    LaunchedEffect(path, stamp, performanceMode) {
+        if (!performanceMode && bitmap == null) bitmap = VideoThumbs.load(File(path))
     }
     val current = bitmap
     if (current != null) {

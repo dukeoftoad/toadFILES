@@ -82,8 +82,9 @@ import com.toadfiles.app.ui.theme.fontFamilyFor
  *  - **Font** — [AppFont]: the device's system typeface, the bundled Manrope, the
  *    unique chunky Toad font, Inter, Space Grotesk or JetBrains Mono — every entry
  *    previews in its own letterforms;
- *  - **Motion** — [MotionStyle]: Springy toad, Calm & precise or Cinematic, applied
- *    app-wide through `LocalToadMotion`;
+ *  - **Motion** — [MotionStyle]: Springy toad, Calm & precise, Cinematic or None
+ *    (zero animations — instant everything), applied app-wide through
+ *    `LocalToadMotion`;
  *  - **Navigation** and **App icon** as before (same SettingsViewModel setters,
  *    same DataStore keys, same `appearance_scroll` test seam).
  */
