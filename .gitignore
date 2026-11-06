@@ -22,3 +22,6 @@ keystore.properties
 *.log
 .DS_Store
 roborazzi/
+
+# Generated changelog asset (syncChangelog copies CHANGELOG.md at build time; lite ships none)
+app/src/full/assets/

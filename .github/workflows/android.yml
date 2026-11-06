@@ -63,21 +63,30 @@ jobs:
         # Some issues only show up with minification on.
         run: ./gradlew :app:lintRelease --stacktrace
 
-      - name: Unit tests
+      - name: Unit tests (full flavor)
+        # The full edition's suite — the flavor-blind contract plus the full-only
+        # fixtures in src/testFull (7z pipeline). Lite's delta is deletion, gated by
+        # compile-time constants, so its unit suite would re-run the same shared
+        # tests minus the full contracts; assemble + lint below still build and
+        # check the lite flavor end to end.
         # Same bounded re-run policy as the release gate: CI-only Robolectric flakes
         # (component statics leaking across sandboxed test classes, Compose timeouts
         # on loaded runners) must not paint main red — they failed 4+ green-commit
         # builds in Nov 2026 with a DIFFERENT random test each time. A real
         # regression fails both passes and keeps the run red.
         run: |
-          ./gradlew :app:testDebugUnitTest --stacktrace || \
-            ./gradlew :app:testDebugUnitTest --rerun-tasks --stacktrace
+          ./gradlew :app:testFullDebugUnitTest --stacktrace || \
+            ./gradlew :app:testFullDebugUnitTest --rerun-tasks --stacktrace
 
-      - name: Assemble debug APK
+      - name: Assemble debug APKs (both editions)
+        # With the edition flavors, assembleDebug builds full AND lite debug APKs
+        # (docs/LITE_EDITION_PLAN.md §2) — the lite build is this step's real test.
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Upload debug APK
+      - name: Upload debug APKs
         uses: actions/upload-artifact@v4
         with:
-          name: toadFILES-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: toadFILES-debug-apks
+          path: |
+            app/build/outputs/apk/full/debug/app-full-debug.apk
+            app/build/outputs/apk/lite/debug/app-lite-debug.apk

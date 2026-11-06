@@ -60,8 +60,10 @@ flaky, so the emulator matrix was removed. Instrumentation is a local, on-device
 - [ ] Keep device/OEM-only checks (sections 1–5) manual — emulators cannot cover them.
 
 ## 7. Release mechanics
-- [ ] Update `versionCode` / `versionName` in `app/build.gradle.kts`.
-- [ ] Tag `vX.Y.Z` — `release.yml` builds and publishes the signed APK
-      (`TOADFILES_KEYSTORE_FILE/_PASSWORD/_KEY_ALIAS/_KEY_PASSWORD` secrets required).
+- [ ] Update `versionCode` / `versionName` in `app/build.gradle.kts` (both editions
+      share them; the lite APK carries a `-lite` versionName suffix automatically).
+- [ ] Tag `vX.Y.Z` — `release.yml` builds and publishes BOTH signed APKs
+      (`toadfiles-<tag>.apk` and `toadfiles-lite-<tag>.apk`;
+      `TOADFILES_KEYSTORE_FILE/_PASSWORD/_KEY_ALIAS/_KEY_PASSWORD` secrets required).
 - [ ] Confirm the README screenshots still match the shipped UI (Robolectric/Roborazzi
-      capture: `./gradlew :app:testDebugUnitTest --tests '*TabScreenshotsTest*'`).
+      capture: `./gradlew :app:testFullDebugUnitTest --tests '*TabScreenshotsTest*'`).

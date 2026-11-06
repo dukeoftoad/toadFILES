@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- toadFILES Lite (docs/LITE_EDITION_PLAN.md §2): a flavor res file with the same
+     name REPLACES the main one at merge time, so "toadFILES Lite" is the only string
+     that differs from the full edition. (A buildConfigField resValue with this name
+     would collide with main's strings.xml entry and fail the lite resource merge.)
+     The launcher alias, the app label and every system surface that reads
+     @string/app_name pick this up automatically. -->
+<resources>
+    <string name="app_name">toadFILES Lite</string>
+</resources>

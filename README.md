@@ -44,14 +44,19 @@ Encrypted vault (Keystore plus biometrics) is on the list. It'll show up once I'
 
 Grab the APK from the [Releases](https://github.com/dukeoftoad/toadFILES/releases) page. Android 14 or newer is required (as of v1.8.1 the minimum is API 34). The app asks for "All files access", which is the standard permission for a file manager.
 
+Since the v2.3.0 line there are two editions built from this one repo (see [docs/LITE_EDITION_PLAN.md](docs/LITE_EDITION_PLAN.md)):
+
+- **toadFILES** — everything, including 7z support, media categories, the storage analyzer and the optional update check.
+- **toadFILES Lite** (`toadfiles-lite-<tag>.apk`, installs side-by-side as `com.toadfiles.app.lite`) — the fast, lightweight core: ZIP-only archives, no media grids, no analyzer, no update checker — and *no internet permission at all*, so it physically cannot phone home. Fonts and launcher-icon variants are stripped to keep the APK roughly 40% smaller; motion is off by construction (the "Performance mode" behavior of the full app, baked into the build).
+
 ## Building from source
 
 ```
 ./gradlew :app:assembleDebug
-./gradlew :app:testDebugUnitTest
+./gradlew :app:testFullDebugUnitTest
 ```
 
-Android Studio (Koala or newer) works too. Tests are plain JVM tests running on Robolectric, so no emulator is needed.
+`assembleDebug` builds both editions (`full` and `lite` product flavors). Android Studio (Koala or newer) works too. Tests are plain JVM tests running on Robolectric, so no emulator is needed; the 7z fixtures live in the full flavor's test source set (`src/testFull`).
 
 The instrumentation suite (`./gradlew :app:connectedDebugAndroidTest`) needs a real device or emulator; CI deliberately does not run it — hosted-runner emulators proved slow and flaky, so device-only behavior is covered by the manual release checklist (docs/RELEASE_CHECKLIST.md) instead.
 

@@ -4,6 +4,52 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased]
+
+The first cut of **toadFILES Lite** (docs/LITE_EDITION_PLAN.md): a second APK built
+from the same repo via Gradle product flavors.
+
+### Added
+- **`lite` product flavor (PR-1 + PR-2 of the plan)**: `applicationIdSuffix .lite`
+  installs side-by-side with the full app; `versionNameSuffix -lite`; the app label
+  reads "toadFILES Lite" via a flavor res override. Full is today's app unchanged.
+  The build gate is `BuildConfig.EDITION` (a compile-time constant per flavor), so
+  every `IS_LITE` branch constant-folds and R8 strips the dead side in release
+  builds — Lite's dex genuinely loses the stripped features instead of hiding them.
+- **Lite resource diet**: the 24 bundled Google-Fonts files (1.9 MB — 41% of the
+  APK) move to `src/full/res/font`; lite ships the Toad font and the system
+  typeface only, and the Appearance tab lists those two. The 7z pipeline
+  (commons-compress + xz, ~1 MB of dex) and coil-video are `fullImplementation`
+  deps — off the lite classpath entirely.
+- **Lite runtime diet**: Categories and Storage/Analyzer screens, the What's New
+  route, the update checker (MainActivity never runs `StartupUpdateCheck`; the
+  About screen hides the Updates and What's-new cards) and the app-icon switcher
+  UI are all compile-time-gated off. The lite manifest strips the INTERNET
+  permission at merge time — the app physically cannot phone home — removes the
+  42 launcher aliases for one `LauncherLite` entry, and advertises ZIP-only
+  VIEW filters. `ArchiveOps.canExtract` answers ZIP-only; a stray .7z reports an
+  honest "7z support is not included in toadFILES Lite".
+- **Lite motion**: `MotionStyle.NONE` pinned at the theme call site (the same
+  early-return splash and snap specs as the full app's "None"), and
+  `LocalPerformanceMode` reads as ON app-wide so video thumbnails resolve to the
+  generic icon instead of spinning up MediaMetadataRetriever.
+- **CI builds both editions**: Android CI lints and assembles `full` and `lite`
+  debug APKs and uploads both; the Release workflow gates on the full unit suite
+  (`testFullDebugUnitTest`), signs and attaches both APKs —
+  `toadfiles-<tag>.apk` and `toadfiles-lite-<tag>.apk`. The full-flavor 7z
+  fixtures now live in `src/testFull` (AGP's flavor test source set — the
+  earlier `src/full/test` placement was silently never compiled or run).
+
+### Fixed
+- **Release gate (v2.3.0, run #33)**: the ghost-alias test failed the v2.3.0
+  release gate twice in one job while Android CI passed the same suite on the
+  same commit — Robolectric's component-settings state carries ENABLED leftovers
+  written by other tests in the same JVM, which no per-test seeding can wall
+  off. The test now asserts the before/after delta of `PackageManager` state
+  across the ghost apply (a healthy guard writes nothing, so the snapshots must
+  be identical; a broken guard ENABLES the target and shows up as a delta), and
+  the sibling write test resets every alias it touched back to DEFAULT.
+
 ## [2.3.0] — 2026-11-06
 
 The release-hardening wave: the "441 of 2 items" extraction bug dies at the root,

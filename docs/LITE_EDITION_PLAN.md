@@ -121,3 +121,47 @@ and adds one `SettingsRepositoryTest`-style assertion per stripped gate.
   DataStore — a user switching editions re-chooses settings (favorites export via
   Properties is manual and acceptable for v1).
 - No F-Droid/Play flavor matrix. Two editions, one dimension, done.
+
+---
+
+## 7. Implementation status (post-v2.3.0)
+
+**Landed (the plan's PR-1 + PR-2 in one change):**
+
+- §2 flavor architecture: `full`/`lite` product flavors, `BuildConfig.EDITION` gate
+  (`domain/Edition.kt`), `.lite` suffix, label via `src/lite/res/values/strings.xml`
+  (a flavor res override — a `resValue` would have collided with main's
+  `app_name` string and failed the lite resource merge).
+- §3 phase 1 (resource diet): fonts moved to `src/full/res/font` +
+  `BundledFonts.kt` flavor seam (`bundledFontFamilyOrNull`), Appearance lists
+  SYSTEM + TOAD in lite.
+- §3 phase 2 (runtime diet): Categories / Storage / Analyzer / What's New routes
+  gated in `ToadNavHost`; update checker + banner + About Updates/What's-new cards
+  gated in `MainActivity`/`AboutScreen`; Home hero storage card gated; Appearance
+  hides Motion, App icon and accent, themes collapse to CLASSIC; 7z via the
+  `SevenZipImpl` flavor seam (lite answers "not included"); `ArchiveOps` ZIP-only;
+  INTERNET permission + 42 aliases stripped at manifest merge, one `LauncherLite`.
+- §4 motion: `MotionStyle.NONE` pinned + `LocalPerformanceMode` forced ON in lite
+  at the `ToadTheme` call site (NOT inside `ToadTheme` itself — component tests
+  drive the theme directly with their own motion params).
+- CI (android.yml, release.yml): both editions linted/assembled/signed; the release
+  uploads `toadfiles-<tag>.apk` + `toadfiles-lite-<tag>.apk`.
+
+**Deliberately deferred (PR-3 / phase 3 leftovers):**
+
+- `testLiteDebugUnitTest` in the gate: the shared Robolectric suite is NOT actually
+  flavor-blind — `AppearanceScreenTest` (font rows), `AboutScreenTest` (Updates /
+  What's-new cards), `ToadNavHostE2ETest` (Categories tab, storage card),
+  `TabScreenshotsTest` and the 7z `ArchiveOps` dispatch tests assert full-edition
+  contracts and would go red under the lite flavor without edition-aware surgery.
+  CI runs the full suite (`testFullDebugUnitTest`, including `src/testFull`) and
+  builds + lints both flavors instead. Revisit only if lite gains behavior of its
+  own (a bug surface the full suite can't catch).
+- Lite-specific screenshots in `docs/screenshots/`.
+- `versionName` tooling beyond the `-lite` suffix.
+
+**One convention fix during landing:** flavor-only unit tests live in
+`src/testFull/java` (AGP's flavor test source set — task `testFullDebugUnitTest`),
+NOT `src/full/test/java`, which AGP silently never compiles or runs. The 7z
+fixtures (`SevenZipSupportTest`, `ArchiveOpsVolumeTest`) were relocated
+accordingly.

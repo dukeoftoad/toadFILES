@@ -46,6 +46,28 @@ android {
         }
     }
 
+    // toadFILES Lite (docs/LITE_EDITION_PLAN.md): one repo, one codebase, two
+    // editions. `full` is today's app byte-for-byte; `lite` is the stripped flavor
+    // (applicationIdSuffix .lite → installs side-by-side). Feature gating uses the
+    // compile-time-constant BuildConfig.EDITION — R8 constant-folds "lite" branches
+    // and strips the dead side in release builds.
+    flavorDimensions += "edition"
+    productFlavors {
+        create("full") {
+            dimension = "edition"
+            buildConfigField("String", "EDITION", '"full"')
+        }
+        create("lite") {
+            dimension = "edition"
+            applicationIdSuffix = ".lite"
+            versionNameSuffix = "-lite"
+            // NOTE: no resValue app_name — it would collide with main's strings.xml
+            // entry ("Duplicate resources"). The lite label is overridden the
+            // resource-merge way instead: src/lite/res/values/strings.xml.
+            buildConfigField("String", "EDITION", '"lite"')
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -95,11 +117,13 @@ android {
 // at runtime (com.toadfiles.app.ui.whatsnew.Changelog), so release notes live in exactly
 // one place — CHANGELOG.md at the repo root — and can never drift from the app copy.
 // The generated file is gitignored; never edit it by hand.
+// It lands in src/full/assets — lite has no What's New route and ships no changelog
+// asset (docs/LITE_EDITION_PLAN.md §3 phase 2).
 val syncChangelog = tasks.register<Copy>("syncChangelog") {
     from(rootProject.file("CHANGELOG.md")) {
         rename { "changelog.md" }
     }
-    into("src/main/assets")
+    into("src/full/assets")
 }
 tasks.named("preBuild") { dependsOn(syncChangelog) }
 
@@ -125,12 +149,13 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)
-    implementation(libs.coil.video) // video thumbnails for the Categories/Recent grids
     implementation(libs.kotlinx.coroutines.core)
-    // 7z read support (pure Java). ZIP stays on java.util.zip.
-    implementation("org.apache.commons:commons-compress:1.27.1")
-    // XZ for Java: commons-compress needs it for LZMA-based 7z entries at runtime.
-    implementation("org.tukaani:xz:1.10")
+    // Full-edition-only weight: video-thumbnail decoder dep (VideoThumbs itself only
+    // needs MediaMetadataRetriever) and the 7z pipeline (commons-compress + xz, ~1 MB
+    // of dex). Lite declares ZIP-only (docs/LITE_EDITION_PLAN.md §3 phase 2).
+    fullImplementation(libs.coil.video)
+    fullImplementation("org.apache.commons:commons-compress:1.27.1")
+    fullImplementation("org.tukaani:xz:1.10")
 
     // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
     testImplementation(libs.junit)
