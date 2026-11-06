@@ -55,7 +55,10 @@ android {
     productFlavors {
         create("full") {
             dimension = "edition"
-            buildConfigField("String", "EDITION", '"full"')
+            // Kotlin-DSL note: the value is a Java-source literal, so the quotes
+            // must be escaped ("\"full\"") — the Groovy-style '"full"' single-quote
+            // form is a multi-character char literal here and fails script compilation.
+            buildConfigField("String", "EDITION", "\"full\"")
         }
         create("lite") {
             dimension = "edition"
@@ -64,7 +67,7 @@ android {
             // NOTE: no resValue app_name — it would collide with main's strings.xml
             // entry ("Duplicate resources"). The lite label is overridden the
             // resource-merge way instead: src/lite/res/values/strings.xml.
-            buildConfigField("String", "EDITION", '"lite"')
+            buildConfigField("String", "EDITION", "\"lite\"")
         }
     }
 
@@ -153,9 +156,10 @@ dependencies {
     // Full-edition-only weight: video-thumbnail decoder dep (VideoThumbs itself only
     // needs MediaMetadataRetriever) and the 7z pipeline (commons-compress + xz, ~1 MB
     // of dex). Lite declares ZIP-only (docs/LITE_EDITION_PLAN.md §3 phase 2).
-    fullImplementation(libs.coil.video)
-    fullImplementation("org.apache.commons:commons-compress:1.27.1")
-    fullImplementation("org.tukaani:xz:1.10")
+    // Kotlin DSL generates no accessor for flavor configurations — add() is the way.
+    add("fullImplementation", libs.coil.video)
+    add("fullImplementation", "org.apache.commons:commons-compress:1.27.1")
+    add("fullImplementation", "org.tukaani:xz:1.10")
 
     // ---- Local JVM unit tests (JUnit + Robolectric + Compose UI tests on the JVM) ----
     testImplementation(libs.junit)
