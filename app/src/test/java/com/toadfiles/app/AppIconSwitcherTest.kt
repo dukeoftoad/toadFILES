@@ -9,7 +9,6 @@ import com.toadfiles.app.domain.AppIconDesign
 import com.toadfiles.app.domain.PackageManagerAppIconSwitcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -129,7 +128,27 @@ class AppIconSwitcherTest {
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             pm.getComponentEnabledSetting(shippedDefault),
         )
+
+        // Leave the campground cleaner than we found it: reset every alias this test
+        // touched back to DEFAULT. Robolectric's component-settings state can leak
+        // across tests in the same JVM (it is what fed the ghost test's release-gate
+        // flake), so an ENABLED leftover here is exactly what other tests must never
+        // inherit.
+        val touched = AppIconDesign.entries.flatMap { d ->
+            AppIconColor.entries.map { c -> ghostlessComponentName(d, c) }
+        }
+        touched.forEach {
+            pm.setComponentEnabledSetting(
+                it,
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
     }
+
+    /** Same mapping the switcher uses, kept local to the cleanup above. */
+    private fun ghostlessComponentName(d: AppIconDesign, c: AppIconColor): ComponentName =
+        PackageManagerAppIconSwitcher.componentNameFor("com.toadfiles.app", d, c)
 
     @Test
     fun `apply bails out untouched when the target alias is a ghost`() {
@@ -158,25 +177,20 @@ class AppIconSwitcherTest {
             )
         }
 
+        // v2.3.0-post (hermetic rewrite): assert the DELTA, not absolute values.
+        // The v2.3.0 release gate failed on the "no alias reads ENABLED" form:
+        // Robolectric's component state can carry ENABLED leftovers written by OTHER
+        // tests in the same JVM (a static-per-sandbox map), and a leftover surfaces
+        // on these reads no matter what this test seeds — a CI-only, order-dependent
+        // failure that no amount of pre-seeding can wall off. The delta form is
+        // immune to ambient state by construction: whatever the map holds before
+        // apply, a healthy ghost guard writes NOTHING (the seed above is the last
+        // writer), so the after-snapshot must equal the before-snapshot exactly. A
+        // broken guard still fails it loudly — the plan's first write ENABLES the
+        // ghost target on top of the seed, changing the map between the snapshots.
+        val before = all.associateWith { pm.getComponentEnabledSetting(it) }
         ghost.apply(AppIconDesign.TOAD, AppIconColor.GREEN)
-
-        // v2.2.0: assert the guard's CONTRACT instead of equality with the seeded map.
-        // Robolectric's component-settings map is static per sandbox, so state written
-        // by other tests in the same JVM can surface on these reads as DEFAULT (0) or
-        // as a leftover value — pinning "every read is exactly DISABLED" flaked two
-        // release gates that way (v2.1.0 and again v2.2.0, both CI-only, never
-        // locally). The failure the guard prevents is an alias ending up ENABLED (the
-        // vanished-app bug), so "no alias is ENABLED after a ghost apply" is the
-        // discriminating assertion — and it is deterministic: with the guard in place
-        // nothing writes at all (the seed above is the last writer for every
-        // component); with the guard removed the plan's first write ENABLES the ghost
-        // target and fails here immediately.
-        for (component in all) {
-            assertNotEquals(
-                "ghost guard must never enable $component",
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                pm.getComponentEnabledSetting(component),
-            )
-        }
+        val after = all.associateWith { pm.getComponentEnabledSetting(it) }
+        assertEquals("ghost guard must leave every alias untouched", before, after)
     }
 }
