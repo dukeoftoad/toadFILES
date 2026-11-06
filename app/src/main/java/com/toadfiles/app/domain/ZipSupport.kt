@@ -61,19 +61,19 @@ object ZipSupport {
         val maxRatio: Long = 200,
     )
 
-    /** Slack added to the compressed-byte count when judging the expansion ratio
-     *  (restored with the central-directory rewrite — its loss made the heuristic
-     *  fire on benign ultra-compressible payloads, see [RATIO_MIN_COMPRESSED]). */
-    private const val RATIO_OVERHEAD = 64L
-
-    /** Entries whose compressed size is below this are exempt from the ratio
-     *  heuristic: deflate's own ~1032:1 ceiling bounds their absolute expansion to
-     *  roughly a megabyte, so the total-bytes cap — not the ratio — is the
-     *  meaningful guard for them. Highly repetitive REAL files (logs, CSVs, zero
-     *  padding, the "toad " × 5000 MAXIMUM-level round-trip test) routinely exceed
-     *  200:1 from a sub-kilobyte compressed block without being bombs. The
-     *  per-entry budget check and the running byte cap still apply to them. */
-    private const val RATIO_MIN_COMPRESSED = 1024L
+    /** Slack added to the compressed-byte count when judging the expansion ratio.
+     *  Deflate spends a few hundred bytes on Huffman-table and block headers before
+     *  any payload, and the zip container adds its own local-header noise, so a raw
+     *  compressed size is not a fair denominator for the first KiB of an entry.
+     *  The value must sit inside a window pinned by the ZipSupportTest fixtures:
+     *  high enough that the MAXIMUM-level round-trip (25,000 bytes of "toad " from a
+     *  61-byte block, ratio ~410:1 — highly repetitive REAL content, not a bomb)
+     *  passes with margin, low enough that a 200 KiB zero-run bomb (csize ~245 at a
+     *  50× cap) and the descriptor/5 MB bombs still abort. 1 KiB clears every
+     *  fixture with room; the running total-bytes cap stays the authority either
+     *  way — a hostile central directory can lie about the ratio, not about bytes
+     *  actually emitted. */
+    private const val RATIO_OVERHEAD = 1024L
 
     /** Sentinel for global abort conditions; its message is reported verbatim. */
     internal class ArchiveAbort(message: String) : IOException(message)
@@ -195,13 +195,14 @@ object ZipSupport {
                                             )
                                         }
                                         // Ratio guard against the compressed size the
-                                        // central directory recorded — only where the
-                                        // heuristic means something ([RATIO_MIN_COMPRESSED]
-                                        // exempts tiny blocks whose expansion is bounded by
-                                        // deflate itself). The total-bytes cap above stays
-                                        // the authority — a hostile central directory could
-                                        // lie about the ratio, but not about bytes emitted.
-                                        if (limits.maxRatio > 0 && entry.compressedSize >= RATIO_MIN_COMPRESSED &&
+                                        // central directory recorded, padded by
+                                        // [RATIO_OVERHEAD] so tiny blocks with
+                                        // header-heavy deflate streams keep an honest
+                                        // denominator. The total-bytes cap above stays
+                                        // the authority — a hostile central directory
+                                        // could lie about the ratio, but not about
+                                        // bytes actually emitted.
+                                        if (limits.maxRatio > 0 && entry.compressedSize > 0 &&
                                             entry.compressedSize <= Long.MAX_VALUE / limits.maxRatio &&
                                             written > (entry.compressedSize + RATIO_OVERHEAD) * limits.maxRatio
                                         ) {
