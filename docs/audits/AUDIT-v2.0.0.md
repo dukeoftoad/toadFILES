@@ -321,3 +321,12 @@ relocation), A26 (i18n/test-tag debt), A27 (test-suite nits).
   helpers replaced by one `TestAwait.kt`. The sleep-based race tests
   (deterministic-fail redesign) remain open.
 
+- **Release-gate flake (second occurrence, v2.2.0)** — the ghost-alias guard test
+  flaked again despite v2.1.1's explicit seeding. Root cause: Robolectric's
+  component-settings map is a static per-sandbox field, so state written by other
+  test classes in the same JVM can surface as `DEFAULT`/leftover values on reads;
+  "every read is exactly DISABLED" was equality against a leaky baseline. The test
+  now pins the guard's contract (no alias ENABLED after a ghost apply — the
+  vanished-app failure mode), which is deterministic with and without the guard,
+  and the release workflow's unit-test gate gains one bounded suite re-run.
+
