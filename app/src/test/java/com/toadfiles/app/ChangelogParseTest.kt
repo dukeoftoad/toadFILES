@@ -18,7 +18,18 @@ class ChangelogParseTest {
 
     /** The repo-root changelog as the bundling task ships it (never hand-edited). */
     private val bundledAsset: File by lazy {
-        listOf(File("src/main/assets/changelog.md"), File("app/src/main/assets/changelog.md"))
+        listOf(
+            // The edition split (v2.3.0) moved the generated asset into the full
+            // flavor's source set — lite ships no What's New route and no changelog
+            // (docs/LITE_EDITION_PLAN.md §3). Unit tests run with the module dir
+            // as the working directory, so this resolves to app/src/full/assets/.
+            File("src/full/assets/changelog.md"),
+            // The pre-split layout, kept so an old tag's checkout still resolves,
+            // plus repo-root working dirs for IDE runs.
+            File("src/main/assets/changelog.md"),
+            File("app/src/full/assets/changelog.md"),
+            File("app/src/main/assets/changelog.md"),
+        )
             .firstOrNull { it.exists() }
             ?: error(
                 "changelog.md is missing — the Gradle syncChangelog task generates it " +

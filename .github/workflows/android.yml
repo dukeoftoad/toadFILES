@@ -18,7 +18,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Backstop only: a healthy full job runs 6–9 min (Nov 2026). The 45-minute
+    # budget let a stalled test JVM die of old age instead of failing fast
+    # (run 42192575915: two failures printed, then 39 min of silence).
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -76,6 +79,13 @@ jobs:
         # on loaded runners) must not paint main red — they failed 4+ green-commit
         # builds in Nov 2026 with a DIFFERENT random test each time. A real
         # regression fails both passes and keeps the run red.
+        #
+        # Step-level timeout: the suite passes in ~2 min, so 12 is 2x headroom for
+        # the bounded re-run (compile + two passes). Without it, a stalled test JVM
+        # burns the whole job budget silently — run 42192575915 (Nov 6, 2026) sat
+        # 39 min past its last output and died only at the job's timeout-minutes.
+        # A hang is a real failure: fail fast and visibly, don't wait it out.
+        timeout-minutes: 12
         run: |
           ./gradlew :app:testFullDebugUnitTest --stacktrace || \
             ./gradlew :app:testFullDebugUnitTest --rerun-tasks --stacktrace

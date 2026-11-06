@@ -88,6 +88,12 @@ jobs:
         run: chmod +x gradlew
 
       - name: Lint and unit tests (gate the release)
+        # Step-level timeout: GitHub's default job budget is 360 minutes, and a
+        # stalled test JVM waits out every one of them (Android CI run 42192575915,
+        # Nov 6, 2026: 39 min of silence after the last test output, killed only by
+        # the job timeout). The gate passes in ~4 min; 12 covers the bounded re-run.
+        # A hang fails the release loudly and quickly instead of stalling it hours.
+        timeout-minutes: 12
         run: |
           # Both editions ship from this gate, so both get linted; with product
           # flavors the aggregate lintRelease task no longer exists.
