@@ -330,3 +330,39 @@ relocation), A26 (i18n/test-tag debt), A27 (test-suite nits).
   vanished-app failure mode), which is deterministic with and without the guard,
   and the release workflow's unit-test gate gains one bounded suite re-run.
 
+### 7.4 v2.3.0 remediation notes (release-hardening wave)
+
+Not audit A-numbers — these came out of the v2.3.0 bug report and the flake
+follow-ups, but they close integrity risks the audit had flagged around the ZIP
+guards (P1/P2 area) and the release gate.
+
+- **ZIP extraction walks the central directory** — the old ZipInputStream loop
+  trusted LOCAL file headers; a streamed outer zip could desync into a nested
+  archive's own local headers and publish its innards as top-level entries
+  ("441 of 2 items" when extracting an APK + .sha256). `ZipSupport.extract` now
+  iterates `java.util.zip.ZipFile`'s central directory (what every honest unzip
+  tool sees) and copies entries verbatim — an extracted file is never re-opened
+  or sniffed, so nested archives are payload. The entry-count cap is enforced
+  before anything is written, the CRC/size guard moved into the copy loop
+  (ZipFile streams don't self-verify), and the progress overlay reports
+  byte-level progress. Pinned by `ZipSupportNestedResyncTest`, which
+  hand-builds the hostile archive byte by byte.
+- **Ratio guard slack** — the header-based expansion-ratio guard judged against
+  the central directory's recorded csize with no slack; deflate-9 of a
+  highly-repetitive block produces honest ratios far above the cap from a
+  ~61-byte first block. The guard pads csize with a 1 KiB `RATIO_OVERHEAD`
+  (Huffman/block headers have no honest denominator in the first KiB);
+  `ZipSupportTest` pins both directions — the benign 410:1 round-trip passes
+  with margin while the zero-run and descriptor bombs still abort.
+- **Release-gate flake (third occurrence) closed at the contract level** —
+  v2.3.0's ghost-alias assertion pins "no alias ENABLED after a ghost apply"
+  instead of equality against a leaky seeded baseline; the Android CI
+  unit-test step gains the same bounded re-run the release gate had. The
+  Release workflow's concurrency group keys on the resolved tag so a tag push
+  and a UI-published release for the same tag cancel each other instead of
+  double-building (v2.2.0 built twice 1 s apart).
+- **CI hygiene** — 163 stale workflow runs deleted from the Actions history;
+  the Nov 2026 red-paint pattern (4+ green commits painted red by a DIFFERENT
+  random Robolectric/Compose flake each time) is addressed by the bounded
+  re-run rather than by manual re-triggering.
+

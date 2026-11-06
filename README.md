@@ -36,6 +36,7 @@ Real screenshots of the app — captured from the actual Compose UI running on t
 - Home is a proper dashboard: a hero storage card with free space, quick-access folders with icons, favorites, and a recent feed.
 - Storage screen with per-volume cards, a media-by-type breakdown, trash usage, and an on-demand biggest-folders analyzer.
 - Material You dynamic color on Android 12+, or pick one of seven accent colors (toad, blue, purple, green, orange, red, pink) when dynamic color is off.
+- Appearance controls built for real devices: seven themes, a font picker, four motion levels — including **None**, which turns every animation off — and a **Performance mode** toggle that skips animation and video-thumbnail decoding entirely to save CPU, RAM and battery on low-end devices.
 
 Encrypted vault (Keystore plus biometrics) is on the list. It'll show up once I'm confident it can be done right.
 
