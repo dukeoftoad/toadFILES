@@ -6,6 +6,58 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-11-06
+
+The wave-three release: the third remediation batch of the v2.0.0 full-repo audit
+(docs/audits/AUDIT-v2.0.0.md) — the duplicated op machinery finally becomes one
+engine, the repeated whole-tree walks become metadata, and the password bytes stop
+outliving the operations that use them.
+
+### Changed
+- **A22 — one undo engine, one compress engine** (was copy-paste across three
+  ViewModels): the byte-identical `undoDelete` loop (honest counts, collision-rename
+  notes, media re-scan) that lived in Browse, Categories and Recent is now the shared
+  `undoDeleteBatch` in domain/UndoOps.kt, and the per-archive compress loop
+  (monotonic pipeline-totals progress, per-archive delete-sources gating) is the
+  shared `ArchiveOps.compressBatch` — Browse and Categories can no longer drift
+  apart. Pinned by the new UndoOpsTest and ArchiveOpsBatchTest.
+- **A20 — trash size and media totals stop re-walking the world**: a trashed file's
+  size is recorded in its sidecar at trash time, so the Storage tab's trash-usage
+  card answers from metadata instead of walking every payload tree on every refresh
+  (directory payloads and legacy sidecars keep the walk fallback); and the
+  Categories/Storage media totals are computed in ONE pass over the media index —
+  six aggregate queries plus six per-category row scans (an exists() stat per row,
+  per category) become a single scan with the identical per-category counts.
+- **A23 — the volume-split contract moved to its siblings**: `VolumeChoice`,
+  `VOLUME_MB` and the byte mappers now live in domain/ArchivePrefs.kt next to
+  `ArchiveFormat`/`CompressLevel` instead of inside the compress dialog's file, so
+  ViewModels stop importing a ui.components type for a pure domain value.
+- **A26 — the sort menu can no longer be reworded by an enum rename**: labels come
+  from a stable mapping instead of `enum.name`; and the shared dialogs/sheets carry
+  test tags now (`dialog_confirm`, `dialog_name_input`, `dialog_conflict`,
+  `overlay_progress`, `dialog_result`, `dialog_password`, `dialog_compress`,
+  `dialog_apk_install`, `sheet_file_actions`, `sheet_properties`,
+  `dialog_archive_folder`), following the repo's snake_case convention.
+
+### Fixed
+- **A15 — password bytes never outlive the operation**: the `CharArray` handed to
+  the 7z pipeline is wiped (`fill('\u0000')`) at the ArchiveOps seam when the
+  extract ends and when a compress batch ends — success, failure or cancellation.
+  Every production caller creates the array fresh per attempt, so nothing reuses it
+  after the wipe. The typed `String`s in dialogs remain an accepted, documented
+  residual (heap-lifetime hardening only).
+- **A27 — the test suite tells the truth again**: the three vacuous
+  conditional assertions (asserting only inside `if (x != null)`, which passed
+  trivially when the stats were missing) are unconditional now; the stale
+  `TODO(integration)` markers on the two password-flow tests that became real long
+  ago are gone; the mangled `[movedFiles]`/`[movedEntries]` KDoc markers in
+  MediaTrashOps are fixed; and the 10-second polling `await()` helper that was
+  copy-pasted as a private member into ten test files is now one shared definition.
+
+Still open after wave three: A10 (CI emulator job or honest removal), A12 (Kover +
+verifyRoborazzi), A17 (release-signature pinning), i18n extraction of the hardcoded
+component copy (the rest of A26), and the sleep-based race tests (the rest of A27).
+
 ## [2.1.1] — 2026-11-05
 
 The come-back-where-you-were release: Browse finally survives a trip to

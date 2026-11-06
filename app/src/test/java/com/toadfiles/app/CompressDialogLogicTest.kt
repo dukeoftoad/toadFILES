@@ -1,9 +1,9 @@
 package com.toadfiles.app
 
-import com.toadfiles.app.ui.components.VolumeChoice
+import com.toadfiles.app.domain.VolumeChoice
 import com.toadfiles.app.ui.components.compressConfirmEnabled
-import com.toadfiles.app.ui.components.customVolumeTextToBytes
-import com.toadfiles.app.ui.components.volumeChoiceFor
+import com.toadfiles.app.domain.customVolumeTextToBytes
+import com.toadfiles.app.domain.volumeChoiceFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

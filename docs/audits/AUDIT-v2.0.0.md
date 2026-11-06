@@ -194,10 +194,10 @@ Verified as correct during this pass (worth recording so future audits don't re-
 |---|---|---|---|
 | **Now (this audit's PR)** | A1 (OpRunner single-flight + cancel semantics + tests) | small, isolated | ✅ shipped in v2.0.0 (#29) |
 | Next reliability PR | A2, A3, A4, A5, A8, A9 (all op/VM lifecycle — one pass over three ViewModels + entryCount move) | medium | ✅ shipped in v2.1.0 |
-| UI perf pass | A6, A18, A19, A20, A21 | medium | A6, A18, A19, A21 ✅ v2.1.0/v2.1.1; A20 open |
+| UI perf pass | A6, A18, A19, A20, A21 | medium | A6, A18, A19, A20, A21 ✅ v2.1.0–v2.2.0 |
 | Theme pass | A7 (container roles), A24 | small | ✅ shipped in v2.1.0 (A24) / v2.1.1 (A7) |
-| CI/test pass | A10 (emulator job or honest removal), A11 (ShadowDownloadManager), A12 (Kover + verifyRoborazzi), A27 | medium | A11 ✅ v2.1.1; A10, A12, A27 open |
-| Hardening backlog | A13-A17, A22-A26, A28-A30 | opportunistic, tied to next touch of each file | A13, A14, A16, A19, A25, A28, A29, A30 ✅ v2.1.0/v2.1.1; A15, A17, A22, A23, A24-shipped, A26 open |
+| CI/test pass | A10 (emulator job or honest removal), A11 (ShadowDownloadManager), A12 (Kover + verifyRoborazzi), A27 | medium | A11 ✅ v2.1.1; A27 ✅ v2.2.0 (vacuous assertions, stale TODOs, KDoc, await dedupe; sleep-based race redesign still open); A10, A12 open |
+| Hardening backlog | A13-A17, A22-A26, A28-A30 | opportunistic, tied to next touch of each file | A13, A14, A15, A16, A19, A22, A23, A25, A28, A29, A30 ✅ v2.1.0–v2.2.0 (A26 partial: labels + test tags done, i18n open); A17, A24-shipped, i18n open |
 
 *Everything above was verified by reading the code at the cited lines on the audited commit; static review only, no device run.*
 
@@ -278,3 +278,46 @@ Still open after wave two: A10 (CI emulator job or honest removal), A12 (Kover +
 verifyRoborazzi), A15 (password zeroization), A17 (release-signature pinning),
 A20 (trash-size/hidden-total walks), A22 (op-machinery dedup), A23 (VolumeChoice
 relocation), A26 (i18n/test-tag debt), A27 (test-suite nits).
+
+### 7.3 v2.2.0 remediation notes (wave three)
+
+- **A22** — `domain/UndoOps.kt` is the one undo engine (`undoDeleteBatch` +
+  `UndoOutcome.toastMessage()`), consuming the media re-scan as an injected callback so
+  the domain stays free of data-layer types; Browse/Categories/Recent's `undoDelete`
+  shrink to launch + engine + toast + their own re-list. `ArchiveOps.compressBatch` is
+  the one compress-batch engine (A4's pipeline-totals forwarding and the per-archive
+  delete-sources gate live there); Browse's inline op launch and Categories' OpRunner
+  op both delegate to it. Pinned by `UndoOpsTest` (counts, gone, collision rename,
+  empty batch, rescan hand-off) and `ArchiveOpsBatchTest` (monotonic pipeline totals,
+  per-archive trash gating, password wipe).
+- **A20** — `Trash.trash` records `size=<bytes>` in the pending sidecar (files only —
+  a directory walk inside the trash transaction would hold the trash lock; dirs and
+  legacy sidecars report -1); `TrashEntry.sizeBytes` carries it; `StorageViewModel`
+  prefers the metadata with a per-entry walk fallback. `MediaRepository.summaries()`
+  is one index pass now: the six COUNT/SUM aggregate queries and the six per-category
+  `hiddenTotals` scans (an exists() stat per row per category) became a single scan
+  whose `matchesSelection` mirrors `selectionFor`'s SQL per category (shared
+  `archiveMimes`/`archiveExts` constants), so the counts are unchanged. All five
+  existing summaries tests pin the equivalence unchanged.
+- **A23** — `VolumeChoice`, `VOLUME_MB`, `volumeChoiceFor`, `customVolumeTextToBytes`
+  moved from `ui/components/CompressDialog.kt` to `domain/ArchivePrefs.kt`; imports
+  updated in both ViewModels, the dialog and the tests.
+- **A15** — `ArchiveOps.extract` wipes the caller's password `CharArray` in `finally`;
+  `ArchiveOps.compressBatch` wipes it when the batch ends (NOT inside `compress` — a
+  multi-archive batch hands the same array to every archive, so the outermost seam is
+  the one consumption point). All five production `toCharArray()` sites create the
+  array fresh per attempt. Typed `String`s in dialog state remain a documented
+  residual (Compose TextField contract; nothing is logged or persisted).
+- **A26 (partial)** — `SortMenu` labels come from a stable `sortModeLabel` mapping;
+  eleven shared dialogs/sheets/surfaces carry test tags following the snake_case
+  convention (`dialog_confirm`, `dialog_name_input`, `dialog_conflict`,
+  `overlay_progress`, `dialog_result`, `dialog_password`, `dialog_compress`,
+  `dialog_apk_install`, `sheet_file_actions`, `sheet_properties`,
+  `dialog_archive_folder`). The hardcoded-copy i18n extraction is still open.
+- **A27 (partial)** — the three vacuous conditional assertions are unconditional
+  (`HomeViewModelTest`, `FileRepositoryTest`, `AboutViewModelTest`); the stale
+  `TODO(integration)` markers on the two real password-flow tests are gone;
+  MediaTrashOps' mangled KDoc markers fixed; the ten copy-pasted private `await()`
+  helpers replaced by one `TestAwait.kt`. The sleep-based race tests
+  (deterministic-fail redesign) remain open.
+

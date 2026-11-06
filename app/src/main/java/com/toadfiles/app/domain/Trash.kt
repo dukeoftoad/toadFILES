@@ -11,6 +11,13 @@ data class TrashEntry(
     val file: File,
     val originPath: String,
     val trashedAt: Long,
+    /** Payload size in bytes recorded at trash time (audit A20) — a single stat taken
+     *  while the pending sidecar was written, so Storage's trash-usage card never has
+     *  to walk the payload tree on every refresh. Files only: a directory payload
+     *  keeps the walk-at-read fallback (-1), because walking inside the trash
+     *  transaction would hold the trash lock for the whole traversal. Legacy sidecars
+     *  predating the field also report -1 and fall back. */
+    val sizeBytes: Long = -1,
 )
 
 /**
@@ -128,7 +135,10 @@ object Trash {
                 //    for legacy sidecars — see [decodeOrigin]).
                 val pending = File(metaDir, target.name + META_SUFFIX + PENDING_SUFFIX)
                 pending.writeText(
-                    "origin=${URLEncoder.encode(src.absolutePath, "UTF-8")}\ntrashedAt=${clock()}",
+                    "origin=${URLEncoder.encode(src.absolutePath, "UTF-8")}\ntrashedAt=${clock()}\n" +
+                        // Audit A20: record the payload size while the cheap stat is
+                        // available, so refresh-time usage never walks the tree.
+                        "size=${if (src.isFile) src.length() else -1L}",
                 )
                 // Test-only barrier (audit P2.6): lets a test park the transaction in
                 // this window to prove a concurrent listing waits instead of pruning.
@@ -160,13 +170,13 @@ object Trash {
     /** Restores a trashed item to its original location. Returns the restored file or null. */
     fun restore(trashed: File): File? = synchronized(lock) {
         val meta = readMeta(trashed) ?: return null
-        val parent = File(meta.second.substringBeforeLast('/', ""))
+        val parent = File(meta.originPath.substringBeforeLast('/', ""))
         val target = when {
             parent.isDirectory -> parent
             parent.mkdirs() -> parent
             else -> trashed.parentFile?.parentFile ?: return null // fall back to the volume root
         }
-        val name = PathSafety.uniqueName(target, meta.second.substringAfterLast('/'))
+        val name = PathSafety.uniqueName(target, meta.originPath.substringAfterLast('/'))
         val dest = File(target, name)
         return if (trashed.renameTo(dest)) {
             // The payload is safely back. If this cleanup fails the leftover sidecar is
@@ -219,13 +229,14 @@ object Trash {
                 val meta = readMeta(f)
                 out += TrashEntry(
                     file = f,
-                    originPath = meta?.second ?: "",
+                    originPath = meta?.originPath ?: "",
                     // Without metadata the trashed-at time is UNKNOWN, not old: rename
                     // preserves mtime, so falling back to lastModified() would let the
                     // next purge destroy a sidecar-less payload despite the 30-day
                     // retention promise. 0 keeps it listed (it sorts last — the list
                     // is newest-first) and manually deletable, but never auto-purged (D10).
-                    trashedAt = meta?.first ?: 0L,
+                    trashedAt = meta?.trashedAt ?: 0L,
+                    sizeBytes = meta?.sizeBytes ?: -1L,
                 )
             }
             pruneOrphanMeta(dir, payloads)
@@ -247,7 +258,7 @@ object Trash {
     /** The recorded origin path for [trashed], or null when its metadata is missing or
      *  corrupt. Lets callers report collision renames honestly (a restore that landed
      *  as "name (1).ext" — D4) without re-reading the sidecar format themselves. */
-    fun originOf(trashed: File): String? = synchronized(lock) { readMeta(trashed)?.second }
+    fun originOf(trashed: File): String? = synchronized(lock) { readMeta(trashed)?.originPath }
 
     // ---------- internal ----------
 
@@ -289,8 +300,12 @@ object Trash {
         return String(bytes, 0, end, Charsets.UTF_8)
     }
 
-    /** Returns (trashedAt, originPath), or null when the sidecar is missing or corrupt. */
-    private fun readMeta(trashed: File): Pair<Long, String>? {
+    /** Sidecar contents: trashed-at time, origin path and the recorded payload size
+     *  (-1 when unknown — directory payloads and legacy sidecars; audit A20). */
+    private data class Meta(val trashedAt: Long, val originPath: String, val sizeBytes: Long)
+
+    /** Returns the sidecar contents, or null when the sidecar is missing or corrupt. */
+    private fun readMeta(trashed: File): Meta? {
         // Crash window (audit P1.3): the payload moved but the sidecar is still
         // ".pending". Fall back to the pending record so restore keeps working;
         // entries() promotes it on the next listing anyway.
@@ -299,22 +314,25 @@ object Trash {
 
     /** Parses the metadata file at [f] with [parseMeta]; null when missing, unreadable
      *  or not valid metadata. Shared by every reader so the schema lives in one place. */
-    private fun parseMetaFile(f: File?): Pair<Long, String>? = try {
+    private fun parseMetaFile(f: File?): Meta? = try {
         f?.let { parseMeta(it.readText()) }
     } catch (_: Exception) {
         null
     }
 
     /** Validates the sidecar schema: both "trashedAt=<positive long>" and a non-empty
-     *  absolute "origin=<path>" must be present, else it is not trusted metadata. */
-    private fun parseMeta(text: String): Pair<Long, String>? {
+     *  absolute "origin=<path>" must be present, else it is not trusted metadata.
+     *  "size=<long>" is optional (legacy sidecars and directory payloads: -1). */
+    private fun parseMeta(text: String): Meta? {
         var at = -1L
         var origin = ""
+        var size = -1L
         for (line in text.lineSequence()) {
             if (line.startsWith("trashedAt=")) at = line.removePrefix("trashedAt=").toLongOrNull() ?: at
             else if (line.startsWith("origin=")) origin = decodeOrigin(line.removePrefix("origin="))
+            else if (line.startsWith("size=")) size = line.removePrefix("size=").toLongOrNull() ?: -1L
         }
-        return if (at > 0 && origin.startsWith("/")) at to origin else null
+        return if (at > 0 && origin.startsWith("/")) Meta(at, origin, size) else null
     }
 
     /** Sidecar origins are URL-encoded on write so a '\n' in a filename cannot corrupt
@@ -372,7 +390,7 @@ object Trash {
         // parses as valid trash metadata AND whose origin actually names this payload
         // is migrated. Anything else is preserved as an ordinary payload.
         val meta = parseMetaFile(sidecar)
-        if (meta == null || !referencesPayload(meta.second, payload.name)) return false
+        if (meta == null || !referencesPayload(meta.originPath, payload.name)) return false
         val metaDir = metaDirFor(trashDir)
         if (!metaDir.isDirectory && !metaDir.mkdirs()) return false
         return try {
