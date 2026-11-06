@@ -6,11 +6,15 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
-The first cut of **toadFILES Lite** (docs/LITE_EDITION_PLAN.md): a second APK built
-from the same repo via Gradle product flavors.
+## [2.3.0] — 2026-11-06
+
+The release-hardening wave **and the first cut of toadFILES Lite**: the "441 of 2 items"
+extraction bug dies at the root, the ratio guard stops punishing honest archives, the
+UI gains a zero-cost motion setting plus a one-toggle Performance mode — and one repo
+now ships two APKs (full and Lite) via Gradle product flavors (docs/LITE_EDITION_PLAN.md).
 
 ### Added
-- **`lite` product flavor (PR-1 + PR-2 of the plan)**: `applicationIdSuffix .lite`
+- **toadFILES `lite` product flavor (PR-1 + PR-2 of the plan)**: `applicationIdSuffix .lite`
   installs side-by-side with the full app; `versionNameSuffix -lite`; the app label
   reads "toadFILES Lite" via a flavor res override. Full is today's app unchanged.
   The build gate is `BuildConfig.EDITION` (a compile-time constant per flavor), so
@@ -39,22 +43,26 @@ from the same repo via Gradle product flavors.
   `toadfiles-<tag>.apk` and `toadfiles-lite-<tag>.apk`. The full-flavor 7z
   fixtures now live in `src/testFull` (AGP's flavor test source set — the
   earlier `src/full/test` placement was silently never compiled or run).
-
-### Fixed
-- **Release gate (v2.3.0, run #33)**: the ghost-alias test failed the v2.3.0
-  release gate twice in one job while Android CI passed the same suite on the
-  same commit — Robolectric's component-settings state carries ENABLED leftovers
-  written by other tests in the same JVM, which no per-test seeding can wall
-  off. The test now asserts the before/after delta of `PackageManager` state
-  across the ghost apply (a healthy guard writes nothing, so the snapshots must
-  be identical; a broken guard ENABLES the target and shows up as a delta), and
-  the sibling write test resets every alias it touched back to DEFAULT.
-
-## [2.3.0] — 2026-11-06
-
-The release-hardening wave: the "441 of 2 items" extraction bug dies at the root,
-the ratio guard stops punishing honest archives, and the UI gains a zero-cost
-motion setting plus a one-toggle Performance mode.
+- **Motion "None" (Appearance tab)**: a fourth MotionStyle that turns every
+  animation off — nav transitions become `EnterTransition.None`/`ExitTransition.None`
+  (no transition nodes are created at all), every animated value settles in one frame
+  via snap specs, and the launch splash is skipped entirely (`splashHoldMs` 0 + a
+  zero-node early return). Zero animation work on the UI thread for low-end or
+  battery-starved devices. The Appearance tab renders the enum automatically, so the
+  card lists four choices now; the persisted enum-name round-trip already tolerated
+  unknown values, so older installs upgrade cleanly.
+- **Performance mode (Settings)**: one toggle that removes the recurring overload the
+  motion choice can't cover — it forces `MotionStyle.NONE` app-wide regardless of the
+  Appearance pick and publishes `LocalPerformanceMode`, which `VideoThumb` reads to
+  skip the `MediaMetadataRetriever` stat/decode pipeline entirely (generic videocam
+  icon instead). Lower CPU, RAM and battery; persisted as `performance_mode` in
+  DataStore (defaults off; pinned by a SettingsRepositoryTest round-trip).
+- **docs/LITE_EDITION_PLAN.md**: the lightweight-edition proposal — a `lite` Gradle
+  flavor (separate APK, `applicationIdSuffix .lite`) that strips fonts (1.9 MB = 41%
+  of the APK), the 24 extra launcher aliases, video thumbnails + coil-video,
+  Categories/Analyzer screens, the update checker and 7z (commons-compress + xz),
+  targeting ~2.5–3.0 MB APK, instant cold start and zero animation frames, with a
+  three-PR sequencing plan.
 
 ### Fixed
 - **Ratio guard false-positives on ultra-compressible entries (caught by CI,
@@ -90,33 +98,22 @@ motion setting plus a one-toggle Performance mode.
 - **Release gate — the ghost-alias test can no longer flake**: Robolectric's
   component-settings map is static per sandbox, so the ghost test's
   "every read is exactly DISABLED" assertion could read leftover state written by
-  other test classes in the same JVM and fail CI-only, at a low rate (v2.1.0's
-  gate and again v2.1.1's fix wasn't enough). The assertion now pins the guard's
-  actual contract — no alias may end up ENABLED after a ghost apply — which is
-  deterministic in both directions, and the release workflow's test gate gains a
-  single bounded suite re-run as a second belt.
-
-### Added
-- **Motion "None" (Appearance tab)**: a fourth MotionStyle that turns every
-  animation off — nav transitions become `EnterTransition.None`/`ExitTransition.None`
-  (no transition nodes are created at all), every animated value settles in one frame
-  via snap specs, and the launch splash is skipped entirely (`splashHoldMs` 0 + a
-  zero-node early return). Zero animation work on the UI thread for low-end or
-  battery-starved devices. The Appearance tab renders the enum automatically, so the
-  card lists four choices now; the persisted enum-name round-trip already tolerated
-  unknown values, so older installs upgrade cleanly.
-- **Performance mode (Settings)**: one toggle that removes the recurring overload the
-  motion choice can't cover — it forces `MotionStyle.NONE` app-wide regardless of the
-  Appearance pick and publishes `LocalPerformanceMode`, which `VideoThumb` reads to
-  skip the `MediaMetadataRetriever` stat/decode pipeline entirely (generic videocam
-  icon instead). Lower CPU, RAM and battery; persisted as `performance_mode` in
-  DataStore (defaults off; pinned by a SettingsRepositoryTest round-trip).
-- **docs/LITE_EDITION_PLAN.md**: the lightweight-edition proposal — a `lite` Gradle
-  flavor (separate APK, `applicationIdSuffix .lite`) that strips fonts (1.9 MB = 41%
-  of the APK), the 24 extra launcher aliases, video thumbnails + coil-video,
-  Categories/Analyzer screens, the update checker and 7z (commons-compress + xz),
-  targeting ~2.5–3.0 MB APK, instant cold start and zero animation frames, with a
-  three-PR sequencing plan.
+  other test classes in the same JVM and fail CI-only, at a low rate (v2.1.0's and
+  v2.1.1's gates — and twice more in one v2.3.0 gate job, run #33, while Android CI
+  passed the same suite on the same commit). The test now asserts the before/after
+  delta of `PackageManager` state across the ghost apply — a healthy guard writes
+  nothing, so the snapshots must be identical; a broken guard ENABLES the target
+  and shows up as a delta — the sibling write test resets every alias it touches
+  back to DEFAULT, and the release workflow's test gate gains
+  a single bounded suite re-run as a second belt.
+- **ChangelogParseTest resolved the generated changelog at its pre-split path**: the
+  Lite edition moved the bundled asset from `src/main/assets/` to `src/full/assets/`
+  (where `syncChangelog` writes it now), but the release-gate test still looked in
+  the old location — `testFullDebugUnitTest` failed "changelog.md is missing" on
+  every run since the flavor split (runs 42192575915 / 42198502334, the v2.3.0
+  gate). The lookup now targets the full flavor's source set, keeping the legacy
+  paths as fallbacks, and the generated-asset `.gitignore` moves with it so local
+  checkouts stay clean.
 
 ### Changed
 - **CI cleanup**: the Android CI unit-test step gains the same bounded suite re-run
@@ -126,6 +123,14 @@ motion setting plus a one-toggle Performance mode.
   release for the same tag cancel each other instead of double-building in parallel
   (v2.2.0 built twice 1s apart, the loser failing its gate); 163 stale workflow runs
   deleted from the Actions history.
+- **A stalled test JVM can no longer eat the CI budget (run 42192575915)**: the
+  Android CI unit-test job printed its two failures, sat 39 minutes in silence —
+  the worker JVM never exited — and died only at the job's 45-minute timeout, for
+  a suite that passes in ~2. Both workflows' unit-test steps now carry a 12-minute
+  step-level timeout (GitHub's default job budget is 360 minutes — at the release
+  gate a hang would have stalled the release for six hours), and Android CI's
+  job-level backstop drops 45 → 30 minutes. A hang now fails fast and visibly
+  instead of burning wall-clock.
 
 ## [2.2.0] — 2026-11-06
 

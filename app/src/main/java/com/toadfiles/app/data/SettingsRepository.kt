@@ -81,7 +81,7 @@ data class ToadSettings(
     val abortConfirm: Boolean = true,
     /** Confirmation dialog when extraction would overwrite existing files. */
     val overwriteConfirm: Boolean = true,
-    /** One-knob overload switch (v2.2.1): forces MotionStyle.NONE app-wide (no
+    /** One-knob overload switch (v2.3.0): forces MotionStyle.NONE app-wide (no
      *  animations, no splash) and skips recurring heavy work (video thumbnail
      *  decoding) — trades the polish for lower CPU, RAM and battery draw. */
     val performanceMode: Boolean = false,
