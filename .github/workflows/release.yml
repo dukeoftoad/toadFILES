@@ -89,7 +89,9 @@ jobs:
 
       - name: Lint and unit tests (gate the release)
         run: |
-          ./gradlew :app:lintRelease --stacktrace
+          # Both editions ship from this gate, so both get linted; with product
+          # flavors the aggregate lintRelease task no longer exists.
+          ./gradlew :app:lintFullRelease :app:lintLiteRelease --stacktrace
           # The full edition's unit suite (the lite flavor's delta is deletion —
           # assemble below builds and signs both APKs).
           # The Robolectric ghost-alias guard test has flaked two release gates at a

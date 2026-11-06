@@ -56,12 +56,14 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Lint (debug)
-        run: ./gradlew :app:lintDebug --stacktrace
+      - name: Lint (debug, both editions)
+        # With product flavors the aggregate lintDebug/lintRelease tasks no longer
+        # exist — lint each edition explicitly (docs/LITE_EDITION_PLAN.md §2).
+        run: ./gradlew :app:lintFullDebug :app:lintLiteDebug --stacktrace
 
-      - name: Lint (release)
+      - name: Lint (release, both editions)
         # Some issues only show up with minification on.
-        run: ./gradlew :app:lintRelease --stacktrace
+        run: ./gradlew :app:lintFullRelease :app:lintLiteRelease --stacktrace
 
       - name: Unit tests (full flavor)
         # The full edition's suite — the flavor-blind contract plus the full-only
@@ -82,6 +84,13 @@ jobs:
         # With the edition flavors, assembleDebug builds full AND lite debug APKs
         # (docs/LITE_EDITION_PLAN.md §2) — the lite build is this step's real test.
         run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Assemble release APKs (both editions, unsigned here)
+        # R8 + resource shrinking differ per flavor — the lite flavor's whole point
+        # is dead-code stripping, so its minified build is exercised on every push,
+        # not discovered at the next release tag. Without the keystore env vars the
+        # APKs are simply unsigned (the Release workflow signs for real).
+        run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Upload debug APKs
         uses: actions/upload-artifact@v4
