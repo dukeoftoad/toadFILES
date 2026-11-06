@@ -61,6 +61,20 @@ object ZipSupport {
         val maxRatio: Long = 200,
     )
 
+    /** Slack added to the compressed-byte count when judging the expansion ratio
+     *  (restored with the central-directory rewrite — its loss made the heuristic
+     *  fire on benign ultra-compressible payloads, see [RATIO_MIN_COMPRESSED]). */
+    private const val RATIO_OVERHEAD = 64L
+
+    /** Entries whose compressed size is below this are exempt from the ratio
+     *  heuristic: deflate's own ~1032:1 ceiling bounds their absolute expansion to
+     *  roughly a megabyte, so the total-bytes cap — not the ratio — is the
+     *  meaningful guard for them. Highly repetitive REAL files (logs, CSVs, zero
+     *  padding, the "toad " × 5000 MAXIMUM-level round-trip test) routinely exceed
+     *  200:1 from a sub-kilobyte compressed block without being bombs. The
+     *  per-entry budget check and the running byte cap still apply to them. */
+    private const val RATIO_MIN_COMPRESSED = 1024L
+
     /** Sentinel for global abort conditions; its message is reported verbatim. */
     internal class ArchiveAbort(message: String) : IOException(message)
 
@@ -181,13 +195,15 @@ object ZipSupport {
                                             )
                                         }
                                         // Ratio guard against the compressed size the
-                                        // central directory recorded. The total-bytes cap
-                                        // above stays the authority — a hostile central
-                                        // directory could lie about the ratio, but not
-                                        // about bytes actually emitted.
-                                        if (limits.maxRatio > 0 && entry.compressedSize > 0 &&
+                                        // central directory recorded — only where the
+                                        // heuristic means something ([RATIO_MIN_COMPRESSED]
+                                        // exempts tiny blocks whose expansion is bounded by
+                                        // deflate itself). The total-bytes cap above stays
+                                        // the authority — a hostile central directory could
+                                        // lie about the ratio, but not about bytes emitted.
+                                        if (limits.maxRatio > 0 && entry.compressedSize >= RATIO_MIN_COMPRESSED &&
                                             entry.compressedSize <= Long.MAX_VALUE / limits.maxRatio &&
-                                            written > entry.compressedSize * limits.maxRatio
+                                            written > (entry.compressedSize + RATIO_OVERHEAD) * limits.maxRatio
                                         ) {
                                             throw ArchiveAbort(
                                                 "Aborted: suspicious expansion ratio in $name (possible zip bomb)"
