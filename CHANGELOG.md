@@ -7,6 +7,21 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 ## [Unreleased]
 
 ### Fixed
+- **Ratio guard false-positives on ultra-compressible entries (caught by CI,
+  runs #161/#163/#164)**: the central-directory rewrite judged the expansion
+  ratio against the compressed size the central directory records with no
+  slack — but deflate-9 of "toad " × 5000 produces csize = 61 for 25,000 bytes
+  (410:1 from a 61-byte block), so the honest MAXIMUM-level round-trip test
+  tripped "possible zip bomb" deterministically. The stream-based guard never
+  fired there because it measured consumed bytes plus a 64-byte slack. The
+  header-based guard now pads the recorded csize with a 1 KiB
+  RATIO_OVERHEAD — deflate spends a few hundred bytes on Huffman/block headers
+  before any payload, so the first KiB has no honest denominator — which the
+  ZipSupportTest fixtures pin from both sides: the benign 410:1 round-trip
+  passes with an 8.7× margin (threshold 217,000 ≥ 25,000) while the 200 KiB
+  zero-run bomb at a 50× cap (csize ~245) and the descriptor/5 MB bombs still
+  abort with nothing published. Verified 6/6 in the out-of-repo fixture
+  battery plus the original 9-scenario loop battery.
 - **ZIP extraction walks the central directory — nested archives can never explode
   ("441 of 2 items")**: extracting a zip that holds an APK + its .sha256 sidecar
   could produce 441 files instead of 2. The extractor streamed with ZipInputStream,
