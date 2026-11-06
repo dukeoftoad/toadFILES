@@ -155,12 +155,13 @@ class FileRepositoryTest {
 
     @Test
     fun `statsOf reports sane volume numbers or null without crashing`() {
+        // Audit A27: the sane-invariant used to hide inside `if (stats != null)`;
+        // on the Robolectric mount statsOf(base) really does report numbers, so the
+        // invariant is now unconditional (and the missing-path no-throw is kept).
         val stats = repo.statsOf(base)
-        // StatFs behaviour depends on the mount; anything non-null must be sane.
-        if (stats != null) {
-            assertTrue(stats.totalBytes >= 0)
-            assertTrue(stats.freeBytes >= 0)
-        }
+        assertNotNull("statsOf should report numbers for an existing dir", stats)
+        assertTrue(stats!!.totalBytes >= 0)
+        assertTrue(stats.freeBytes >= 0)
         // Missing path must not throw.
         repo.statsOf(File(base, "nope"))
     }

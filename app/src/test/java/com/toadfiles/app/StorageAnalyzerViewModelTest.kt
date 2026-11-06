@@ -50,13 +50,6 @@ class StorageAnalyzerViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     /** A small deterministic tree: seed/a.jpg (5 bytes) + seed/sub/b.mp4 (100 bytes). */
     private fun seedTree(): File = File(volume, "analyzer-seed").apply {

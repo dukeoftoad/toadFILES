@@ -122,17 +122,99 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
     }
 
     /**
-     * True per-category totals for the grid cards, counted in VISIBLE files — exactly
+     * Per-category totals for the grid cards, counted in VISIBLE files — exactly
      * the rows [list] and [recent] would show (audit P2.5). The old implementation
-     * listed up to 2000 entries and reported the capped size as the total; COUNT/SUM
-     * aggregates keep the numbers real and uncapped, and [totalsFor] excludes the
-     * hidden rows without introducing any cap.
+     * listed up to 2000 entries and reported the capped size as the total; uncapped
+     * COUNT/SUM aggregates fixed that, and audit A20 folds the whole thing into ONE
+     * index pass: the previous shape ran six aggregate queries plus six per-category
+     * row scans, each scanning every row with an exists() stat ([hiddenTotals]) —
+     * 6×N stats per call. One scan now classifies every row into every category it
+     * matches (the per-category predicates below mirror [selectionFor]'s SQL, so
+     * the counts are identical) and hides trash/ghost rows exactly once.
      */
-    override fun summaries(): List<CategorySummary> =
-        FileCategory.entries.map { c ->
-            val (count, bytes) = totalsFor(c)
-            CategorySummary(c, count, bytes)
+    override fun summaries(): List<CategorySummary> {
+        val counts = IntArray(FileCategory.entries.size)
+        val bytes = LongArray(FileCategory.entries.size)
+        try {
+            resolver.query(
+                MediaStore.Files.getContentUri("external"),
+                arrayOf(
+                    MediaStore.Files.FileColumns.MEDIA_TYPE,
+                    MediaStore.Files.FileColumns.MIME_TYPE,
+                    MediaStore.Files.FileColumns.DISPLAY_NAME,
+                    MediaStore.Files.FileColumns.SIZE,
+                    MediaStore.Files.FileColumns.DATA,
+                ),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                val iType = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                val iMime = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+                val iName = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val iSize = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+                val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+                while (c.moveToNext()) {
+                    val data = if (iData >= 0) c.getString(iData) else null
+                    // The row-visibility rule shared with the listings: trash paths and
+                    // vanished ghost rows are hidden from every category at once — one
+                    // visibility decision per row instead of one per category.
+                    if (data != null && isHiddenPath(data)) continue
+                    val mediaType = c.getInt(iType)
+                    val mime = c.getString(iMime)
+                    val name = c.getString(iName)
+                    val size = c.getLong(iSize)
+                    for (category in FileCategory.entries) {
+                        if (matchesSelection(category, mediaType, mime, name)) {
+                            counts[category.ordinal]++
+                            bytes[category.ordinal] += size
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Provider without row access (or index unavailable): honest zeros.
+            return FileCategory.entries.map { CategorySummary(it, 0, 0L) }
         }
+        return FileCategory.entries.map { c -> CategorySummary(c, counts[c.ordinal], bytes[c.ordinal]) }
+    }
+
+    /** Archive MIME types of [selectionFor]'s ARCHIVES clause — shared with the
+     *  single-scan classifier so both stay in lockstep. */
+    private val archiveMimes = setOf(
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/x-7z-compressed",
+        "application/x-rar-compressed",
+    )
+
+    /** Archive extensions of [selectionFor]'s name fallback — shared with the
+     *  single-scan classifier. */
+    private val archiveExts = listOf("zip", "tar", "gz", "bz2", "xz", "7z", "rar")
+
+    /**
+     * Kotlin mirror of [selectionFor]'s SQL for one row (audit A20): a row counts in
+     * a category exactly when that category's SQL selection would have matched it —
+     * SQL-NULL mime/name never matches, extension fallbacks compare lowercased — so
+     * the single-scan totals equal the old per-category aggregates exactly.
+     */
+    private fun matchesSelection(
+        category: FileCategory,
+        mediaType: Int,
+        mime: String?,
+        name: String?,
+    ): Boolean = when (category) {
+        FileCategory.IMAGES -> mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
+        FileCategory.VIDEOS -> mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+        FileCategory.AUDIO -> mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO
+        FileCategory.DOCS -> mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_DOCUMENT
+        FileCategory.ARCHIVES ->
+            (mime != null && mime in archiveMimes) ||
+                (name != null && archiveExts.any { name.lowercase().endsWith(".$it") })
+        FileCategory.APKS ->
+            mime == "application/vnd.android.package-archive" ||
+                (name != null && name.lowercase().endsWith(".apk"))
+    }
 
     override fun recent(limit: Int): List<MediaEntry> {
         val out = mutableListOf<MediaEntry>()
@@ -276,77 +358,9 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
      */
     private fun isHiddenPath(data: String): Boolean = isTrashPath(data) || !File(data).exists()
 
-    /**
-     * Per-category totals for the cards, counted in VISIBLE files (audit P2.5): rows
-     * [isHiddenPath] hides are excluded, so a card can never advertise an entry the
-     * user cannot open. Totals stay true uncapped aggregates — the full COUNT/SUM runs
-     * first and [hiddenTotals] subtracts the hidden rows afterwards, instead of capping
-     * the result at a listing size. (0, 0) when unavailable.
-     */
-    private fun totalsFor(category: FileCategory): Pair<Int, Long> {
-        val (selection, args) = selectionFor(category)
-        try {
-            val (count, bytes) = resolver.query(
-                MediaStore.Files.getContentUri("external"),
-                arrayOf(
-                    "COUNT(${MediaStore.Files.FileColumns._ID})",
-                    "SUM(${MediaStore.Files.FileColumns.SIZE})",
-                ),
-                selection,
-                args,
-                null,
-            )?.use { c ->
-                if (c.moveToFirst()) {
-                    // SUM over zero rows is NULL; Cursor.getLong would hand back 0 anyway,
-                    // but be explicit about the empty case.
-                    c.getInt(0) to (if (c.isNull(1)) 0L else c.getLong(1))
-                } else null
-            } ?: return 0 to 0L
-            val (hiddenCount, hiddenBytes) = hiddenTotals(selection, args)
-            // coerceAtLeast: the index can change between the two queries.
-            return (count - hiddenCount).coerceAtLeast(0) to (bytes - hiddenBytes).coerceAtLeast(0L)
-        } catch (_: Exception) {
-            // Provider without aggregate support (or index unavailable): honest zeros.
-        }
-        return 0 to 0L
-    }
-
-    /**
-     * Count and bytes of the rows under [selection] that [isHiddenPath] hides (trash
-     * paths, vanished files) — the amount [totalsFor] subtracts from the raw aggregate.
-     * Probe only: unlike [reconcileStaleRows] this never writes to the index, so
-     * reading summaries stays side-effect free. Errors propagate to [totalsFor]'s
-     * catch, which reports honest zeros.
-     */
-    private fun hiddenTotals(selection: String, args: Array<String>): Pair<Int, Long> {
-        var count = 0
-        var bytes = 0L
-        resolver.query(
-            MediaStore.Files.getContentUri("external"),
-            arrayOf(
-                MediaStore.Files.FileColumns.SIZE,
-                MediaStore.Files.FileColumns.DATA,
-            ),
-            selection,
-            args,
-            null,
-        )?.use { c ->
-            val iSize = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
-            val iData = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
-            while (c.moveToNext()) {
-                val data = if (iData >= 0) c.getString(iData) else null
-                if (data != null && isHiddenPath(data)) {
-                    count++
-                    bytes += c.getLong(iSize)
-                }
-            }
-        }
-        return count to bytes
-    }
-
-    /** Selection + args for a category. Shared by [list], [totalsFor] and its
-     *  hidden-row probe so the category totals always count exactly what the listing
-     *  would show. */
+    /** Selection + args for a category. Shared by [list]; [matchesSelection] is its
+     *  single-scan Kotlin mirror and must stay in lockstep with this SQL, so the
+     *  category totals always count exactly what the listing would show. */
     private fun selectionFor(category: FileCategory): Pair<String, Array<String>> {
         val mime = MediaStore.Files.FileColumns.MIME_TYPE
         val name = MediaStore.Files.FileColumns.DISPLAY_NAME
@@ -364,17 +378,11 @@ class MediaRepository(private val context: Context) : MediaQuerySource {
                 "${MediaStore.Files.FileColumns.MEDIA_TYPE}=?" to
                     arrayOf(MediaStore.Files.FileColumns.MEDIA_TYPE_DOCUMENT.toString())
             FileCategory.ARCHIVES -> {
-                val mimes = arrayOf(
-                    "application/zip",
-                    "application/x-zip-compressed",
-                    "application/x-7z-compressed",
-                    "application/x-rar-compressed",
-                )
                 // Some archivers write exotic or empty MIME types, so Browse's extension
-                // set gets a second chance via the file name.
-                val exts = listOf("zip", "tar", "gz", "bz2", "xz", "7z", "rar")
-                val extClause = exts.joinToString(" OR ") { "lower($name) LIKE '%.$it'" }
-                "($mime IN (${mimes.joinToString { "?" }}) OR $extClause)" to mimes
+                // set gets a second chance via the file name. The constants are shared
+                // with [matchesSelection] so the SQL and its single-scan mirror agree.
+                val extClause = archiveExts.joinToString(" OR ") { "lower($name) LIKE '%.$it'" }
+                "($mime IN (${archiveMimes.joinToString { "?" }}) OR $extClause)" to archiveMimes.toTypedArray()
             }
             FileCategory.APKS ->
                 "($mime=? OR lower($name) LIKE '%.apk')" to

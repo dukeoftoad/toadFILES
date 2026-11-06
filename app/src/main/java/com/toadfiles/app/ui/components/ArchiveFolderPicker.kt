@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -72,6 +73,7 @@ fun ArchiveFolderPicker(
     val canGoUp = dir.absolutePath != root
 
     AlertDialog(
+        modifier = Modifier.testTag("dialog_archive_folder"),
         onDismissRequest = onDismiss,
         title = { Text("Archive folder") },
         text = {

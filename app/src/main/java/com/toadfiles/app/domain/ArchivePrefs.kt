@@ -31,3 +31,44 @@ enum class CompressLevel(val label: String) {
     MAXIMUM("Maximum"),
     ULTRA("Ultra"),
 }
+
+// ---------- split-into-volumes contract (audit A23) ----------
+// The volume-size contract was defined in the compress dialog's file while its
+// siblings (ArchiveFormat, CompressLevel) live here — ViewModels ended up importing
+// a ui.components type for a pure domain value. Moved next to its siblings; the
+// dialog keeps only its own UI copy (labels list, confirm-enabled rule).
+
+/** One megabyte as the volume selector counts it (binary, like the rest of the app). */
+const val VOLUME_MB: Long = 1024L * 1024
+
+/**
+ * "Split into volumes" options, ZArchiver-style: No, fixed sizes, or Custom…
+ * ([CUSTOM] reveals a megabytes field; the byte mapping lives in [customVolumeTextToBytes]).
+ */
+enum class VolumeChoice(val label: String, val bytes: Long?) {
+    NONE("No", null),
+    MB5("5 MB", 5 * VOLUME_MB),
+    MB10("10 MB", 10 * VOLUME_MB),
+    MB50("50 MB", 50 * VOLUME_MB),
+    MB100("100 MB", 100 * VOLUME_MB),
+    MB700("700 MB", 700 * VOLUME_MB),
+    GB1("1 GB", 1024 * VOLUME_MB),
+    CUSTOM("Custom…", null);
+
+    override fun toString(): String = label
+}
+
+/** Maps the stored (bytes, custom) pair back to the selected option for the dropdown. */
+fun volumeChoiceFor(bytes: Long?, custom: Boolean): VolumeChoice =
+    if (custom) VolumeChoice.CUSTOM
+    else VolumeChoice.entries.firstOrNull { it != VolumeChoice.CUSTOM && it.bytes == bytes }
+        ?: VolumeChoice.NONE
+
+/**
+ * Custom volume size text (megabytes) → bytes; null when blank, non-numeric or
+ * non-positive (an invalid custom size means "no split", never a blocked OK button).
+ */
+fun customVolumeTextToBytes(text: String): Long? {
+    val mb = text.trim().toLongOrNull() ?: return null
+    return if (mb <= 0) null else mb * VOLUME_MB
+}

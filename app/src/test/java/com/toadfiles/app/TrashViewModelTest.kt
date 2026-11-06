@@ -55,13 +55,6 @@ class TrashViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     private fun seedTrash(name: String, trashedAt: Long? = null): File {
         val src = File(volume, name).apply { writeText("trash me") }

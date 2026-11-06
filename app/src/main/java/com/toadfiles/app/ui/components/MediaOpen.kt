@@ -3,6 +3,7 @@ package com.toadfiles.app.ui.components
 import android.content.Context
 import android.net.Uri
 import androidx.compose.material3.Text
+import androidx.compose.ui.platform.testTag
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import com.toadfiles.app.data.MediaRepository
@@ -81,6 +82,8 @@ fun ApkInstallDialog(
     toast: (String) -> Unit,
 ) {
     androidx.compose.material3.AlertDialog(
+        modifier = androidx.compose.ui.Modifier
+            .testTag("dialog_apk_install"),
         onDismissRequest = onDismiss,
         title = { Text("Install \"$apkName\"?") },
         text = {

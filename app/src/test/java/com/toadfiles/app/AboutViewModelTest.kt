@@ -107,13 +107,6 @@ class AboutViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     // Fixtures derive from BuildConfig.VERSION_NAME so a version bump in
     // app/build.gradle.kts cannot silently flip "newer release" cases.
@@ -144,8 +137,11 @@ class AboutViewModelTest {
     fun `init loads storage stats and category counts without crashing`() {
         await { !vm.state.value.loading }
         val s = vm.state.value
-        // StatFs may report null on unusual Robolectric mounts; if non-null it must be sane.
-        s.storage?.let { stats -> assertTrue(stats.totalBytes >= 0) }
+        // Audit A27: the invariant used to sit inside s.storage?.let { … } and pass
+        // trivially when storage was missing; the Robolectric mount reports numbers,
+        // so it is unconditional now.
+        assertNotNull("storage stats should load on the Robolectric mount", s.storage)
+        assertTrue(s.storage!!.totalBytes >= 0)
         // Every FileCategory must be represented — six categories.
         assertEquals(6, s.categoryCounts.size)
         // Robolectric media library is empty, so all counts are zero.

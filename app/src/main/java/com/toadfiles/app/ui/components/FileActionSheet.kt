@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.Format
@@ -98,6 +99,7 @@ fun FileActionSheet(
         }
     }
     ModalBottomSheet(
+        modifier = Modifier.testTag("sheet_file_actions"),
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
