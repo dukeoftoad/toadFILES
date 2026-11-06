@@ -11,6 +11,7 @@ import com.toadfiles.app.domain.MediaTrashOps
 import com.toadfiles.app.domain.OpProgress
 import com.toadfiles.app.domain.OpResult
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.domain.undoDeleteBatch
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.PathSafety
@@ -26,7 +27,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
-import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicLong
 
 data class RecentUiState(
@@ -195,42 +195,17 @@ class RecentViewModel(
     }
 
     /**
-     * Restores a delete batch (snackbar "Undo") from the captured payload list,
-     * exactly like Browse/Categories. Honest accounting (N5): items already gone from
-     * the trash are reported as such, collision renames are counted (D4), and restored
-     * files are re-scanned into the media index (D1) so they reappear here immediately.
+     * Restores a delete batch (snackbar "Undo") from the captured payload list via the
+     * shared undo engine (audit A22 — the loop used to be pasted in three ViewModels).
+     * Honest accounting (N5): items already gone from the trash are reported as such,
+     * collision renames are counted (D4), and restored files are re-scanned into the
+     * media index (D1) so they reappear here immediately.
      */
     fun undoDelete(trashed: List<File>) {
         if (trashed.isEmpty()) return
         viewModelScope.launch(ioDispatcher) {
-            var restored = 0
-            var renamed = 0
-            var gone = 0
-            val restoredPaths = mutableListOf<String>()
-            for (t in trashed) {
-                // exists() follows symlinks — a dangling-link payload still restores (D7).
-                if (!t.exists() && !Files.isSymbolicLink(t.toPath())) {
-                    gone++
-                    continue
-                }
-                val origin = Trash.originOf(t)
-                val dest = Trash.restore(t) ?: continue // stays in the trash, still restorable
-                restored++
-                if (origin != null && dest.name != origin.substringAfterLast('/')) renamed++
-                restoredPaths += dest.absolutePath
-            }
-            media.rescan(restoredPaths)
-            val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
-            _state.update {
-                it.copy(
-                    toast = when {
-                        gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
-                        restored < trashed.size ->
-                            "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
-                    },
-                )
-            }
+            val outcome = undoDeleteBatch(trashed) { media.rescan(it) }
+            _state.update { it.copy(toast = outcome.toastMessage()) }
             refresh()
         }
     }

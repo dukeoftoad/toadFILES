@@ -24,12 +24,13 @@ import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
 import com.toadfiles.app.domain.Sorting
 import com.toadfiles.app.domain.Trash
+import com.toadfiles.app.domain.undoDeleteBatch
 import com.toadfiles.app.ui.components.OpRunner
 import com.toadfiles.app.ui.components.PendingPasswordRetry
 import com.toadfiles.app.ui.components.PropertiesDetail
-import com.toadfiles.app.ui.components.VolumeChoice
+import com.toadfiles.app.domain.VolumeChoice
 import com.toadfiles.app.ui.components.computeFilePropertiesDetail
-import com.toadfiles.app.ui.components.customVolumeTextToBytes
+import com.toadfiles.app.domain.customVolumeTextToBytes
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,7 +42,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.atomic.AtomicLong
-import java.nio.file.Files
 import kotlin.coroutines.coroutineContext
 
 /** "Extract to…" collision waiting for the user's strategy in the shared ConflictDialog. */
@@ -322,42 +322,16 @@ class CategoriesViewModel(
     }
 
     /**
-     * Restores a delete batch (snackbar "Undo") from the captured payload list,
-     * exactly like Browse. Honest accounting (N5): items already gone from the trash
-     * are reported as such, collision renames are counted (D4), and restored files
-     * are re-scanned into the media index (D1) so they reappear here immediately.
+     * Restores a delete batch (snackbar "Undo") from the captured payload list via the
+     * shared undo engine (audit A22). Honest accounting (N5): items already gone from
+     * the trash are reported as such, collision renames are counted (D4), and restored
+     * files are re-scanned into the media index (D1) so they reappear here immediately.
      */
     fun undoDelete(trashed: List<File>) {
         if (trashed.isEmpty()) return
         viewModelScope.launch(ioDispatcher) {
-            var restored = 0
-            var renamed = 0
-            var gone = 0
-            val restoredPaths = mutableListOf<String>()
-            for (t in trashed) {
-                // exists() follows symlinks — a dangling-link payload still restores (D7).
-                if (!t.exists() && !Files.isSymbolicLink(t.toPath())) {
-                    gone++
-                    continue
-                }
-                val origin = Trash.originOf(t)
-                val dest = Trash.restore(t) ?: continue // stays in the trash, still restorable
-                restored++
-                if (origin != null && dest.name != origin.substringAfterLast('/')) renamed++
-                restoredPaths += dest.absolutePath
-            }
-            media.rescan(restoredPaths)
-            val renamedNote = if (renamed > 0) ", $renamed renamed" else ""
-            _state.update {
-                it.copy(
-                    toast = when {
-                        gone > 0 -> "Restored $restored of ${trashed.size} — $gone already gone$renamedNote"
-                        restored < trashed.size ->
-                            "Restored $restored of ${trashed.size} — the rest stays in Trash$renamedNote"
-                        else -> "Restored $restored ${Format.itemWord(restored)}$renamedNote"
-                    },
-                )
-            }
+            val outcome = undoDeleteBatch(trashed) { media.rescan(it) }
+            _state.update { it.copy(toast = outcome.toastMessage()) }
             // Audit A5: re-list in place via refresh() — see confirmDelete.
             refresh()
         }
@@ -578,12 +552,10 @@ class CategoriesViewModel(
     }
 
     /**
-     * The one compress engine (v1.8.0): runs [targets] sequentially — a single archive,
-     * or one per source for "separate archive for each item" — with the same format,
-     * level, password and volume size for each, and aggregates the per-archive results
-     * into one combined [OpResult] (summed counts; cancelled if any run was cancelled;
-     * failures concatenated). Progress ticks across archives stay monotonic: the
-     * running base of finished archives is added to each tick.
+     * The one compress engine (v1.8.0 loop) — audit A22: the per-archive loop moved
+     * into the shared [ArchiveOps.compressBatch] so Browse and Categories cannot drift
+     * again. The overlay starts indeterminate (A4: real totals are per-archive file
+     * counts, unknown without an IO walk) and the first tick fixes it.
      */
     private fun zipAll(
         files: List<File>,
@@ -594,46 +566,20 @@ class CategoriesViewModel(
         volumeBytes: Long?,
         deleteSources: Boolean,
     ) {
-        val separate = targets.size > 1
         val title = if (format == ArchiveFormat.SEVEN_Z) "Compressing" else "Zipping"
-        // Audit A4: real totals are per-archive file counts — unknown without an IO
-        // walk, so the overlay starts indeterminate and the first tick fixes it.
         _state.update { it.copy(progress = title to OpProgress(0, -1, "")) }
         ops.run(
             op = { onP ->
-                var succeeded = 0
-                var skipped = 0
-                var failed = 0
-                var cancelled = false
-                val failures = mutableListOf<String>()
-                var base = 0
-                for (i in targets.indices) {
-                    val srcs = if (separate) listOf(files[i]) else files
-                    var archiveTotal = 0
-                    val r = ArchiveOps.compress(srcs, targets[i], format, level, password = password, volumeBytes = volumeBytes) { p ->
-                        // Audit A4: forward the pipeline's OWN totals (p.done counts files
-                        // added; p.total = that archive's file count) — substituting
-                        // files.size showed "37 of 1 items" and clamped the bar.
-                        archiveTotal = p.total
-                        onP(OpProgress(base + p.done, base + p.total, p.currentItem))
-                    }
-                    succeeded += r.succeeded
-                    skipped += r.skipped
-                    failed += r.failed
-                    if (r.cancelled) cancelled = true
-                    failures += r.failures
-                    base += archiveTotal
-                    // Delete-after-compress honors the dialog checkbox (initialized from
-                    // the persisted setting): per archive, only a fully successful run
-                    // trashes that archive's own source.
-                    if (deleteSources && r.fullySucceeded) trashSourcesAfterCompress(srcs)
-                }
-                OpResult(
-                    succeeded = succeeded,
-                    skipped = skipped,
-                    failed = failed,
-                    cancelled = cancelled,
-                    failures = failures.distinct(),
+                ArchiveOps.compressBatch(
+                    files = files,
+                    targets = targets,
+                    format = format,
+                    level = level,
+                    password = password,
+                    volumeBytes = volumeBytes,
+                    deleteSources = deleteSources,
+                    onProgress = onP,
+                    trashSources = { srcs -> trashSourcesAfterCompress(srcs) },
                 )
             },
             onProgress = { p -> _state.update { it.copy(progress = title to p) } },

@@ -108,13 +108,6 @@ class RecentViewModelRaceTest {
             )
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     @Test
     fun `a slow older filter query cannot overwrite the newer result`() = runTest {

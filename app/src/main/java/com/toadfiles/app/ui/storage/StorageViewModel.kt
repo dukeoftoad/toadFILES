@@ -70,7 +70,12 @@ class StorageViewModel(
                     mediaSummaries = media,
                     mediaLoading = false,
                     trashCount = trashEntries.size,
-                    trashBytes = trashEntries.sumOf { e -> FileOps.sizeOf(e.file) },
+                    // Audit A20: prefer the size recorded in the payload's sidecar at
+                    // trash time; only legacy sidecars and directory payloads (-1)
+                    // still pay the tree walk here, on every refresh.
+                    trashBytes = trashEntries.sumOf { e ->
+                        if (e.sizeBytes >= 0) e.sizeBytes else FileOps.sizeOf(e.file)
+                    },
                     refreshing = false,
                 )
             }

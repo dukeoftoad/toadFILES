@@ -107,13 +107,6 @@ class BrowseViewModelTest {
         dir.deleteRecursively()
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     @Test
     fun `openDir lists real files with folders first and natural order`() {
@@ -957,7 +950,7 @@ class BrowseViewModelTest {
         vm.openDir(dir)
 
         vm.requestZip(listOf(f))
-        vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.MB5)
+        vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.MB5)
         vm.confirmZip("pack")
 
         // overwriteConfirm defaults to on: ask before replacing the volume set.
@@ -974,12 +967,12 @@ class BrowseViewModelTest {
     fun `resolveVolumeBytes maps presets and custom text`() {
         vm.requestZip(listOf(File(dir, "doc.txt")))
         // Preset
-        vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.MB5)
+        vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.MB5)
         assertEquals(5L * 1024 * 1024, vm.resolveVolumeBytes())
-        vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.GB1)
+        vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.GB1)
         assertEquals(1024L * 1024 * 1024, vm.resolveVolumeBytes())
         // Custom, valid
-        vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.CUSTOM)
+        vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.CUSTOM)
         vm.setZipVolumeCustomText("5")
         assertEquals(5L * 1024 * 1024, vm.resolveVolumeBytes())
         // Custom, invalid: blank / non-numeric / non-positive all mean "no split"
@@ -992,18 +985,15 @@ class BrowseViewModelTest {
         vm.setZipVolumeCustomText("-3")
         assertNull(vm.resolveVolumeBytes())
         // Back to a preset after Custom clears the draft text
-        vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.NONE)
+        vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.NONE)
         assertNull(vm.resolveVolumeBytes())
         assertEquals("", vm.state.value.pendingZipVolumeCustomText)
     }
 
     /**
-     * TODO(integration): needs Agent 1's domain (AES-256 7z creation + password-aware
-     * extraction). Asserts the VM passes a non-null password through to ArchiveOps by
-     * round-tripping the produced archive: extracting it without a password must come
-     * back passwordRequired, with the right password must succeed. Enable when the
-     * domain contract (compress password / extract password / OpResult.passwordRequired)
-     * has landed.
+     * Audit A27: the domain contract this test needed (AES-256 7z creation +
+     * password-aware extraction) has long since landed — the stale
+     * TODO(integration) marker is gone; the test is a real round-trip pin.
      */
     @Test
     fun `confirmZip passes the password to ArchiveOps for an encrypted 7z`() = runTest {
@@ -1036,8 +1026,9 @@ class BrowseViewModelTest {
     }
 
     /**
-     * TODO(integration): same domain dependency as above; covers the Browse extract
-     * password-prompt flow (prompt state + retry with the same target dir).
+     * Covers the Browse extract password-prompt flow (prompt state + retry with the
+     * same target dir) against the real 7z domain pipeline (audit A27: the stale
+     * TODO(integration) marker removed — the dependency landed long ago).
      */
     @Test
     fun `passwordRequired opens the prompt and retry extracts with the password`() = runTest {

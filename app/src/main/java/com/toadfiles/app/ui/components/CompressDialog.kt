@@ -39,47 +39,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import java.io.File
 import com.toadfiles.app.domain.ArchiveFormat
 import com.toadfiles.app.domain.CompressLevel
-
-/** One megabyte as the volume selector counts it (binary, like the rest of the app). */
-const val VOLUME_MB: Long = 1024L * 1024
+// Audit A23: the volume contract (VolumeChoice / VOLUME_MB / mappers) moved to
+// domain/ArchivePrefs.kt next to its sibling contract enums — imported below.
+import com.toadfiles.app.domain.VolumeChoice
+import com.toadfiles.app.domain.volumeChoiceFor
 
 /** Encryption options offered in the compress dialog (7z only). */
 val ENCRYPTION_OPTIONS = listOf("None", "Data (AES-256)")
-
-/**
- * "Split into volumes" options, ZArchiver-style: No, fixed sizes, or Custom…
- * ([CUSTOM] reveals a megabytes field; the byte mapping lives in [customVolumeTextToBytes]).
- */
-enum class VolumeChoice(val label: String, val bytes: Long?) {
-    NONE("No", null),
-    MB5("5 MB", 5 * VOLUME_MB),
-    MB10("10 MB", 10 * VOLUME_MB),
-    MB50("50 MB", 50 * VOLUME_MB),
-    MB100("100 MB", 100 * VOLUME_MB),
-    MB700("700 MB", 700 * VOLUME_MB),
-    GB1("1 GB", 1024 * VOLUME_MB),
-    CUSTOM("Custom…", null);
-
-    override fun toString(): String = label
-}
-
-/** Maps the stored (bytes, custom) pair back to the selected option for the dropdown. */
-fun volumeChoiceFor(bytes: Long?, custom: Boolean): VolumeChoice =
-    if (custom) VolumeChoice.CUSTOM
-    else VolumeChoice.entries.firstOrNull { it != VolumeChoice.CUSTOM && it.bytes == bytes }
-        ?: VolumeChoice.NONE
-
-/**
- * Custom volume size text (megabytes) → bytes; null when blank, non-numeric or
- * non-positive (an invalid custom size means "no split", never a blocked OK button).
- */
-fun customVolumeTextToBytes(text: String): Long? {
-    val mb = text.trim().toLongOrNull() ?: return null
-    return if (mb <= 0) null else mb * VOLUME_MB
-}
 
 /**
  * OK is enabled only with a valid name and — when data encryption is on — a non-blank
@@ -139,6 +109,7 @@ fun CompressDialog(
     val volumeChoice = volumeChoiceFor(volumeBytes, volumeCustom)
 
     AlertDialog(
+        modifier = Modifier.testTag("dialog_compress"),
         onDismissRequest = onDismiss,
         title = { Text("Compress ${if (count == 1) "1 item" else "$count items"}") },
         text = {
@@ -216,7 +187,7 @@ fun CompressDialog(
                     label = "Split into volumes",
                     options = VolumeChoice.entries.map { it.label },
                     selected = volumeChoice.label,
-                ) { onVolumeChange(VolumeChoice.entries[it]) }
+                ) { onVolumeChange(VolumeChoice.entries[it]) } // domain enum (A23)
                 if (volumeChoice == VolumeChoice.CUSTOM) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(

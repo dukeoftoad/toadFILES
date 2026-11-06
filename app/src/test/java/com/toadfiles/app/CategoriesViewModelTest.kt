@@ -72,13 +72,6 @@ class CategoriesViewModelTest {
         ioExecutor.awaitTermination(5, TimeUnit.SECONDS)
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     private fun entry(id: Long, name: String, data: String? = null) = MediaRepository.MediaEntry(
         id = id,
@@ -750,10 +743,10 @@ class CategoriesViewModelTest {
         try {
             vm.requestZip(listOf(File(root, "a.txt")))
             // Preset
-            vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.MB5)
+            vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.MB5)
             assertEquals(5L * 1024 * 1024, vm.resolveVolumeBytes())
             // Custom, valid
-            vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.CUSTOM)
+            vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.CUSTOM)
             vm.setZipVolumeCustomText("5")
             assertEquals(5L * 1024 * 1024, vm.resolveVolumeBytes())
             // Custom, invalid: blank / non-numeric / non-positive all mean "no split"
@@ -764,7 +757,7 @@ class CategoriesViewModelTest {
             vm.setZipVolumeCustomText("0")
             assertNull(vm.resolveVolumeBytes())
             // Back to a preset after Custom clears the draft text
-            vm.setZipVolume(com.toadfiles.app.ui.components.VolumeChoice.NONE)
+            vm.setZipVolume(com.toadfiles.app.domain.VolumeChoice.NONE)
             assertNull(vm.resolveVolumeBytes())
             assertEquals("", vm.state.value.pendingZipVolumeCustomText)
         } finally {
