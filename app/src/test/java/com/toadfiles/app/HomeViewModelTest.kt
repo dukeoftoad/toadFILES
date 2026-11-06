@@ -20,6 +20,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -59,20 +60,16 @@ class HomeViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun await(block: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 10_000
-        while (!block()) {
-            check(System.currentTimeMillis() < deadline) { "condition not met within timeout" }
-            Thread.sleep(10)
-        }
-    }
 
     @Test
     fun `storage stats load without crashing`() = runTest {
         vm.refreshStorage()
-        // StatFs can report null on unusual Robolectric mounts; anything non-null must be sane.
+        // Audit A27: the old assertion sat inside `if (s != null)` and passed trivially
+        // whenever the stats were missing. Robolectric's tmpfs-backed external storage
+        // does report usable StatFs numbers, so the sane-invariant is now unconditional.
         val s = vm.state.value.storage
-        if (s != null) assertTrue(s.totalBytes >= 0)
+        assertNotNull("storage stats should load on the Robolectric mount", s)
+        assertTrue("total bytes must be non-negative", s!!.totalBytes >= 0)
     }
 
     @Test

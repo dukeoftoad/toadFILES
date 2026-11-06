@@ -58,6 +58,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.domain.ConflictStrategy
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
@@ -441,6 +442,7 @@ fun ConfirmDialog(
     destructive: Boolean = false,
 ) {
     AlertDialog(
+        modifier = Modifier.testTag("dialog_confirm"),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(message) },
@@ -469,6 +471,7 @@ fun NameInputDialog(
 ) {
     var value by remember { mutableStateOf(initialValue) }
     AlertDialog(
+        modifier = Modifier.testTag("dialog_name_input"),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -506,6 +509,7 @@ fun ConflictDialog(
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.testTag("dialog_conflict"),
         onDismissRequest = onDismiss,
         title = { Text("Conflicts in \"$targetName\"") },
         text = {
@@ -550,6 +554,7 @@ fun ConflictDialog(
 @Composable
 fun ProgressOverlay(text: String, done: Int, total: Int, currentItem: String?, onCancel: () -> Unit) {
     AlertDialog(
+        modifier = Modifier.testTag("overlay_progress"),
         onDismissRequest = {},
         title = { Text(text) },
         text = {
@@ -633,6 +638,7 @@ fun ResultDialog(
     resultTitle: String = "",
 ) {
     AlertDialog(
+        modifier = Modifier.testTag("dialog_result"),
         onDismissRequest = onDismiss,
         title = { Text(resultDoneTitle(resultTitle)) },
         text = {
@@ -653,6 +659,14 @@ fun ResultDialog(
     )
 }
 
+/** Stable user-facing label per sort mode (audit A26 — never derived from enum.name). */
+fun sortModeLabel(mode: SortMode): String = when (mode) {
+    SortMode.NAME -> "Name"
+    SortMode.SIZE -> "Size"
+    SortMode.DATE -> "Date"
+    SortMode.TYPE -> "Type"
+}
+
 @Composable
 fun SortMenu(
     expanded: Boolean,
@@ -665,7 +679,9 @@ fun SortMenu(
     androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         SortMode.entries.forEach { mode ->
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                // Audit A26: stable label mapping — deriving the copy from enum.name
+                // meant a silent enum rename reworded the UI.
+                text = { Text(sortModeLabel(mode)) },
                 trailingIcon = {
                     if (mode == current) {
                         Icon(Icons.Outlined.Check, contentDescription = "Selected")

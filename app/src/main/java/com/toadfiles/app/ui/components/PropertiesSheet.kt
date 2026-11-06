@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.domain.Checksums
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FileOps
@@ -102,6 +103,7 @@ fun PropertiesSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
+        modifier = Modifier.testTag("sheet_properties"),
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {

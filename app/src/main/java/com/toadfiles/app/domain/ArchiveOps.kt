@@ -117,14 +117,21 @@ object ArchiveOps {
         password: CharArray? = null,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult {
-        if (VolumeSupport.isVolumeStart(archive.name)) {
-            return extractVolumes(archive, targetDir, replace, limits, password, onProgress)
-        }
-        return when (extension(archive.name)) {
-            "zip", in APP_BUNDLES ->
-                ZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
-            "7z" -> SevenZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
-            else -> OpResult(0, 0, 1, false, listOf("${archive.name}: unsupported archive type"))
+        try {
+            if (VolumeSupport.isVolumeStart(archive.name)) {
+                return extractVolumes(archive, targetDir, replace, limits, password, onProgress)
+            }
+            return when (extension(archive.name)) {
+                "zip", in APP_BUNDLES ->
+                    ZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
+                "7z" -> SevenZipSupport.extract(archive, targetDir, replace, limits, password, onProgress)
+                else -> OpResult(0, 0, 1, false, listOf("${archive.name}: unsupported archive type"))
+            }
+        } finally {
+            // Audit A15: the caller's password bytes never outlive the operation. The
+            // array is created fresh per attempt by every caller (retry flow included),
+            // so blanking it here leaks nothing and can never race a second user.
+            password?.fill('\u0000')
         }
     }
 
@@ -242,4 +249,72 @@ object ArchiveOps {
         level: CompressLevel = CompressLevel.NORMAL,
         onProgress: (OpProgress) -> Unit = {},
     ): OpResult = ZipSupport.zip(sources, outFile, level, onProgress)
+
+    /**
+     * The one compress-batch engine (v1.8.0 loop, audit A22): runs [targets]
+     * sequentially — a single archive, or one per source for "separate archive for
+     * each item" — with the same format, level, password and volume size for each,
+     * and aggregates the per-archive results into one combined [OpResult] (summed
+     * counts; cancelled if any run was cancelled; failures concatenated).
+     *
+     * Progress ticks across archives stay monotonic: the running base of finished
+     * archives is added to each tick, and the pipeline's OWN totals are forwarded
+     * (audit A4 — substituting the selection size showed "37 of 1 items" and clamped
+     * the bar at the first tick).
+     *
+     * Delete-after-compress follows the app's delete convention: per archive, only a
+     * fully successful run hands that archive's own [sources] to [trashSources] — a
+     * failed sibling never deletes another's sources.
+     *
+     * Audit A15: [password] is blanked in `finally` when the batch ends, however it
+     * ends. It is deliberately NOT blanked inside [compress] — a multi-archive batch
+     * hands the same array to every archive — so this outermost seam is the one
+     * honest point of consumption. Every production caller creates the array fresh
+     * per attempt (dialog confirm, password retry), so nothing reuses it afterwards.
+     */
+    suspend fun compressBatch(
+        files: List<File>,
+        targets: List<File>,
+        format: ArchiveFormat,
+        level: CompressLevel = CompressLevel.NORMAL,
+        password: CharArray? = null,
+        volumeBytes: Long? = null,
+        deleteSources: Boolean = false,
+        onProgress: (OpProgress) -> Unit = {},
+        trashSources: suspend (List<File>) -> Unit = {},
+    ): OpResult {
+        val separate = targets.size > 1
+        try {
+            var succeeded = 0
+            var skipped = 0
+            var failed = 0
+            var cancelled = false
+            val failures = mutableListOf<String>()
+            var base = 0
+            for (i in targets.indices) {
+                val srcs = if (separate) listOf(files[i]) else files
+                var archiveTotal = 0
+                val r = compress(srcs, targets[i], format, level, password = password, volumeBytes = volumeBytes) { p ->
+                    archiveTotal = p.total
+                    onProgress(OpProgress(base + p.done, base + p.total, p.currentItem))
+                }
+                succeeded += r.succeeded
+                skipped += r.skipped
+                failed += r.failed
+                if (r.cancelled) cancelled = true
+                failures += r.failures
+                base += archiveTotal
+                if (deleteSources && r.fullySucceeded) trashSources(srcs)
+            }
+            return OpResult(
+                succeeded = succeeded,
+                skipped = skipped,
+                failed = failed,
+                cancelled = cancelled,
+                failures = failures.distinct(),
+            )
+        } finally {
+            password?.fill('\u0000')
+        }
+    }
 }
