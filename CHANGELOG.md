@@ -6,6 +6,26 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-11-08
+
+A focused accessibility release: one new knob, available in both editions, no
+regressions surfaced in the audit pass over main source (no TODO/FIXME debt, no
+unchecked assumptions on the new code path).
+
+### Added
+- **Text size (Appearance tab)**: a four-step text-size picker — Small, Default, Large,
+  Extra large — that scales every sp-based size app-wide through `ToadTheme`'s
+  `LocalDensity` override. The factor (0.85 / 1.0 / 1.15 / 1.3) composes with the
+  device's own font scale, so a user on the system's "Large" who also picks app "Large"
+  gets both factors; `Default` is a 1.0 no-op that leaves the system accessibility
+  setting untouched. Applied at the theme root, never inside individual composables, so
+  every Material component, every `Text(...)`, and every bundled-font letterform scales
+  together — there is no second place to wire it. Available in **both** editions: text
+  size is an accessibility choice, not a feature the Lite diet strips, so the Lite
+  Appearance tab carries the card beside its two-font picker. Pinned by four
+  `SettingsRepositoryTest` round-trips (default, persist-and-read-back, corrupt-value
+  fallback to default, survives an unrelated write) mirroring the `appFont` contract.
+
 ## [2.3.0] — 2026-11-06
 
 The release-hardening wave **and the first cut of toadFILES Lite**: the "441 of 2 items"

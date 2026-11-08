@@ -15,6 +15,7 @@ import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.TextScale
 import com.toadfiles.app.domain.ZipOpenAction
 import com.toadfiles.app.data.ThemeMode
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +33,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setAppTheme(theme: AppTheme) = viewModelScope.launch { container.settingsRepo.setAppTheme(theme) }
     fun setMotionStyle(style: MotionStyle) = viewModelScope.launch { container.settingsRepo.setMotionStyle(style) }
     fun setAppFont(font: AppFont) = viewModelScope.launch { container.settingsRepo.setAppFont(font) }
+    fun setTextScale(scale: TextScale) = viewModelScope.launch { container.settingsRepo.setTextScale(scale) }
     fun setDynamic(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setDynamicColor(enabled) }
     fun setAccent(accent: AccentColor) = viewModelScope.launch { container.settingsRepo.setAccentColor(accent) }
     fun setShowHidden(enabled: Boolean) = viewModelScope.launch { container.settingsRepo.setShowHidden(enabled) }

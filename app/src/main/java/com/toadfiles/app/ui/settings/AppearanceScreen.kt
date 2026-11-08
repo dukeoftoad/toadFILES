@@ -67,6 +67,7 @@ import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.BackKeyAction
 import com.toadfiles.app.domain.MotionStyle
+import com.toadfiles.app.domain.TextScale
 import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.theme.AccentPalettes
 import com.toadfiles.app.ui.theme.AppIconPalettes
@@ -219,6 +220,33 @@ fun AppearanceScreen(
                             onClick = { vm.setAppFont(font) },
                         )
                         if (index != fontChoices.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 4.dp))
+                        }
+                    }
+                }
+            }
+
+            // ---- Text size ----
+            // Available in both editions (not IS_LITE-gated): an accessibility knob,
+            // not a feature the Lite diet strips. Applied app-wide through ToadTheme's
+            // LocalDensity override, so every sp-based size — the system typeface's,
+            // the bundled font's, every Material component — scales together with the
+            // device's own font setting. STANDARD is the no-op default.
+            Spacer(Modifier.height(32.dp))
+
+            Text("Text size", style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 8.dp))
+
+            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    TextScale.entries.forEachIndexed { index, scale ->
+                        SelectableRow(
+                            title = scale.label,
+                            subtitle = scale.description,
+                            selected = settings.textScale == scale,
+                            onClick = { vm.setTextScale(scale) },
+                        )
+                        if (index != TextScale.entries.lastIndex) {
                             HorizontalDivider(Modifier.padding(horizontal = 4.dp))
                         }
                     }

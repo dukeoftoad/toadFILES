@@ -11,12 +11,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.toadfiles.app.data.ThemeMode
 import com.toadfiles.app.domain.AccentColor
 import com.toadfiles.app.domain.AppFont
 import com.toadfiles.app.domain.AppTheme
 import com.toadfiles.app.domain.MotionStyle
+import com.toadfiles.app.domain.TextScale
 
 /**
  * App theme. Four layers of choice, all set on the Appearance tab:
@@ -30,6 +33,10 @@ import com.toadfiles.app.domain.MotionStyle
  * 4. [MotionStyle] — how the app moves, provided to every screen via
  *    [LocalToadMotion] so springs, durations and nav transitions follow the user's
  *    taste without per-screen hard-coding.
+ * 5. [TextScale] — app-wide text-size multiplier (v2.4.0), applied through
+ *    [LocalDensity]'s fontScale so every sp-based size — every Material component,
+ *    every `Text(...)`, every bundled-font letterform — scales together with the
+ *    device's own font setting. [TextScale.STANDARD] is the no-op.
  *
  * [performanceMode] (Settings, "Performance mode") is the one-knob overload switch:
  * it forces [MotionStyle.NONE] regardless of the Appearance choice and publishes
@@ -45,6 +52,7 @@ fun ToadTheme(
     accentColor: AccentColor = AccentColor.TOAD,
     motionStyle: MotionStyle = MotionStyle.DEFAULT,
     appFont: AppFont = AppFont.DEFAULT,
+    textScale: TextScale = TextScale.DEFAULT,
     performanceMode: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -66,11 +74,21 @@ fun ToadTheme(
         else -> ToadThemes.schemeFor(appTheme, dark = darkTheme)
             ?: AccentPalettes.schemeFor(accentColor, dark = darkTheme)
     }
+    // Compose with the device's font scale: a 1.0 factor (TextScale.STANDARD) leaves
+    // LocalDensity untouched, so the system accessibility setting always wins first;
+    // a non-1.0 pick multiplies on top of it, app-wide, at the theme root. Density is
+    // an interface, so the override rebuilds it with the constructor rather than copy().
+    val baseDensity = LocalDensity.current
+    val scaledDensity = Density(
+        density = baseDensity.density,
+        fontScale = baseDensity.fontScale * textScale.factor,
+    )
     CompositionLocalProvider(
         LocalToadMotion provides ToadMotion.forStyle(
             if (performanceMode) MotionStyle.NONE else motionStyle,
         ),
         LocalPerformanceMode provides performanceMode,
+        LocalDensity provides scaledDensity,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

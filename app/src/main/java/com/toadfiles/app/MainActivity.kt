@@ -163,6 +163,7 @@ class MainActivity : ComponentActivity() {
                 // compile-time constants for the lite flavor; R8 folds them away.
                 motionStyle = if (IS_LITE) MotionStyle.NONE else settings.value.motionStyle,
                 appFont = settings.value.appFont,
+                textScale = settings.value.textScale,
                 performanceMode = settings.value.performanceMode || IS_LITE,
             ) {
                 Box(Modifier.fillMaxSize()) {

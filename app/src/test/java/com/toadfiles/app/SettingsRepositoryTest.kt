@@ -17,6 +17,7 @@ import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.TextScale
 import com.toadfiles.app.domain.ZipOpenAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -262,6 +263,39 @@ class SettingsRepositoryTest {
         repo.setShowHidden(true)
         repo.setSortMode(SortMode.SIZE)
         assertEquals(AppFont.JETBRAINS_MONO, repo.settings.first().appFont)
+    }
+
+    // ---------- v2.4.0: text scale ----------
+
+    @Test
+    fun `text scale defaults to STANDARD - the shipped size`() = runTest {
+        assertEquals(TextScale.STANDARD, newRepo().settings.first().textScale)
+    }
+
+    @Test
+    fun `setTextScale persists the choice and reads it back`() = runTest {
+        val repo = newRepo()
+        repo.setTextScale(TextScale.LARGE)
+        assertEquals(TextScale.LARGE, repo.settings.first().textScale)
+        repo.setTextScale(TextScale.EXTRA_LARGE)
+        assertEquals(TextScale.EXTRA_LARGE, repo.settings.first().textScale)
+    }
+
+    @Test
+    fun `corrupt text scale value falls back to the default`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit { it[stringPreferencesKey("text_scale")] = "HUMUNGOUS" }
+        assertEquals(TextScale.DEFAULT, repo.settings.first().textScale)
+    }
+
+    @Test
+    fun `text scale choice survives an unrelated write`() = runTest {
+        val repo = newRepo()
+        repo.setTextScale(TextScale.SMALL)
+        repo.setShowHidden(true)
+        repo.setSortMode(SortMode.SIZE)
+        assertEquals(TextScale.SMALL, repo.settings.first().textScale)
     }
 
     @Test

@@ -22,6 +22,7 @@ import com.toadfiles.app.domain.MotionStyle
 import com.toadfiles.app.domain.SevenZipOpenAction
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.TextScale
 import com.toadfiles.app.domain.ZipOpenAction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,11 @@ data class ToadSettings(
     val motionStyle: MotionStyle = MotionStyle.DEFAULT,
     /** v1.11: the typeface (Appearance tab). [AppFont.DEFAULT] = bundled Manrope. */
     val appFont: AppFont = AppFont.DEFAULT,
+    /** v2.4.0: app-wide text-size multiplier (Appearance tab). [TextScale.DEFAULT] = 1.0,
+     *  applied at the theme root through LocalDensity so every sp-based size scales
+     *  together with the device's own font setting. Available in both editions — an
+     *  accessibility knob, not a feature Lite strips. */
+    val textScale: TextScale = TextScale.DEFAULT,
     /** Legacy v1.10 flag. Kept (and written) only so a pre-1.11 install's
      *  Material-You choice can be migrated into [appTheme]; the Appearance tab
      *  no longer exposes it — Material You is its own theme entry now. */
@@ -120,6 +126,7 @@ class SettingsRepository(
         val APP_THEME = stringPreferencesKey("app_theme")
         val MOTION_STYLE = stringPreferencesKey("motion_style")
         val APP_FONT = stringPreferencesKey("app_font")
+        val TEXT_SCALE = stringPreferencesKey("text_scale")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val ACCENT = stringPreferencesKey("accent_color")
         val HIDDEN = booleanPreferencesKey("show_hidden")
@@ -157,6 +164,8 @@ class SettingsRepository(
                 ?: MotionStyle.DEFAULT,
             appFont = p[Keys.APP_FONT]?.let { runCatching { AppFont.valueOf(it) }.getOrNull() }
                 ?: AppFont.DEFAULT,
+            textScale = p[Keys.TEXT_SCALE]?.let { runCatching { TextScale.valueOf(it) }.getOrNull() }
+                ?: TextScale.DEFAULT,
             dynamicColor = p[Keys.DYNAMIC] ?: true,
             accentColor = p[Keys.ACCENT]?.let { runCatching { AccentColor.valueOf(it) }.getOrNull() }
                 ?: AccentColor.TOAD,
@@ -202,6 +211,7 @@ class SettingsRepository(
     suspend fun setAppTheme(theme: AppTheme) = store.edit { it[Keys.APP_THEME] = theme.name }
     suspend fun setMotionStyle(style: MotionStyle) = store.edit { it[Keys.MOTION_STYLE] = style.name }
     suspend fun setAppFont(font: AppFont) = store.edit { it[Keys.APP_FONT] = font.name }
+    suspend fun setTextScale(scale: TextScale) = store.edit { it[Keys.TEXT_SCALE] = scale.name }
     suspend fun setDynamicColor(enabled: Boolean) = store.edit { it[Keys.DYNAMIC] = enabled }
     suspend fun setAccentColor(accent: AccentColor) = store.edit { it[Keys.ACCENT] = accent.name }
     suspend fun setShowHidden(enabled: Boolean) = store.edit { it[Keys.HIDDEN] = enabled }
