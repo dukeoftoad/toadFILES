@@ -20,14 +20,36 @@ data class DownloadRequest(
 )
 
 /**
+ * A snapshot of an in-flight OTA download, reported on every poll of the system job.
+ * [bytesSoFar]/[totalBytes] come straight from DownloadManager's cursor, where -1
+ * means "unknown" — normalized here to 0 so arithmetic stays honest. [fraction] is
+ * null whenever the total size is unknown (GitHub always sends Content-Length, but
+ * a proxy may strip it): the UI then shows an indeterminate bar instead of a lie.
+ */
+data class DownloadProgress(val bytesSoFar: Long, val totalBytes: Long) {
+    /** 0..1, or null when the total is unknown / the numbers don't add up. */
+    val fraction: Float?
+        get() {
+            if (totalBytes <= 0 || bytesSoFar < 0) return null
+            return (bytesSoFar.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+        }
+
+    companion object {
+        val UNKNOWN = DownloadProgress(bytesSoFar = 0, totalBytes = -1)
+    }
+}
+
+/**
  * Download backend for the self-update flow, behind an interface so AboutViewModel is
  * unit-testable with a fake — the real DownloadManager is an Android system service
  * and is deliberately not unit-tested here.
  *
  * PRIVACY STANCE: used only when the user taps "Download & install" on the About
  * screen; the request goes to the GitHub release asset URL and nowhere else. Progress
- * is shown by DownloadManager's own notification — toadFILES builds no progress engine
- * of its own and does not poll the network itself beyond watching the system job.
+ * is shown by DownloadManager's own notification AND, since v2.6.0, by the About
+ * panel itself: the watch loop below already polls the system job every 500 ms, and
+ * now also reads the byte counters off the same cursor — no second poller, no extra
+ * network visibility, no progress engine of our own.
  */
 interface UpdateDownloader {
     /**
@@ -41,8 +63,16 @@ interface UpdateDownloader {
      * (content://downloads/…) ready to be handed to the package installer.
      * Returns null when the download failed or did not finish within the timeout
      * (the system job itself keeps running — its notification still reports progress).
+     *
+     * [onProgress] fires on every poll tick while the download runs (at most every
+     * [SystemUpdateDownloader.POLL_INTERVAL_MS], never on the completion tick); it is
+     * invoked on the caller's dispatcher, so ViewModel callers can update state directly.
      */
-    suspend fun awaitDownload(context: Context, id: Long): Uri?
+    suspend fun awaitDownload(
+        context: Context,
+        id: Long,
+        onProgress: (DownloadProgress) -> Unit = {},
+    ): Uri?
 }
 
 /**
@@ -77,13 +107,21 @@ class SystemUpdateDownloader : UpdateDownloader {
         return dm.enqueue(req)
     }
 
-    override suspend fun awaitDownload(context: Context, id: Long): Uri? {
+    override suspend fun awaitDownload(
+        context: Context,
+        id: Long,
+        onProgress: (DownloadProgress) -> Unit,
+    ): Uri? {
         val dm = manager(context) ?: return null
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
-            when (statusOf(dm, id)) {
+            val snapshot = statusOf(dm, id)
+            when (snapshot.status) {
                 DownloadManager.STATUS_SUCCESSFUL -> return dm.getUriForDownloadedFile(id)
                 DownloadManager.STATUS_FAILED -> return null
+                // RUNNING / PAUSED / PENDING: report the byte counters so the in-app
+                // bar tracks the same job the notification shade mirrors.
+                else -> onProgress(snapshot.progress)
             }
             delay(POLL_INTERVAL_MS)
         }
@@ -93,17 +131,46 @@ class SystemUpdateDownloader : UpdateDownloader {
     private fun manager(context: Context): DownloadManager? =
         context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
 
-    private fun statusOf(dm: DownloadManager, id: Long): Int? =
+    /**
+     * One poll = one cursor row = status AND byte counters read together, so the UI
+     * never sees a status older than its bytes. (status, bytes, total) maps 1:1 onto
+     * [Snapshot], whose math is pinned by UpdateDownloaderTest without any service.
+     */
+    private fun statusOf(dm: DownloadManager, id: Long): Snapshot =
         dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
             if (c.moveToFirst()) {
-                val idx = c.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                if (idx >= 0) c.getInt(idx) else null
+                Snapshot(
+                    status = c.columnInt(DownloadManager.COLUMN_STATUS),
+                    bytesSoFar = c.columnLong(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR),
+                    totalBytes = c.columnLong(DownloadManager.COLUMN_TOTAL_SIZE_BYTES),
+                )
             } else {
-                null
+                // Row vanished (job cancelled underneath us): report a running-but-empty
+                // tick so the UI keeps its indeterminate bar until the next poll decides.
+                Snapshot(DownloadManager.STATUS_RUNNING, 0, -1)
             }
-        }
+        } ?: Snapshot(DownloadManager.STATUS_RUNNING, 0, -1)
 
-    private companion object {
+    /** Cursor row of a download job, without android.database types in the signature. */
+    private data class Snapshot(val status: Int, val bytesSoFar: Long, val totalBytes: Long) {
+        val progress: DownloadProgress
+            get() = DownloadProgress(
+                bytesSoFar = bytesSoFar.coerceAtLeast(0),
+                totalBytes = totalBytes,
+            )
+    }
+
+    private fun android.database.Cursor.columnInt(name: String): Int {
+        val idx = getColumnIndex(name)
+        return if (idx >= 0) getInt(idx) else 0
+    }
+
+    private fun android.database.Cursor.columnLong(name: String): Long {
+        val idx = getColumnIndex(name)
+        return if (idx >= 0) getLong(idx) else -1
+    }
+
+    internal companion object {
         const val APK_MIME = "application/vnd.android.package-archive"
         const val DEFAULT_FILE_NAME = "toadfiles-update.apk"
 

@@ -6,6 +6,44 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-11-08
+
+The OTA download is now visible and recoverable inside the app: a real progress bar
+while the update APK streams, and an honest failure message with a retry that
+actually re-downloads.
+
+### Added
+- **In-app download progress for the OTA update (owner request)**: tapping
+  "Download & install" used to leave the About panel guessing — the text simply said
+  progress was "in the notification shade". The panel now shows a Material progress
+  bar fed by the same system-DownloadManager watch loop that already ran every
+  500 ms (its byte counters, previously ignored, are read off the same poll — no
+  second poller, no extra network traffic). When the release's total size is known
+  (GitHub always sends Content-Length) the bar is determinate and labelled
+  "Downloading… 43% — also visible in the notification shade."; if a proxy strips
+  the length, the bar degrades to indeterminate rather than inventing a percentage.
+
+### Fixed
+- **A failed APK download offered the wrong retry (owner request)**: a failed or
+  timed-out download flipped the panel to the error state, whose "Retry" button
+  re-ran the GitHub *check* — discarding the release the user had already decided
+  to install. The panel now stays on the release with the message "The APK download
+  failed — you can retry." and the primary button becomes "Retry download", which
+  re-enqueues the APK from scratch (the destination file is deleted before
+  enqueueing, so a retry re-downloads rather than resuming a broken file). The
+  failure message clears the moment the retry starts; installer-side dead ends
+  (missing "Install unknown apps" grant, installer refusing to start) keep their
+  existing dedicated handling.
+
+### Tests
+- `UpdateDownloaderTest` pins the progress math (0→1 mapping, over-count clamping,
+  unknown-total/unknown-bytes honest nulls) and that finished jobs emit no progress
+  ticks; `AboutViewModelTest` pins the mid-download progress feed, the unknown-total
+  indeterminate case, the in-place failure message and the retry path (message
+  cleared on retry, second enqueue, final URI); `AboutScreenTest` renders the panel
+  in all four states (determinate, indeterminate, failed, fresh) and proves the
+  retry tap re-runs the download flow rather than the update check.
+
 ## [2.5.1] — 2026-11-08
 
 Truncated file names no longer hide what kind of file they are: the name is cut to

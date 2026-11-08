@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.content.Context
 import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.DownloadProgress
 import com.toadfiles.app.data.DownloadRequest
 import com.toadfiles.app.data.SystemUpdateDownloader
 import kotlinx.coroutines.test.runTest
@@ -112,5 +113,39 @@ class UpdateDownloaderTest {
             .setStatus(DownloadManager.STATUS_FAILED)
 
         assertNull("a failed download must not surface an installer uri", downloader.awaitDownload(context, id))
+    }
+
+    @Test
+    fun `awaitDownload does not report progress on an already-finished job`() = runTest {
+        val id = downloader.enqueue(context, request())
+        Shadows.shadowOf(Shadows.shadowOf(dm()).getRequest(id))
+            .setStatus(DownloadManager.STATUS_SUCCESSFUL)
+
+        var ticks = 0
+        downloader.awaitDownload(context, id) { ticks++ }
+        assertEquals("success/failure ticks carry no progress event", 0, ticks)
+    }
+
+    // ---------- v2.6.0: the progress math the in-app bar is built on ----------
+
+    @Test
+    fun `progress fraction maps bytes onto a 0-1 range`() {
+        assertEquals(0f, DownloadProgress(0, 10_000).fraction!!, 0.0001f)
+        assertEquals(0.25f, DownloadProgress(2_500, 10_000).fraction!!, 0.0001f)
+        assertEquals(1f, DownloadProgress(10_000, 10_000).fraction!!, 0.0001f)
+    }
+
+    @Test
+    fun `progress fraction is clamped when the counters disagree`() {
+        // DownloadManager can briefly report more-so-far-than-total mid-restart.
+        assertEquals(1f, DownloadProgress(11_000, 10_000).fraction!!, 0.0001f)
+    }
+
+    @Test
+    fun `progress fraction is null whenever the numbers are unknown`() {
+        assertNull("total -1 (no Content-Length) must be indeterminate", DownloadProgress(1_024, -1).fraction)
+        assertNull("total 0 is never a division denominator", DownloadProgress(1_024, 0).fraction)
+        assertNull("bytes -1 is unknown too", DownloadProgress(-1, 10_000).fraction)
+        assertNull("all-unknown row", DownloadProgress(-1, -1).fraction)
     }
 }

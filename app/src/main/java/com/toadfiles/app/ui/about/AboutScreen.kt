@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -35,6 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -340,7 +344,7 @@ private const val LATEST_CHANGELOG_ITEMS = 4
  * All actions are explicit taps: check, download & install, open GitHub, dismiss.
  */
 @Composable
-private fun UpdatePanel(
+internal fun UpdatePanel(
     update: UpdateState,
     onCheck: () -> Unit,
     onDownloadInstall: () -> Unit,
@@ -394,7 +398,7 @@ private fun UpdatePanel(
 }
 
 @Composable
-private fun UpdateAvailable(
+internal fun UpdateAvailable(
     available: UpdateState.Available,
     onDownloadInstall: () -> Unit,
     onDismiss: () -> Unit,
@@ -433,17 +437,68 @@ private fun UpdateAvailable(
         )
     }
     if (available.downloadInProgress) {
+        Spacer(Modifier.height(10.dp))
+        // v2.6.0: real in-app progress. Determinate when the release's total size is
+        // known (GitHub always sends Content-Length), indeterminate otherwise — the
+        // bar never lies. The byte counters come from the system DownloadManager's
+        // own watch loop; the notification shade keeps mirroring the same job.
+        val fraction = available.downloadProgress
+        if (fraction != null) {
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .testTag(UPDATE_PROGRESS_BAR)
+                    .semantics { contentDescription = DOWNLOAD_PROGRESS_DESC },
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Downloading… ${(fraction * 100).toInt()}%" +
+                    " — also visible in the notification shade.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(UPDATE_PROGRESS_TEXT),
+            )
+        } else {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .testTag(UPDATE_PROGRESS_BAR)
+                    .semantics { contentDescription = DOWNLOAD_PROGRESS_DESC },
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Downloading… — also visible in the notification shade.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag(UPDATE_PROGRESS_TEXT),
+            )
+        }
+    }
+    if (available.downloadError != null) {
         Spacer(Modifier.height(8.dp))
         Text(
-            "Downloading… progress is shown in the notification shade.",
+            available.downloadError, // smart-cast: immutable same-module val, null-checked above
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag(UPDATE_DOWNLOAD_ERROR),
         )
     }
     Spacer(Modifier.height(12.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Button(onClick = onDownloadInstall, enabled = !available.downloadInProgress) {
-            Text(if (available.downloadedUri != null) "Install downloaded APK" else "Download & install")
+        val buttonLabel = when {
+            available.downloadedUri != null -> "Install downloaded APK"
+            available.downloadError != null -> "Retry download" // the failed attempt kept everything else
+            else -> "Download & install"
+        }
+        Button(
+            onClick = onDownloadInstall,
+            enabled = !available.downloadInProgress,
+            modifier = Modifier.testTag(UPDATE_RETRY_BUTTON),
+        ) {
+            Text(buttonLabel)
         }
         Spacer(Modifier.width(8.dp))
         TextButton(onClick = { Intents.openUrl(context, available.htmlUrl) }) {
@@ -453,6 +508,12 @@ private fun UpdateAvailable(
     Spacer(Modifier.height(4.dp))
     TextButton(onClick = onDismiss) { Text("Dismiss") }
 }
+
+internal const val UPDATE_PROGRESS_BAR = "update_progress_bar"
+internal const val UPDATE_PROGRESS_TEXT = "update_progress_text"
+internal const val UPDATE_DOWNLOAD_ERROR = "update_download_error"
+internal const val UPDATE_RETRY_BUTTON = "update_retry_button"
+private const val DOWNLOAD_PROGRESS_DESC = "Update download progress"
 
 /** Every feature the app actually ships (verified against the code and CHANGELOG.md). */
 private val Capabilities: List<String> = listOf(

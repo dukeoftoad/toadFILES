@@ -3,6 +3,7 @@ package com.toadfiles.app
 import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import com.toadfiles.app.data.DownloadProgress
 import com.toadfiles.app.data.DownloadRequest
 import com.toadfiles.app.data.GitHubRelease
 import com.toadfiles.app.data.UpdateCheckRateLimitException
@@ -23,6 +24,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -70,13 +72,19 @@ class AboutViewModelTest {
         }
     }
 
-    /** Fake DownloadManager: records the request, returns a canned download result. */
+    /**
+     * Fake DownloadManager: records the request, replays canned progress steps (the
+     * v2.6.0 progress-bar feed), optionally holds the download open on a gate so a
+     * test can observe mid-download state, then returns the canned download result.
+     */
     private class FakeDownloader : UpdateDownloader {
         var enqueued: Int = 0
             private set
         var lastRequest: DownloadRequest? = null
             private set
         var result: Uri? = Uri.parse("content://downloads/all_downloads/42")
+        var progressSteps: List<DownloadProgress> = emptyList()
+        var gate: CompletableDeferred<Unit>? = null
 
         override fun enqueue(context: Context, request: DownloadRequest): Long {
             enqueued++
@@ -84,7 +92,15 @@ class AboutViewModelTest {
             return 42L
         }
 
-        override suspend fun awaitDownload(context: Context, id: Long): Uri? = result
+        override suspend fun awaitDownload(
+            context: Context,
+            id: Long,
+            onProgress: (DownloadProgress) -> Unit,
+        ): Uri? {
+            progressSteps.forEach { onProgress(it) }
+            gate?.await()
+            return result
+        }
     }
 
     @Before
@@ -313,7 +329,7 @@ class AboutViewModelTest {
     }
 
     @Test
-    fun `downloadAndInstall reports a failed download as Error`() = runTest {
+    fun `downloadAndInstall reports a failed download in place with a retry message`() = runTest {
         checker.release = release()
         vm.checkForUpdates()
         awaitAvailable()
@@ -321,8 +337,89 @@ class AboutViewModelTest {
 
         vm.downloadAndInstall(context)
 
-        await { vm.state.value.update is UpdateState.Error }
-        assertTrue((vm.state.value.update as UpdateState.Error).message.contains("download"))
+        // v2.6.0: the panel STAYS Available — Error would offer the wrong retry
+        // (re-checking GitHub for a release we already have on screen).
+        val failed = awaitAvailable()
+        assertFalse(failed.downloadInProgress)
+        assertNull(failed.downloadedUri)
+        assertEquals("The APK download failed — you can retry.", failed.downloadError)
+        assertTrue(failed.downloadError!!.contains("failed"))
+        assertTrue(failed.downloadError!!.contains("retry"))
+    }
+
+    @Test
+    fun `retrying after a failed download clears the message and succeeds`() = runTest {
+        checker.release = release()
+        vm.checkForUpdates()
+        awaitAvailable()
+        downloader.result = null
+        vm.downloadAndInstall(context)
+        awaitAvailable() // failed attempt keeps the panel Available
+
+        downloader.result = Uri.parse("content://downloads/all_downloads/43")
+        val gate = CompletableDeferred<Unit>()
+        downloader.gate = gate
+        vm.downloadAndInstall(context) // the retry tap — same button, same code path
+
+        // The failure message is cleared the moment the retry attempt starts.
+        val retrying = awaitAvailable()
+        assertEquals(null, retrying.downloadError)
+        assertTrue(retrying.downloadInProgress)
+
+        gate.complete(Unit)
+        await { (vm.state.value.update as? UpdateState.Available)?.downloadedUri != null }
+        val after = vm.state.value.update as UpdateState.Available
+        assertEquals(null, after.downloadError)
+        assertEquals("content://downloads/all_downloads/43", after.downloadedUri.toString())
+        assertEquals(2, downloader.enqueued) // the retry really re-downloaded
+    }
+
+    @Test
+    fun `downloadAndInstall feeds in-app progress while the download runs`() = runTest {
+        checker.release = release()
+        vm.checkForUpdates()
+        awaitAvailable()
+        downloader.progressSteps = listOf(
+            DownloadProgress(bytesSoFar = 2_500, totalBytes = 10_000),
+            DownloadProgress(bytesSoFar = 5_000, totalBytes = 10_000),
+        )
+        val gate = CompletableDeferred<Unit>()
+        downloader.gate = gate
+
+        vm.downloadAndInstall(context)
+
+        // Mid-download: the latest progress tick is on the panel — the bar's data source.
+        val mid = awaitAvailable()
+        assertTrue(mid.downloadInProgress)
+        assertEquals(0.5f, mid.downloadProgress!!, 0.0001f)
+        assertEquals(null, mid.downloadedUri)
+
+        gate.complete(Unit)
+        await { (vm.state.value.update as? UpdateState.Available)?.downloadedUri != null }
+        val after = vm.state.value.update as UpdateState.Available
+        assertFalse(after.downloadInProgress)
+        // Completed downloads reset the bar — the installer handoff takes over next.
+        assertEquals(null, after.downloadProgress)
+    }
+
+    @Test
+    fun `download progress with unknown total size leaves the fraction null`() = runTest {
+        checker.release = release()
+        vm.checkForUpdates()
+        awaitAvailable()
+        // A proxy stripped Content-Length: bytes tick but the total is unknown (-1).
+        downloader.progressSteps = listOf(DownloadProgress(bytesSoFar = 1_024, totalBytes = -1))
+        val gate = CompletableDeferred<Unit>()
+        downloader.gate = gate
+
+        vm.downloadAndInstall(context)
+
+        val mid = awaitAvailable()
+        assertTrue(mid.downloadInProgress)
+        assertEquals(null, mid.downloadProgress) // indeterminate bar, never a fake percentage
+
+        gate.complete(Unit)
+        await { (vm.state.value.update as? UpdateState.Available)?.downloadedUri != null }
     }
 
     @Test

@@ -1,13 +1,25 @@
 package com.toadfiles.app
 
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.ToadApp
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.ui.about.AboutScreen
+import com.toadfiles.app.ui.about.UPDATE_DOWNLOAD_ERROR
+import com.toadfiles.app.ui.about.UPDATE_PROGRESS_BAR
+import com.toadfiles.app.ui.about.UPDATE_PROGRESS_TEXT
+import com.toadfiles.app.ui.about.UPDATE_RETRY_BUTTON
+import com.toadfiles.app.ui.about.UpdatePanel
+import com.toadfiles.app.ui.about.UpdateState
 import com.toadfiles.app.ui.theme.ToadTheme
 import org.junit.Before
 import org.junit.Rule
@@ -117,5 +129,96 @@ class AboutScreenTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Installed").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    // ---------- v2.6.0: in-app download progress + failed-download retry ----------
+
+    /** A release fixture; only the download-phase fields differ between tests. */
+    private fun available(
+        downloadInProgress: Boolean = false,
+        downloadProgress: Float? = null,
+        downloadError: String? = null,
+    ) = UpdateState.Available(
+        version = "v9.9.9",
+        apkUrl = "https://github.com/dukeoftoad/toadFILES/releases/download/v9.9.9/toadfiles-v9.9.9.apk",
+        fileName = "toadfiles-v9.9.9.apk",
+        sizeBytes = 4_828_342L,
+        notes = "Faster unzip and an update check.",
+        htmlUrl = "https://github.com/dukeoftoad/toadFILES/releases/tag/v9.9.9",
+        downloadInProgress = downloadInProgress,
+        downloadProgress = downloadProgress,
+        downloadError = downloadError,
+    )
+
+    private fun renderPanel(update: UpdateState, onDownloadInstall: () -> Unit = {}) {
+        compose.setContent {
+            ToadTheme {
+                // Column wrapper mirrors the real usage (AboutScreen's card column):
+                // UpdatePanel emits multiple top-level children and must not be
+                // measured bare by the test host — its rows would all land at (0,0),
+                // and a touch at the button's center would hit another node instead.
+                androidx.compose.foundation.layout.Column {
+                    UpdatePanel(update = update, onCheck = {}, onDownloadInstall = onDownloadInstall, onDismiss = {})
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `downloading with a known size shows a determinate bar and a percent label`() {
+        renderPanel(available(downloadInProgress = true, downloadProgress = 0.43f))
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag(UPDATE_PROGRESS_BAR).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag(UPDATE_PROGRESS_BAR).assertExists()
+        compose.onNodeWithTag(UPDATE_PROGRESS_TEXT).assertExists()
+        compose.onNodeWithText("Downloading… 43% — also visible in the notification shade.")
+            .assertExists()
+        // The download button is disabled while the download runs (second tap = no-op).
+        compose.onNodeWithTag(UPDATE_RETRY_BUTTON).assertExists().assertIsDisplayed()
+    }
+
+    @Test
+    fun `downloading with an unknown total shows the bar without a fake percent`() {
+        renderPanel(available(downloadInProgress = true, downloadProgress = null))
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag(UPDATE_PROGRESS_BAR).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag(UPDATE_PROGRESS_BAR).assertExists()
+        compose.onNodeWithText("Downloading… — also visible in the notification shade.")
+            .assertExists()
+    }
+
+    @Test
+    fun `a failed download shows the retry message and a Retry download button`() {
+        val retryTaps = java.util.concurrent.atomic.AtomicInteger(0)
+        renderPanel(
+            available(downloadError = "The APK download failed — you can retry."),
+            onDownloadInstall = { retryTaps.incrementAndGet() },
+        )
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("The APK download failed — you can retry.")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag(UPDATE_DOWNLOAD_ERROR).assertExists()
+        // The retry label replaces "Download & install" — and it re-runs the download
+        // flow, NOT the update check (that was the pre-v2.6.0 wrong-retry behavior).
+        compose.onNodeWithTag(UPDATE_RETRY_BUTTON).assertExists().performClick()
+        compose.waitUntil(5_000) { retryTaps.get() == 1 }
+    }
+
+    @Test
+    fun `a fresh available release shows the plain Download & install label`() {
+        renderPanel(available())
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Download & install").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Download & install").assertExists()
+        compose.onAllNodesWithTag(UPDATE_PROGRESS_BAR).fetchSemanticsNodes().isEmpty()
+        compose.onAllNodesWithTag(UPDATE_DOWNLOAD_ERROR).fetchSemanticsNodes().isEmpty()
     }
 }

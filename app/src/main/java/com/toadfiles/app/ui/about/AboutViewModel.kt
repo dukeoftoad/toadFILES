@@ -65,6 +65,14 @@ sealed interface UpdateState {
      * once the APK finished downloading, which is when the installer handoff happens;
      * [needsInstallPermission] marks the "Install unknown apps" round-trip — the APK
      * is kept so the user can tap "Download & install" again after flipping the toggle.
+     *
+     * Download-phase state (v2.6.0): [downloadProgress] is 0..1 while the APK streams
+     * (null while the total size is unknown — the UI then shows an indeterminate bar);
+     * [downloadError] carries the retry message when the download FAILED. A failed
+     * download deliberately STAYS in Available (not Error): every field the retry
+     * needs is still on screen, and the same "Download & install" button — relabeled
+     * "Retry download" — re-enqueues the job. An Error state here would only offer
+     * the wrong retry (re-checking GitHub for a release we already have).
      */
     data class Available(
         val version: String,
@@ -74,6 +82,8 @@ sealed interface UpdateState {
         val notes: String?,
         val htmlUrl: String,
         val downloadInProgress: Boolean = false,
+        val downloadProgress: Float? = null,
+        val downloadError: String? = null,
         val downloadedUri: Uri? = null,
         val needsInstallPermission: Boolean = false,
     ) : UpdateState
@@ -184,19 +194,25 @@ class AboutViewModel(
     }
 
     /**
-     * "Download & install" tap. First press: enqueues the APK in the system
-     * [android.app.DownloadManager] (progress visible in its notification) and, when
-     * it completes, hands the downloaded content URI to the system installer through
-     * the SAME machinery BrowseScreen uses for tapped APKs
+     * "Download & install" tap — and, since v2.6.0, the retry tap after a failed
+     * download (same code path: the destination file is deleted before enqueueing,
+     * so a retry re-downloads from scratch). First press: enqueues the APK in the
+     * system [android.app.DownloadManager], watches it from the SAME 500 ms poll that
+     * feeds the in-app progress bar ([UpdateState.Available.downloadProgress]), and,
+     * when it completes, hands the downloaded content URI to the system installer
+     * through the SAME machinery BrowseScreen uses for tapped APKs
      * ([Intents.installApkFromUri] — the URI twin of [Intents.installApk], including
      * the "Install unknown apps" gate and outcome handling: on
      * [Intents.InstallResult.NEEDS_PERMISSION] the downloaded APK is kept so a second
      * tap installs it without re-downloading; dead-end outcomes surface as [UpdateState.Error]).
      *
      * A second tap while a download is running is a no-op; a tap after a completed
-     * download goes straight to the installer handoff. If the user leaves About
-     * mid-download the handoff is cancelled with the ViewModel — the system download
-     * itself continues, and re-tapping re-runs the flow.
+     * download goes straight to the installer handoff. A FAILED download stays in
+     * Available with [UpdateState.Available.downloadError] set — the message says the
+     * APK download failed and that the user can retry, and the button becomes
+     * "Retry download". If the user leaves About mid-download the handoff is cancelled
+     * with the ViewModel — the system download itself continues, and re-tapping re-runs
+     * the flow.
      */
     fun downloadAndInstall(context: Context) {
         val current = _state.value.update as? UpdateState.Available ?: return
@@ -209,7 +225,15 @@ class AboutViewModel(
         downloadJob?.cancel()
         // Flip synchronously (not inside the coroutine) so a rapid second tap — which
         // also lands on the main thread — always sees downloadInProgress and is a no-op.
-        mutateAvailable { it.copy(downloadInProgress = true, needsInstallPermission = false) }
+        // Clears any previous failure message and progress: a fresh attempt starts clean.
+        mutateAvailable {
+            it.copy(
+                downloadInProgress = true,
+                downloadProgress = null,
+                downloadError = null,
+                needsInstallPermission = false,
+            )
+        }
         downloadJob = viewModelScope.launch(ioDispatcher) {
             try {
                 val id = updateDownloader.enqueue(
@@ -221,17 +245,31 @@ class AboutViewModel(
                         description = "toadFILES update — installed after download",
                     ),
                 )
-                val uri = updateDownloader.awaitDownload(appContext, id)
+                val uri = updateDownloader.awaitDownload(appContext, id) { p ->
+                    val fraction = p.fraction
+                    if (fraction != null) {
+                        mutateAvailable { it.copy(downloadProgress = fraction) }
+                    }
+                }
                 if (uri == null) {
-                    failAvailable(DOWNLOAD_FAILED)
+                    // DownloadManager reported failure (or the watch timed out): stay in
+                    // Available with the retry message — Error would offer the wrong retry.
+                    failDownload(DOWNLOAD_FAILED)
                     return@launch
                 }
-                mutateAvailable { it.copy(downloadInProgress = false, downloadedUri = uri) }
+                mutateAvailable {
+                    it.copy(
+                        downloadInProgress = false,
+                        downloadProgress = null,
+                        downloadError = null,
+                        downloadedUri = uri,
+                    )
+                }
                 handOffToInstaller(appContext)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                failAvailable(downloadErrorMessage(e))
+                failDownload(downloadErrorMessage(e))
             }
         }
     }
@@ -271,6 +309,22 @@ class AboutViewModel(
         }
     }
 
+    /**
+     * Marks the in-place download as failed but KEEPS the release on screen: the panel
+     * stays Available with [UpdateState.Available.downloadError] set, so the retry tap
+     * re-runs [downloadAndInstall] instead of re-checking GitHub. A no-op if the panel
+     * moved on meanwhile (dismissed, or a new check replaced the release).
+     */
+    private fun failDownload(message: String) {
+        mutateAvailable {
+            it.copy(
+                downloadInProgress = false,
+                downloadProgress = null,
+                downloadError = message,
+            )
+        }
+    }
+
     /** Replaces Available with [message] as an Error, unless the panel moved on. */
     private fun failAvailable(message: String) {
         _state.update { cur ->
@@ -292,7 +346,7 @@ class AboutViewModel(
 
     private companion object {
         const val DEFAULT_APK_NAME = "toadfiles-update.apk"
-        const val DOWNLOAD_FAILED = "The APK download failed — you can try again."
+        const val DOWNLOAD_FAILED = "The APK download failed — you can retry."
         const val GENERIC_CHECK_FAILED = "The update check failed — try again in a moment."
     }
 }
