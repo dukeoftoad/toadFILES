@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ApplicationProvider
@@ -280,12 +281,18 @@ class ToadNavHostE2ETest {
         }
         listOf("Images", "Videos", "Audio", "Documents", "Archives", "APKs")
             .forEach { label -> compose.onNodeWithTag("drawer_sub_$label").assertExists() }
-        // Most used starts empty on a fresh install — the honest hint shows instead.
+        // Most used sits below the (now expanded) Category list — scroll it into
+        // view first (the sheet scrolls since v2.5.0), then expand it. A fresh
+        // install has no use history: the honest hint shows instead of groups.
+        compose.onNodeWithTag("drawer_scroll")
+            .performScrollToNode(hasTestTag("drawer_Most used"))
         compose.onNodeWithTag("drawer_Most used").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithTag("drawer_most_used_empty").fetchSemanticsNodes().isNotEmpty()
         }
-        // And it navigates: drawer Home -> the dashboard.
+        // And it navigates: scroll back up, drawer Home -> the dashboard.
+        compose.onNodeWithTag("drawer_scroll")
+            .performScrollToNode(hasTestTag("drawer_Home"))
         compose.onNodeWithTag("drawer_Home").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Quick access").fetchSemanticsNodes().isNotEmpty()

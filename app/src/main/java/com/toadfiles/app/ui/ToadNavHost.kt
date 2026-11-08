@@ -7,13 +7,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Delete
@@ -458,6 +461,15 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
             drawerState = drawerState,
             drawerContent = {
                 ModalDrawerSheet {
+                    // v2.5.0: the sheet scrolls — with a Category dropdown expanded
+                    // (or on short screens) the lower entries were pushed out of view
+                    // and untappable; now they stay reachable everywhere.
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .testTag("drawer_scroll"),
+                    ) {
                     // The mascot welcomes you in — same face as the splash.
                     ToadFace(
                         size = 56.dp,
@@ -508,6 +520,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                         if (dest.route == drawerDividerAfter) {
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         }
+                    }
                     }
                 }
             },
