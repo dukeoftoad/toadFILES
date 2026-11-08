@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.GetTextLayoutInfo
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -29,8 +29,8 @@ import org.robolectric.annotation.Config
  *
  * Layout assertions go through the UNMERGED tree: FileNameText merges its two text
  * nodes for a11y, and only the unmerged tree keeps them as individually measurable
- * nodes. The layout result is read from the standard GetTextLayoutInfo semantics
- * property rather than ui-test helpers.
+ * nodes. The layout result is read through the standard GetTextLayoutResult semantics
+ * action that every Text node installs — the same channel TalkBack uses.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -39,8 +39,13 @@ class FileNameTextTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun SemanticsNodeInteraction.layoutResult(): TextLayoutResult =
-        fetchSemanticsNode().config[GetTextLayoutInfo].single()
+    private fun SemanticsNodeInteraction.layoutResult(): TextLayoutResult {
+        val results = mutableListOf<TextLayoutResult>()
+        val action = fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action
+        checkNotNull(action) { "node does not expose a text layout result action" }
+        check(action.invoke(results)) { "text layout result not available (node not laid out?)" }
+        return results.single()
+    }
 
     @Test
     fun `long name truncates the base but the extension stays whole and inside the row`() {
