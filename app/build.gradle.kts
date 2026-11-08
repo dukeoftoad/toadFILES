@@ -13,8 +13,8 @@ android {
         // v1.8.1: minimum raised from Android 8.0 (API 26) to Android 14 (API 34).
         minSdk = 34
         targetSdk = 36
-        versionCode = 30
-        versionName = "2.5.0"
+        versionCode = 31
+        versionName = "2.5.1"
 
         // Exposed to the About page so the Android-compatibility rows can never drift
         // from the values the build actually uses.

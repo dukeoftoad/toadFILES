@@ -37,6 +37,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -60,7 +61,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
@@ -71,6 +74,7 @@ import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.SortMode
 import com.toadfiles.app.domain.SortOrder
+import com.toadfiles.app.domain.splitFileName
 import com.toadfiles.app.util.VideoThumbs
 import com.toadfiles.app.ui.theme.EmptyFolderArt
 import com.toadfiles.app.ui.theme.ToadFileApk
@@ -174,11 +178,10 @@ fun FileRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
+                FileNameText(
                     item.name,
                     style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    isDirectory = item.isDir,
                 )
                 Text(
                     subtitle ?: run {
@@ -208,6 +211,56 @@ fun FileRow(
                 Checkbox(checked = true, onCheckedChange = null)
             }
         }
+    }
+}
+
+/**
+ * One-line file name that stays honest about the file type: when the name is too
+ * long for the space it has, the BASE name is cut at whatever fits and the
+ * extension is always rendered in full — "year_end_report_202….pdf" instead of
+ * "year_end_report_20…". Folders, hidden files and extension-less names render
+ * as a plain ellipsized Text (a folder's dot is not a type, and ".gitignore" IS
+ * its whole name). The full untruncated name is exposed as the content
+ * description, so TalkBack — and tests — always see the real name.
+ */
+@Composable
+fun FileNameText(
+    name: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    color: Color = Color.Unspecified,
+    isDirectory: Boolean = false,
+) {
+    val parts = remember(name) { splitFileName(name) }
+    val named = modifier.semantics(mergeDescendants = true) { contentDescription = name }
+    if (isDirectory || parts.extension.isEmpty()) {
+        Text(
+            name,
+            modifier = named,
+            style = style,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        return
+    }
+    Row(modifier = named, verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            parts.base,
+            style = style,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            softWrap = false,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(
+            parts.extension,
+            style = style,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
@@ -391,12 +444,10 @@ fun FileGridCell(
                 }
             }
             Spacer(Modifier.height(6.dp))
-            Text(
+            FileNameText(
                 item.name,
                 style = MaterialTheme.typography.labelMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
+                isDirectory = item.isDir,
             )
             Text(
                 if (item.isDir) "Folder" else Format.size(item.size),

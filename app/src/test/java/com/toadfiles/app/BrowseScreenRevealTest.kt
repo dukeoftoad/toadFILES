@@ -2,8 +2,8 @@ package com.toadfiles.app
 
 import android.os.Environment
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.unit.Dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -62,7 +62,8 @@ class BrowseScreenRevealTest {
 
     private fun awaitRevealedRow(name: String) {
         compose.waitUntil(20_000) {
-            compose.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(name, useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -83,6 +84,6 @@ class BrowseScreenRevealTest {
         render("ghost.txt")
         // No reveal scroll happens for a missing target, so row 0 never moves.
         awaitRevealedRow("reveal_00.txt")
-        compose.onNodeWithText("reveal_00.txt").assertExists()
+        compose.onNodeWithContentDescription("reveal_00.txt", useUnmergedTree = true).assertExists()
     }
 }

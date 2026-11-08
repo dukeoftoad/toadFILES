@@ -1,9 +1,11 @@
 package com.toadfiles.app
 
 import android.content.Context
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -105,10 +107,13 @@ class HomeScreenTest {
         // list (the first scrollable; the chips row is a second, composed off-screen
         // via prefetch) all the way down so the section is actually composed.
         compose.onAllNodes(hasScrollAction())[0]
-            .performScrollToNode(hasText("notes.txt"))
+            .performScrollToNode(hasContentDescription("notes.txt"))
         // The settled feed shows its two docs — "All" + every category chip render.
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "notes.txt",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("All").fetchSemanticsNodes().isNotEmpty()
@@ -129,7 +134,10 @@ class HomeScreenTest {
         compose.onNodeWithText("All").performClick()
         compose.waitUntil(10_000) { vm.state.value.recentFilter == null }
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "notes.txt",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
     }
 

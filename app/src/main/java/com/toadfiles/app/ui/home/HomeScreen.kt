@@ -77,6 +77,7 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileNameText
 import com.toadfiles.app.ui.components.categoryIconFor
 import com.toadfiles.app.ui.theme.toadFileIconFor
 import com.toadfiles.app.ui.components.MediaTapRoute
@@ -725,7 +726,7 @@ private fun FavoriteRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                FileNameText(item.name, isDirectory = item.isDir)
                 Text(
                     if (item.isDir) "Folder" else Format.size(item.size),
                     style = MaterialTheme.typography.labelMedium,
@@ -786,12 +787,7 @@ private fun RecentPreviewRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    e.name,
-                    maxLines = 1,
-                    style = MaterialTheme.typography.bodyMedium,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                FileNameText(e.name, style = MaterialTheme.typography.bodyMedium)
                 Text(
                     "${Format.size(e.size)} · ${Format.dateTime(e.dateModified)}",
                     style = MaterialTheme.typography.labelSmall,

@@ -56,6 +56,7 @@ import com.toadfiles.app.domain.Trash
 import com.toadfiles.app.domain.TrashEntry
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileNameText
 import com.toadfiles.app.ui.theme.EmptyTrashArt
 import com.toadfiles.app.ui.components.ProgressOverlay
 
@@ -277,11 +278,10 @@ private fun TrashRow(
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(
+            FileNameText(
                 e.originPath.substringAfterLast('/').ifEmpty { e.file.name },
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                isDirectory = e.file.isDirectory,
             )
             Text(
                 e.originPath.ifEmpty { "Original location unknown" },

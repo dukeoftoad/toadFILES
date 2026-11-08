@@ -6,6 +6,29 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.5.1] — 2026-11-08
+
+Truncated file names no longer hide what kind of file they are: the name is cut to
+the space available and the extension stays fully on screen, everywhere a file name
+is shown on one line.
+
+### Fixed
+- **Long file names swallowed their extension when truncated (owner request)**: every
+  file list — Browse, Categories drill-ins, Recent (list and grid), Trash, Home's
+  favorites and recent rows, the Storage analyzer's biggest files, the action-sheet
+  header and the dialog titles — cut names with a plain ellipsis, so
+  "year_end_report_2026_final.pdf" could render as "year_end_report_2026_f…" and the
+  file type simply vanished. Names now split into a truncatable base and a pinned
+  extension ("year_end_report_202….pdf") through a shared `FileNameText` component.
+  Hidden files (".gitignore"), extension-less names and folders render exactly as
+  before (a folder's dot is not a file type), the action-sheet header no longer
+  hard-clips mid-character (it had `maxLines = 1` with no overflow policy at all),
+  grid tiles match Recent's one-line name style, and TalkBack now reads the full
+  untruncated name via the row's content description. Pinned by `FileNameSplitTest`
+  (split rules: compound tails like ".tar.gz", hidden-file dots, date-like dot-tails
+  beyond the 8-character cap) and `FileNameTextTest` (layout: the base really
+  truncates, the extension never clips and stays inside the row).
+
 ## [2.5.0] — 2026-11-08
 
 The wrong-APK fix plus the navigation upgrade the owner asked for: the updater now

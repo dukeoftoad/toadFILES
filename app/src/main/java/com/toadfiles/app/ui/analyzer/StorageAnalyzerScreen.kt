@@ -64,6 +64,7 @@ import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.StorageRoot
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileNameText
 import com.toadfiles.app.ui.components.PropertiesDetail
 import com.toadfiles.app.ui.components.PropertiesSheet
 import com.toadfiles.app.ui.components.filterIconFor
@@ -654,12 +655,7 @@ private fun BigFileRow(bigFile: BigFile, onClick: () -> Unit) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                bigFile.name,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            FileNameText(bigFile.name, style = MaterialTheme.typography.bodyLarge)
             Text(
                 bigFile.file.parent ?: "/",
                 style = MaterialTheme.typography.labelMedium,

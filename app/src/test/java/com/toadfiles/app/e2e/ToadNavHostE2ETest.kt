@@ -135,7 +135,10 @@ class ToadNavHostE2ETest {
             compose.onNodeWithTag("tab_Browse").performClick()
             compose.waitForIdle()
             compose.waitUntil(10_000) {
-                compose.onAllNodesWithText("e2e_browse_note.txt").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithContentDescription(
+                    "e2e_browse_note.txt",
+                    useUnmergedTree = true,
+                ).fetchSemanticsNodes().isNotEmpty()
             }
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("e2e_browse_folder").fetchSemanticsNodes().isNotEmpty()
@@ -227,7 +230,10 @@ class ToadNavHostE2ETest {
             // Drill INTO the folder (internal Browse navigation, no back-stack push).
             compose.onNodeWithText("e2e_nav_folder").performClick()
             compose.waitUntil(10_000) {
-                compose.onAllNodesWithText("e2e_nested_note.txt").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithContentDescription(
+                    "e2e_nested_note.txt",
+                    useUnmergedTree = true,
+                ).fetchSemanticsNodes().isNotEmpty()
             }
 
             // THE regression: Browse tab → Home tab must land on Home.
@@ -240,7 +246,10 @@ class ToadNavHostE2ETest {
             // Agreed feature: switching BACK to Browse restores the drill-in.
             compose.onNodeWithTag("tab_Browse").performClick()
             compose.waitUntil(10_000) {
-                compose.onAllNodesWithText("e2e_nested_note.txt").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithContentDescription(
+                    "e2e_nested_note.txt",
+                    useUnmergedTree = true,
+                ).fetchSemanticsNodes().isNotEmpty()
             }
 
             // And a second leave still works.

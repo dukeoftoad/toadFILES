@@ -4,6 +4,7 @@ import android.os.Environment
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
@@ -110,7 +111,10 @@ class CategoriesScreenTest {
     fun `document rows expose the per-item action sheet`() {
         openDrillIn("Documents")
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("quarterly-report.pdf").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "quarterly-report.pdf",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
 
         // The row's ⋮ affordance is rendered and opens the action sheet.
@@ -130,9 +134,13 @@ class CategoriesScreenTest {
     @Test
     fun `image grid cells expose the per-item action sheet`() {
         openDrillIn("Images")
-        // The shared FileGridCell renders the file name as text under the thumbnail.
+        // The shared FileGridCell renders the file name (content description = full
+        // name) under the thumbnail.
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("IMG_1.jpg").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "IMG_1.jpg",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
 
         // The grid cell's ⋮ affordance is rendered and opens the action sheet.
@@ -150,7 +158,10 @@ class CategoriesScreenTest {
     fun `archive rows offer the Browse-parity actions in the shared sheet`() {
         openDrillIn("Archives")
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("bundle.zip").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "bundle.zip",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onAllNodesWithContentDescription("More actions")[0].performClick()
 
@@ -177,7 +188,10 @@ class CategoriesScreenTest {
     fun `drill-in list starts right under the top bar, not a bar-height lower`() {
         openDrillIn("Documents")
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("quarterly-report.pdf").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "quarterly-report.pdf",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
 
         // The Scaffold insets are consumed exactly once (by the PullToRefreshBox).
@@ -185,7 +199,10 @@ class CategoriesScreenTest {
         // drill-in a full TopAppBar height down: the first row sat ~144dp from the
         // top instead of ~80dp, leaving a dead band under the bar. 110dp separates
         // the two states with margin on both sides, in any density.
-        val firstRowTopPx = compose.onNodeWithText("quarterly-report.pdf")
+        val firstRowTopPx = compose.onNodeWithContentDescription(
+            "quarterly-report.pdf",
+            useUnmergedTree = true,
+        )
             .fetchSemanticsNode().positionInRoot.y
         val limitPx = with(compose.density) { 110.dp.toPx() }
         assert(firstRowTopPx < limitPx) {

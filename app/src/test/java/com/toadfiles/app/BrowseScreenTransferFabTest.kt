@@ -66,13 +66,17 @@ class BrowseScreenTransferFabTest {
 
     private fun awaitListing() {
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("notes.txt").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "notes.txt",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
     }
 
     /** Arms a transfer the way a user does: long-press a row → ⋮ → Copy to… */
     private fun armCopy() {
-        compose.onNodeWithText("notes.txt").performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("notes.txt", useUnmergedTree = true)
+            .performTouchInput { longClick() }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("1 selected").fetchSemanticsNodes().isNotEmpty()
         }

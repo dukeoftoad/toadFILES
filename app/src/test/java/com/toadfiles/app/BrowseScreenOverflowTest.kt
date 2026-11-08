@@ -2,6 +2,7 @@ package com.toadfiles.app
 
 import android.os.Environment
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -74,7 +75,10 @@ class BrowseScreenOverflowTest {
     /** Waits until the listing is on screen — i.e. the non-selection top bar is composed. */
     private fun awaitListing() {
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("overflow_note.txt").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                "overflow_note.txt",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -130,7 +134,8 @@ class BrowseScreenOverflowTest {
         awaitListing()
 
         // Default (showHidden = false): the dot-file is filtered out of the listing.
-        compose.onNodeWithText(".overflow_secret.txt").assertDoesNotExist()
+        compose.onNodeWithContentDescription(".overflow_secret.txt", useUnmergedTree = true)
+            .assertDoesNotExist()
 
         openOverflow()
         compose.waitUntil(10_000) {
@@ -140,7 +145,10 @@ class BrowseScreenOverflowTest {
 
         // The persisted flip makes the ViewModel re-list the folder with hidden entries.
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText(".overflow_secret.txt").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithContentDescription(
+                ".overflow_secret.txt",
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
         }
     }
 }

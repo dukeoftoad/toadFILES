@@ -92,7 +92,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.os.Environment
@@ -121,6 +120,7 @@ import com.toadfiles.app.ui.components.CompressDialog
 import com.toadfiles.app.ui.components.PasswordPromptDialog
 import com.toadfiles.app.ui.components.ConfirmDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileNameText
 import com.toadfiles.app.ui.components.HopIn
 import com.toadfiles.app.ui.theme.LocalToadMotion
 import com.toadfiles.app.ui.theme.NoResultsArt
@@ -850,7 +850,7 @@ fun BrowseScreen(
         val hereDest = tap.hereDest
         AlertDialog(
             onDismissRequest = { pendingArchiveTap = null },
-            title = { Text(tap.archive.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            title = { FileNameText(tap.archive.name) },
             text = {
                 Text(
                     if (hereDest != null) {

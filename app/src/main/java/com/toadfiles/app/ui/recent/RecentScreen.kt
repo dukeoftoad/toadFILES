@@ -68,7 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -84,6 +83,7 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.ui.components.ConflictDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.FileNameText
 import com.toadfiles.app.ui.theme.toadFileIconFor
 import com.toadfiles.app.ui.components.MediaEntryActionSheet
 import com.toadfiles.app.ui.components.MediaOpOverlays
@@ -401,7 +401,7 @@ fun RecentScreen(
     state.detailsOf?.let { e ->
         AlertDialog(
             onDismissRequest = { vm.dismissDetails() },
-            title = { Text(e.name, maxLines = 2) },
+            title = { FileNameText(e.name) },
             text = {
                 Column {
                     if (e.data != null) Text("Path: ${e.data}", style = MaterialTheme.typography.labelMedium)
@@ -495,12 +495,7 @@ private fun RecentRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    e.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                FileNameText(e.name, style = MaterialTheme.typography.bodyLarge)
                 Text(
                     "${Format.size(e.size)} · ${Format.dateTime(e.dateModified)}",
                     style = MaterialTheme.typography.labelMedium,
@@ -643,10 +638,8 @@ private fun RecentGridCell(
             }
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
+                FileNameText(
                     e.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1f),
                 )

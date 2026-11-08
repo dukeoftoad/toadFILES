@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import java.io.File
@@ -54,7 +53,7 @@ fun PasswordPromptDialog(
     AlertDialog(
         modifier = Modifier.testTag("dialog_password"),
         onDismissRequest = onCancel,
-        title = { Text(archiveName, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        title = { FileNameText(archiveName) },
         text = {
             Column {
                 Text(

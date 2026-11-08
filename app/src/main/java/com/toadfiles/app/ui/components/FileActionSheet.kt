@@ -123,10 +123,12 @@ fun FileActionSheet(
                 )
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.fillMaxWidth()) {
-                    Text(
+                    // The sheet header keeps the extension visible even for long names
+                    // (it also used to hard-clip: maxLines = 1 with no overflow policy).
+                    FileNameText(
                         item.name,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
+                        isDirectory = item.isDir,
                     )
                     Text(
                         if (item.isDir) "Folder" else "${Format.size(item.size)} · ${Format.dateTime(item.lastModified)}",
