@@ -23,7 +23,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.FolderZip
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.InstallMobile
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
@@ -60,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import com.toadfiles.app.domain.ConflictStrategy
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
 import com.toadfiles.app.domain.FilterMode
 import com.toadfiles.app.domain.Format
@@ -219,6 +225,20 @@ fun filterIconFor(mode: FilterMode): ImageVector = when (mode) {
     FilterMode.AUDIO -> ToadFileAudio
     FilterMode.ARCHIVES -> ToadFileArchive
     FilterMode.APKS -> ToadFileApk
+}
+
+/**
+ * v2.5.0: icon per media category — the drawer's Category dropdown and Most-used
+ * section plus Home's most-used strip share the same glyphs as the Categories
+ * screen's tiles (CategoryLook), so a category reads identically everywhere.
+ */
+fun categoryIconFor(category: FileCategory): ImageVector = when (category) {
+    FileCategory.IMAGES -> Icons.Outlined.Image
+    FileCategory.VIDEOS -> Icons.Outlined.Videocam
+    FileCategory.AUDIO -> Icons.Outlined.Audiotrack
+    FileCategory.DOCS -> Icons.Outlined.Description
+    FileCategory.ARCHIVES -> Icons.Outlined.FolderZip
+    FileCategory.APKS -> Icons.Outlined.InstallMobile
 }
 
 /**

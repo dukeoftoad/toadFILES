@@ -298,6 +298,57 @@ class SettingsRepositoryTest {
         assertEquals(TextScale.SMALL, repo.settings.first().textScale)
     }
 
+    // ---------- v2.5.0: most-used categories tracker ----------
+
+    @Test
+    fun `category use counts accumulate in memory and survive persist-reload`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+
+        repo.recordCategoryUse("IMAGES")
+        repo.recordCategoryUse("IMAGES")
+        repo.recordCategoryUse("VIDEOS")
+
+        // Live counts are visible immediately, without any disk write.
+        assertEquals(mapOf("IMAGES" to 2, "VIDEOS" to 1), repo.categoryUses.value)
+
+        // Persist, then a fresh repository on the same store hydrates them back —
+        // the exact folder-use persist-reload contract, now for categories.
+        repo.persistCategoryUses()
+        val repo2 = SettingsRepository(store = store)
+        assertEquals(emptyMap<String, Int>(), repo2.categoryUses.value) // not loaded yet
+        repo2.recordCategoryUse("ARCHIVES") // triggers the hydrate
+        assertEquals(2, repo2.categoryUses.value["IMAGES"])
+        assertEquals(1, repo2.categoryUses.value["VIDEOS"])
+        assertEquals(1, repo2.categoryUses.value["ARCHIVES"])
+    }
+
+    @Test
+    fun `category use entries with junk are ignored on read`() = runTest {
+        val store = newStore()
+        val repo = SettingsRepository(store = store)
+        store.edit {
+            it[stringSetPreferencesKey("category_uses")] = setOf("junk", "|IMAGES", "x|DOCS", "5|APKS")
+        }
+
+        repo.recordCategoryUse("AUDIO") // triggers the hydrate
+
+        // The junk rows never surface; the one well-formed row does.
+        assertEquals(5, repo.categoryUses.value["APKS"])
+        assertNull(repo.categoryUses.value["junk"])
+        assertNull(repo.categoryUses.value["IMAGES"])
+        assertNull(repo.categoryUses.value["DOCS"])
+        assertEquals(1, repo.categoryUses.value["AUDIO"])
+    }
+
+    @Test
+    fun `blank category names are not recorded`() = runTest {
+        val repo = newRepo()
+        repo.recordCategoryUse("")
+        repo.recordCategoryUse("   ")
+        assertEquals(emptyMap<String, Int>(), repo.categoryUses.value)
+    }
+
     @Test
     fun `quick pins toggle and always unhide`() = runTest {
         val repo = newRepo()

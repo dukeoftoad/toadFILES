@@ -95,6 +95,67 @@ class UpdateCheckerParsingTest {
         assertEquals(0L, release.apkSizeBytes)
     }
 
+    // ---------- v2.5.0: edition-aware APK pick (two APKs per tag since v2.3.0) ----------
+
+    /** A modern payload: both editions ship, lite listed FIRST (the order that bit). */
+    private val twoApkPayload = """
+        {
+          "tag_name": "v2.5.0",
+          "html_url": "https://github.com/dukeoftoad/toadFILES/releases/tag/v2.5.0",
+          "body": "notes",
+          "assets": [
+            { "name": "toadfiles-lite-v2.5.0.apk", "browser_download_url": "https://x/lite.apk", "size": 3600000 },
+            { "name": "toadfiles-v2.5.0.apk", "browser_download_url": "https://x/full.apk", "size": 4800000 },
+            { "name": "toadfiles-v2.5.0-sha256.txt", "browser_download_url": "https://x/s.txt", "size": 142 }
+          ]
+        }
+    """.trimIndent()
+
+    @Test
+    fun `full app skips the lite APK even when it is listed first`() {
+        val release = GithubReleaseChecker.parseRelease(twoApkPayload, isLite = false)
+
+        assertEquals("toadfiles-v2.5.0.apk", release.apkName)
+        assertEquals("https://x/full.apk", release.apkUrl)
+        assertEquals(4800000L, release.apkSizeBytes)
+    }
+
+    @Test
+    fun `lite app picks the lite APK regardless of listing order`() {
+        val release = GithubReleaseChecker.parseRelease(twoApkPayload, isLite = true)
+
+        assertEquals("toadfiles-lite-v2.5.0.apk", release.apkName)
+        assertEquals("https://x/lite.apk", release.apkUrl)
+        assertEquals(3600000L, release.apkSizeBytes)
+    }
+
+    @Test
+    fun `full app still parses a pre-split release with a single apk asset`() {
+        // The default isLite=false must keep the old single-APK payloads working:
+        // "toadfiles-1.7.0.apk" carries no lite marker, so it matches the full edition.
+        val release = GithubReleaseChecker.parseRelease(payload)
+
+        assertEquals("toadfiles-1.7.0.apk", release.apkName)
+    }
+
+    @Test
+    fun `full app gets no apk when a release ships lite assets only`() {
+        val liteOnly = """
+            {
+              "tag_name": "v2.5.1",
+              "assets": [
+                { "name": "toadfiles-lite-v2.5.1.apk", "browser_download_url": "https://x/lite.apk", "size": 1 }
+              ]
+            }
+        """.trimIndent()
+
+        val release = GithubReleaseChecker.parseRelease(liteOnly, isLite = false)
+
+        // Honest null beats silently offering the wrong edition's APK.
+        assertNull(release.apkName)
+        assertNull(release.apkUrl)
+    }
+
     @Test
     fun `parseRelease treats a missing assets array and empty body honestly`() {
         val minimal = """{"tag_name": "v1.9.0"}"""

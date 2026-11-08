@@ -4,6 +4,7 @@ import android.os.Environment
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -268,9 +269,22 @@ class ToadNavHostE2ETest {
         compose.onNodeWithTag("tab_Home").assertDoesNotExist()
         compose.onNodeWithTag("tab_Settings").assertDoesNotExist()
         // The drawer carries ALL primary destinations (Home and Categories were
-        // missing in v1.7.3).
-        listOf("Home", "Browse", "Categories", "Recent", "Trash", "Settings", "About")
+        // missing in v1.7.3). v2.5.0: the plain "Categories" entry became the
+        // "Category" dropdown + "Most used" section (same slot, same drawer).
+        listOf("Home", "Browse", "Category", "Most used", "Recent", "Trash", "Settings", "About")
             .forEach { label -> compose.onNodeWithTag("drawer_$label").assertExists() }
+        // The Category dropdown expands into the six sub-categories (owner request).
+        compose.onNodeWithTag("drawer_Category").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("drawer_sub_Images").fetchSemanticsNodes().isNotEmpty()
+        }
+        listOf("Images", "Videos", "Audio", "Documents", "Archives", "APKs")
+            .forEach { label -> compose.onNodeWithTag("drawer_sub_$label").assertExists() }
+        // Most used starts empty on a fresh install — the honest hint shows instead.
+        compose.onNodeWithTag("drawer_Most used").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("drawer_most_used_empty").fetchSemanticsNodes().isNotEmpty()
+        }
         // And it navigates: drawer Home -> the dashboard.
         compose.onNodeWithTag("drawer_Home").performClick()
         compose.waitUntil(5_000) {

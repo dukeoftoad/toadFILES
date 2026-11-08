@@ -77,6 +77,7 @@ import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.ui.components.ApkInstallDialog
 import com.toadfiles.app.ui.components.EmptyState
+import com.toadfiles.app.ui.components.categoryIconFor
 import com.toadfiles.app.ui.theme.toadFileIconFor
 import com.toadfiles.app.ui.components.MediaTapRoute
 import com.toadfiles.app.ui.components.iconFor
@@ -102,6 +103,9 @@ fun HomeScreen(
     /** Flaw fix: extractable archives route into Browse's extract-or-open dialog
      *  instead of a bare ACTION_VIEW that bounces back into toadFILES itself. */
     onOpenArchive: (File) -> Unit = {},
+    /** v2.5.0: opens the Categories screen pre-scoped to one category — the
+     *  most-used strip below Quick access taps through here. */
+    onOpenCategory: (FileCategory) -> Unit = {},
     vm: HomeViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -294,6 +298,38 @@ fun HomeScreen(
                             )
                         }
                         repeat(3 - rowSlots.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+
+                // v2.5.0: the most-used CATEGORIES join Quick access as their own
+                // little strip — top two, tiles styled like the folder tiles with the
+                // same most-used badge. The folder tiles above keep today's behavior
+                // untouched (owner spec). Full edition only: lite has no Categories
+                // screen to open, and the strip is empty until a category is opened.
+                if (!IS_LITE && state.topCategories.isNotEmpty()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Most used",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        state.topCategories.forEach { category ->
+                            QuickTile(
+                                name = category.label,
+                                icon = categoryIconFor(category),
+                                pinned = false,
+                                mostUsed = true,
+                                onClick = { onOpenCategory(category) },
+                                onLongClick = { onOpenCategory(category) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(2 - state.topCategories.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }

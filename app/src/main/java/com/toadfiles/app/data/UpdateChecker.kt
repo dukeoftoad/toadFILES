@@ -1,5 +1,6 @@
 package com.toadfiles.app.data
 
+import com.toadfiles.app.domain.IS_LITE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,7 +13,9 @@ import java.net.URL
 
 /**
  * The slice of a GitHub release toadFILES needs for the self-update flow.
- * [apkUrl]/[apkName] are null when the release ships no .apk asset at all.
+ * [apkUrl]/[apkName] are null when the release ships no APK for the RUNNING edition
+ * (v2.5.0: tags ship one APK per edition — `toadfiles-<tag>.apk` and
+ * `toadfiles-lite-<tag>.apk` — and the checker picks the one that matches).
  */
 data class GitHubRelease(
     val tagName: String,
@@ -97,7 +100,7 @@ class GithubReleaseChecker(
             val code = connection.responseCode
             if (code !in 200..299) throw exceptionFor(code)
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            return parseRelease(body)
+            return parseRelease(body, isLite = IS_LITE)
         } finally {
             connection.disconnect()
         }
@@ -105,11 +108,20 @@ class GithubReleaseChecker(
 
     companion object {
         /**
-         * Parses a GitHub release payload. Picks the FIRST .apk asset (tags ship one
-         * APK; other assets such as source zips are ignored). Kept a companion function
-         * so unit tests can exercise real payloads without any network.
+         * Parses a GitHub release payload. Since the Lite edition split (v2.3.0) tags
+         * ship TWO APKs — `toadfiles-<tag>.apk` (full) and `toadfiles-lite-<tag>.apk` —
+         * so the pick is edition-aware, not first-match: the FULL app must never be
+         * offered the Lite APK (owner report, v2.5.0: the old first-`.apk` loop could
+         * do exactly that whenever GitHub listed the lite asset first; Lite strips the
+         * update checker entirely, so the full app is the only wrong-download
+         * direction that can happen in practice). Assets whose name carries the
+         * "lite" marker (case-insensitive) belong to the lite edition; every other
+         * APK asset belongs to the full edition. Non-APK assets (source zips,
+         * checksums) are ignored. [isLite] defaults false so the plain full-edition
+         * parse keeps working for tests and callers that predate the split. Kept a
+         * companion function so unit tests can exercise real payloads without network.
          */
-        fun parseRelease(json: String): GitHubRelease {
+        fun parseRelease(json: String, isLite: Boolean = false): GitHubRelease {
             val root = JSONObject(json)
             val tag = root.optString("tag_name")
             if (tag.isBlank()) throw JSONException("Release payload has no tag_name")
@@ -121,12 +133,13 @@ class GithubReleaseChecker(
                 for (i in 0 until assets.length()) {
                     val asset = assets.getJSONObject(i)
                     val name = asset.optString("name")
-                    if (name.endsWith(APK_SUFFIX, ignoreCase = true)) {
-                        apkName = name
-                        apkUrl = asset.optString("browser_download_url").ifBlank { null }
-                        apkSize = asset.optLong("size")
-                        break
-                    }
+                    if (!name.endsWith(APK_SUFFIX, ignoreCase = true)) continue
+                    val assetIsLite = name.contains(LITE_ASSET_MARKER, ignoreCase = true)
+                    if (assetIsLite != isLite) continue // the OTHER edition's APK — skip
+                    apkName = name
+                    apkUrl = asset.optString("browser_download_url").ifBlank { null }
+                    apkSize = asset.optLong("size")
+                    break
                 }
             }
             return GitHubRelease(
@@ -179,6 +192,8 @@ class GithubReleaseChecker(
         /** Shown by "View on GitHub" even if the payload is missing html_url. */
         private const val RELEASES_PAGE_FALLBACK = "https://github.com/dukeoftoad/toadFILES/releases"
         private const val APK_SUFFIX = ".apk"
+        /** Release-asset naming convention: `toadfiles-lite-<tag>.apk` is the Lite build. */
+        private const val LITE_ASSET_MARKER = "lite"
         private const val USER_AGENT = "toadFILES-update-check"
         private const val API_VERSION = "2022-11-28"
         private const val TIMEOUT_MS = 10_000

@@ -117,6 +117,10 @@ class SettingsRepository(
     companion object {
         /** Upper bound on how many distinct folders the "most used" tracker remembers. */
         const val MAX_TRACKED_FOLDERS = 100
+
+        /** Upper bound on how many distinct categories the "most used" tracker remembers.
+         *  FileCategory has six entries, so this ceiling is purely defensive. */
+        const val MAX_TRACKED_CATEGORIES = 20
     }
 
     constructor(context: Context) : this(context.dataStore)
@@ -140,6 +144,7 @@ class SettingsRepository(
         val QUICK_PINS = stringSetPreferencesKey("quick_pins")
         val QUICK_HIDDEN = stringSetPreferencesKey("quick_hidden")
         val FOLDER_USES = stringSetPreferencesKey("folder_uses")
+        val CATEGORY_USES = stringSetPreferencesKey("category_uses")
         val ZIP_OPEN = stringPreferencesKey("zip_open_action")
         val SEVENZIP_OPEN = stringPreferencesKey("sevenzip_open_action")
         val NAV_STYLE = stringPreferencesKey("nav_style")
@@ -347,6 +352,71 @@ class SettingsRepository(
             onUsesPersistSnapshotted?.invoke()
             store.edit { p ->
                 p[Keys.FOLDER_USES] = entries
+            }
+        }
+    }
+
+    // ---------- Most-used categories (v2.5.0) ----------
+
+    /**
+     * Live "most used" FILE-CATEGORY open counts, keyed by [FileCategory.name]. The
+     * exact sibling of the folder-use tracker above — same "count|key" persistence
+     * format, same mutex, same hydrate-on-first-use discipline — fed by
+     * [CategoriesViewModel.open] (every drill-in counts, wherever it starts: the
+     * grid, the drawer's Category dropdown, or a Quick access tile) and read by the
+     * drawer's Most-used section and Home's most-used strip. Categories are never
+     * renamed or remapped, so no remapSavedPaths counterpart exists here.
+     */
+    private val _categoryUses = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val categoryUses: StateFlow<Map<String, Int>> = _categoryUses
+
+    /** True once the persisted category counts have been read into [_categoryUses]. Guarded by [usesMutex]. */
+    @Volatile
+    private var categoryUsesLoaded = false
+
+    /** Loads persisted category counts once (call at startup so previous sessions surface immediately). */
+    suspend fun reloadCategoryUses() {
+        if (categoryUsesLoaded) return
+        usesMutex.withLock {
+            if (!categoryUsesLoaded) hydrateCategoryUsesLocked()
+        }
+    }
+
+    /** Reads the persisted counts into [_categoryUses]. The caller must hold [usesMutex]. */
+    private suspend fun hydrateCategoryUsesLocked() {
+        _categoryUses.value = parseFolderUses(store.data.first()[Keys.CATEGORY_USES])
+        categoryUsesLoaded = true
+    }
+
+    /** Counts one category open. In-memory only; persists via [persistCategoryUses]. */
+    suspend fun recordCategoryUse(name: String) {
+        if (name.isBlank()) return
+        usesMutex.withLock {
+            if (!categoryUsesLoaded) hydrateCategoryUsesLocked()
+            _categoryUses.update { uses ->
+                val next = uses + (name to (uses[name] ?: 0) + 1)
+                if (next.size > MAX_TRACKED_CATEGORIES) {
+                    next.entries.sortedByDescending { it.value }.take(MAX_TRACKED_CATEGORIES)
+                        .associate { it.key to it.value }
+                } else {
+                    next
+                }
+            }
+        }
+    }
+
+    /**
+     * Persists the in-memory category counts (MainActivity.onStop, next to the folder
+     * flush). Always hydrates first — flushing a still-empty map would erase the
+     * previous session's history, exactly like the folder-use flush.
+     */
+    suspend fun persistCategoryUses() {
+        usesMutex.withLock {
+            if (!categoryUsesLoaded) hydrateCategoryUsesLocked()
+            val entries = _categoryUses.value.entries
+                .map { "${it.value}|${it.key}" }.toSet()
+            store.edit { p ->
+                p[Keys.CATEGORY_USES] = entries
             }
         }
     }

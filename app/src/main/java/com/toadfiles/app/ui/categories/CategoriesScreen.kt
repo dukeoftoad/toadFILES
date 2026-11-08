@@ -133,10 +133,21 @@ fun CategoriesScreen(
     /** Flaw fix: extractable archives route into Browse's extract-or-open dialog
      *  instead of a bare ACTION_VIEW that bounces back into toadFILES itself. */
     onOpenArchive: (File) -> Unit = {},
+    /** v2.5.0: a category to open straight away — the drawer's Category dropdown,
+     *  its Most-used section and Home's most-used strip land here pre-scoped. The
+     *  plain tab entry leaves it null and shows the grid as always. */
+    initialCategory: FileCategory? = null,
     vm: CategoriesViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // v2.5.0: a drawer / Quick-access jump lands with a pre-picked category — open
+    // it once on entry (open() also records the category use for Most used). The
+    // plain tab entry passes null and never triggers this.
+    LaunchedEffect(initialCategory) {
+        initialCategory?.let { vm.open(it) }
+    }
     val snackbar = remember { SnackbarHostState() }
     var actionSheetFor by remember { mutableStateOf<MediaRepository.MediaEntry?>(null) }
     /** APK awaiting the shared install-confirm dialog (row tap or sheet "Open"). */

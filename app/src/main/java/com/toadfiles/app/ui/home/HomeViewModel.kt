@@ -50,6 +50,12 @@ data class HomeUiState(
     val quickAccess: List<QuickAccessEntry> = emptyList(),
     /** Candidates for the Quick access editor. */
     val quickCandidates: List<QuickCandidate> = emptyList(),
+    /**
+     * v2.5.0: the two most-opened file categories, for Quick access's most-used
+     * strip (owner spec: capped at two, categories ONLY — the folder tiles above
+     * keep today's behavior untouched). Empty until a category has been opened.
+     */
+    val topCategories: List<FileCategory> = emptyList(),
     val favorites: List<FileItem> = emptyList(),
     /** Active type filter for the recent feed; null = All. Same chips row as the Recent screen. */
     val recentFilter: FileCategory? = null,
@@ -88,8 +94,9 @@ class HomeViewModel(
 
     init {
         refreshStorage()
-        // Surface "most used" from previous sessions right away.
+        // Surface "most used" from previous sessions right away (folders + categories).
         viewModelScope.launch { container.settingsRepo.reloadFolderUses() }
+        viewModelScope.launch { container.settingsRepo.reloadCategoryUses() }
         refreshRecent()
         viewModelScope.launch {
             // One-shot cleanup of favorites pointing at paths that no longer exist
@@ -98,15 +105,35 @@ class HomeViewModel(
             container.settingsRepo.pruneDeadFavorites()
         }
         viewModelScope.launch {
-            combine(container.settingsRepo.settings, container.settingsRepo.folderUses) { s, uses ->
-                s to uses
-            }.collect { (s, uses) ->
+            combine(
+                container.settingsRepo.settings,
+                container.settingsRepo.folderUses,
+                container.settingsRepo.categoryUses,
+            ) { s, uses, catUses ->
+                Triple(s, uses, catUses)
+            }.collect { (s, uses, catUses) ->
                 lastSettings = s
                 lastUses = uses
                 refreshFavorites(s.favorites)
                 rebuildQuickAccess(s, uses)
+                updateTopCategories(catUses)
             }
         }
+    }
+
+    /**
+     * v2.5.0: the top two most-opened categories for Quick access's most-used strip
+     * (owner spec: capped at two, categories only — the folder tiles above keep
+     * today's behavior). At least one open is required; a fresh install shows no
+     * strip at all rather than an empty shell.
+     */
+    private fun updateTopCategories(catUses: Map<String, Int>) {
+        val top = catUses.entries
+            .filter { it.value >= 1 }
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(2)
+            .mapNotNull { (name, _) -> runCatching { FileCategory.valueOf(name) }.getOrNull() }
+        _state.update { it.copy(topCategories = top) }
     }
 
     fun refreshStorage() {

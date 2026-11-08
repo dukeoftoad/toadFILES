@@ -6,6 +6,49 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-11-08
+
+The wrong-APK fix plus the navigation upgrade the owner asked for: the updater now
+downloads the right edition's APK, the side menu gains a Category dropdown and a
+Most-used section, and Quick access grows a most-used-categories strip.
+
+### Fixed
+- **The in-app update offered the LITE APK to the full app (owner report)**: the
+  update checker picked the FIRST `.apk` asset in a release payload — correct when
+  tags shipped one APK, wrong since the Lite edition split (v2.3.0) put
+  `toadfiles-<tag>.apk` and `toadfiles-lite-<tag>.apk` on every tag. Whenever GitHub
+  listed the lite asset first, a full-app user tapping "Update" downloaded the Lite
+  build. Asset selection is now edition-aware: the "lite" name marker (case-
+  insensitive) decides which APK belongs to which edition, the running build only
+  ever matches its own, and a release with no matching APK reports honestly instead
+  of silently offering the wrong one. (Lite never hits this path — it strips the
+  update checker entirely — so the full app was the only direction that could go
+  wrong.) Pinned by four new `UpdateCheckerParsingTest` cases: two-APK payloads with
+  lite listed first, both editions' picks, the pre-split single-APK payload still
+  parsing, and the lite-only release yielding an honest null for the full app.
+
+### Added
+- **Side menu — "Category" with a mini dropdown of sub-categories (owner request)**:
+  replaces the plain "Categories" entry in the same slot between Browse and Recent.
+  Expanding it lists the six file categories — Images, Videos, Audio, Documents,
+  Archives, APKs, the same glyphs as the Categories screen — and tapping one lands
+  directly in that category's drill-in (new optional `category` nav argument on the
+  Categories route; fresh navigation so the pick always wins over restored state).
+- **Side menu — "Most used" with both groups (owner request)**: a second dropdown
+  showing the most-OPENED categories and the most-VISITED folders (the existing
+  folder-use tracker), top three each. Empty installs get an honest "Nothing yet"
+  hint instead of blank space. Backed by a new category-use tracker in
+  `SettingsRepository` — the exact sibling of the folder-use one (same "count|key"
+  persistence, same mutex, same hydrate-on-first-use and flush-on-background
+  discipline), fed by every category drill-in wherever it starts.
+- **Quick access — most-used categories strip (owner request)**: the top two
+  most-opened categories join Quick access on Home as tiles under a "Most used"
+  label, styled like the folder tiles with the same most-used badge, tapping into
+  the pre-scoped drill-in. The folder tiles above keep today's behavior untouched —
+  the strip is strictly additive, capped at two, categories only, and hidden until
+  a category has actually been opened. Full edition only (lite has no Categories
+  screen to open).
+
 ## [2.4.0] — 2026-11-08
 
 A focused accessibility release: one new knob, available in both editions, no

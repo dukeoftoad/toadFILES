@@ -6,15 +6,23 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,8 +38,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -48,6 +62,7 @@ import com.toadfiles.app.ui.about.AboutScreen
 import com.toadfiles.app.ui.analyzer.StorageAnalyzerScreen
 import com.toadfiles.app.ui.browse.BrowseScreen
 import com.toadfiles.app.ui.categories.CategoriesScreen
+import com.toadfiles.app.ui.components.categoryIconFor
 import com.toadfiles.app.ui.home.HomeScreen
 import com.toadfiles.app.ui.recent.RecentScreen
 import com.toadfiles.app.ui.settings.AppearanceScreen
@@ -59,6 +74,7 @@ import com.toadfiles.app.ui.whatsnew.WhatsNewScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.toadfiles.app.ToadViewModelFactory
+import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.domain.NavStyle
 import com.toadfiles.app.ui.theme.LocalToadMotion
@@ -67,7 +83,10 @@ import com.toadfiles.app.ui.theme.ToadFace
 object Routes {
     const val HOME = "home"
     const val BROWSE = "browse?dir={dir}&reveal={reveal}&open_archive={openArchive}&archive_dest={archiveDest}"
-    const val CATEGORIES = "categories"
+    // v2.5.0: the optional category arg lands the Categories screen straight in a
+    // drill-in — the drawer's Category dropdown and Most-used section (and Home's
+    // most-used strip) jump directly to one category instead of the grid.
+    const val CATEGORIES = "categories?category={category}"
     const val RECENT = "recent"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
@@ -86,6 +105,10 @@ object Routes {
         "browse?dir=${Uri.encode(dir)}" + (reveal?.let { "&reveal=${Uri.encode(it)}" } ?: "") +
             (openArchive?.let { "&open_archive=${Uri.encode(it)}" } ?: "") +
             (archiveDest?.let { "&archive_dest=${Uri.encode(it)}" } ?: "")
+
+    /** v2.5.0: the Categories route pre-opened on one category (drawer / Quick access). */
+    fun categories(category: FileCategory): String = "categories?category=${category.name}"
+
     fun storageAnalyzer(root: String = ""): String =
         "storage_analyzer?root=${Uri.encode(root)}"
 }
@@ -115,6 +138,9 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     val navSettings by settingsVm.settings.collectAsStateWithLifecycle()
     val navStyle = navSettings.navStyle
     val useDrawer = navStyle == NavStyle.SIDE_MENU
+    // v2.5.0: the drawer's Most-used section reads the live use trackers.
+    val navFolderUses by settingsVm.folderUses.collectAsStateWithLifecycle()
+    val navCategoryUses by settingsVm.categoryUses.collectAsStateWithLifecycle()
     // v1.11: nav transitions follow the user's motion style (Springy toad / Calm /
     // Cinematic), chosen on the Appearance tab.
     val motion = LocalToadMotion.current
@@ -135,12 +161,12 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
     // Full destination set for the side drawer. Home and Categories were missing in
     // v1.7.3, making them unreachable in SIDE_MENU mode; About sits below a divider.
     // Lite drops Categories with the tab (Storage never was a primary destination).
+    // v2.5.0: the plain "Categories" entry is REPLACED by the Category dropdown +
+    // Most-used section below (owner request) — they render in the same slot via
+    // DrawerCategorySection, so the flat list no longer carries a Categories row.
     val drawerDestinations = buildList {
         add(DrawerDestination(Routes.HOME, "Home", Icons.Outlined.Home))
         add(DrawerDestination(Routes.BROWSE, "Browse", Icons.Outlined.Folder))
-        if (!IS_LITE) {
-            add(DrawerDestination(Routes.CATEGORIES, "Categories", Icons.Outlined.Category))
-        }
         add(DrawerDestination(Routes.RECENT, "Recent", Icons.Outlined.History))
         add(DrawerDestination(Routes.TRASH, "Trash", Icons.Outlined.Delete))
         // ---- secondary group ----
@@ -183,6 +209,19 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 openArchive = archive.absolutePath,
             )
         )
+    }
+
+    // v2.5.0 drawer quick-jumps. Unlike openFromDrawer these navigate FRESH (no
+    // state restore): a sub-category tap must land in THAT category's drill-in, and
+    // a most-used-folder tap in THAT folder — restoring a saved Categories/Browse
+    // state would silently ignore the pick. Back still returns to where you were.
+    val openCategoryFromDrawer: (FileCategory) -> Unit = { category ->
+        scope.launch { drawerState.close() }
+        navController.navigateSingleTop(Routes.categories(category))
+    }
+    val openFolderFromDrawer: (String) -> Unit = { path ->
+        scope.launch { drawerState.close() }
+        navController.navigateSingleTop(Routes.browse(path))
     }
 
     val appScaffold: @Composable () -> Unit = {
@@ -253,6 +292,9 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     onOpenSettings = { navController.navigateSingleTop(Routes.SETTINGS) },
                     onOpenDrawer = openDrawer,
                     onOpenArchive = openArchive,
+                    // v2.5.0: the most-used-categories strip jumps straight into a
+                    // drill-in. (Lite never shows the strip — no Categories screen.)
+                    onOpenCategory = { navController.navigateSingleTop(Routes.categories(it)) },
                 )
             }
             composable(
@@ -306,7 +348,16 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                 // Full edition only: per-category media library (per-category directory
                 // scans + cursor churn + large grid state — lite's heaviest runtime
                 // cut after video thumbnails).
-                composable(Routes.CATEGORIES) {
+                composable(
+                    route = Routes.CATEGORIES,
+                    arguments = listOf(
+                        navArgument("category") {
+                            type = NavType.StringType; nullable = true; defaultValue = null
+                        },
+                    ),
+                ) { entry ->
+                    val initialCategory = entry.arguments?.getString("category")
+                        ?.let { runCatching { FileCategory.valueOf(it) }.getOrNull() }
                     CategoriesScreen(
                         bottomPadding = padding.calculateBottomPadding(),
                         onBack = { navController.popBackStack() },
@@ -321,6 +372,7 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                             }
                         },
                         onOpenArchive = openArchive,
+                        initialCategory = initialCategory,
                     )
                 }
             }
@@ -426,6 +478,19 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
                     HorizontalDivider()
                     drawerDestinations.forEach { dest ->
                         val base = dest.route.substringBefore('?')
+                        // v2.5.0: the Category dropdown + Most-used section replace the
+                        // plain "Categories" entry, sitting exactly where it used to —
+                        // between Browse and Recent. Full edition only: lite has no
+                        // Categories screen to open, so the whole block folds away.
+                        if (dest.label == "Recent" && !IS_LITE) {
+                            DrawerCategorySection(
+                                currentBase = currentBase,
+                                categoryUses = navCategoryUses,
+                                folderUses = navFolderUses,
+                                onOpenCategory = openCategoryFromDrawer,
+                                onOpenFolder = openFolderFromDrawer,
+                            )
+                        }
                         NavigationDrawerItem(
                             label = { Text(dest.label) },
                             icon = { Icon(dest.icon, null) },
@@ -448,5 +513,163 @@ fun ToadNavHost(navController: NavHostController = rememberNavController()) {
         ) { appScaffold() }
     } else {
         appScaffold()
+    }
+}
+
+/** How many entries each Most-used group shows in the drawer (owner cap: small lists). */
+private const val DRAWER_MOST_USED_LIMIT = 3
+
+/**
+ * v2.5.0: the two new drawer sections (owner request) replacing the plain
+ * "Categories" entry:
+ *
+ *  1. **Category** — a mini dropdown of the file categories (the same six the
+ *     Categories screen shows); tapping one lands directly in that category's
+ *     drill-in and records the open for the Most-used tracker.
+ *  2. **Most used** — a mini dropdown with BOTH groups: the most-opened categories
+ *     and the most-visited folders (the existing folder-use tracker). Empty on a
+ *     fresh install, with an honest hint instead of blank space.
+ *
+ * Both sections expand in place (the chevron rotates); re-tapping collapses.
+ */
+@Composable
+private fun DrawerCategorySection(
+    currentBase: String?,
+    categoryUses: Map<String, Int>,
+    folderUses: Map<String, Int>,
+    onOpenCategory: (FileCategory) -> Unit,
+    onOpenFolder: (String) -> Unit,
+) {
+    var categoryExpanded by rememberSaveable { mutableStateOf(false) }
+    var mostUsedExpanded by rememberSaveable { mutableStateOf(false) }
+    val categoriesBase = Routes.CATEGORIES.substringBefore('?')
+
+    // ---- 1. Category (+ mini dropdown of sub-categories) ----
+    NavigationDrawerItem(
+        label = { Text("Category") },
+        icon = { Icon(Icons.Outlined.Category, null) },
+        selected = currentBase == categoriesBase,
+        onClick = { categoryExpanded = !categoryExpanded },
+        badge = {
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = if (categoryExpanded) "Collapse categories" else "Expand categories",
+                modifier = Modifier.rotate(if (categoryExpanded) 180f else 0f),
+            )
+        },
+        modifier = Modifier
+            .testTag("drawer_Category")
+            .padding(NavigationDrawerItemDefaults.ItemPadding),
+    )
+    if (categoryExpanded) {
+        FileCategory.entries.forEach { category ->
+            DrawerSubRow(
+                label = category.label,
+                icon = categoryIconFor(category),
+                onClick = { onOpenCategory(category) },
+                modifier = Modifier.testTag("drawer_sub_${category.label}"),
+            )
+        }
+    }
+
+    // ---- 2. Most used (+ mini dropdown: top categories AND top folders) ----
+    NavigationDrawerItem(
+        label = { Text("Most used") },
+        icon = { Icon(Icons.Outlined.TrendingUp, null) },
+        selected = false,
+        onClick = { mostUsedExpanded = !mostUsedExpanded },
+        badge = {
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = if (mostUsedExpanded) "Collapse most used" else "Expand most used",
+                modifier = Modifier.rotate(if (mostUsedExpanded) 180f else 0f),
+            )
+        },
+        modifier = Modifier
+            .testTag("drawer_Most used")
+            .padding(NavigationDrawerItemDefaults.ItemPadding),
+    )
+    if (mostUsedExpanded) {
+        val topCategories = categoryUses.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(DRAWER_MOST_USED_LIMIT)
+            .mapNotNull { (name, _) -> runCatching { FileCategory.valueOf(name) }.getOrNull() }
+        val topFolders = folderUses.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(DRAWER_MOST_USED_LIMIT)
+            .mapNotNull { (path, _) -> File(path).takeIf { it.isDirectory } }
+
+        if (topCategories.isEmpty() && topFolders.isEmpty()) {
+            Text(
+                "Nothing yet — open categories and folders to fill this in",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .testTag("drawer_most_used_empty")
+                    .padding(start = 52.dp, top = 8.dp, bottom = 8.dp, end = 16.dp),
+            )
+        } else {
+            if (topCategories.isNotEmpty()) {
+                DrawerGroupLabel("Categories")
+                topCategories.forEach { category ->
+                    DrawerSubRow(
+                        label = category.label,
+                        icon = categoryIconFor(category),
+                        onClick = { onOpenCategory(category) },
+                        modifier = Modifier.testTag("drawer_used_${category.label}"),
+                    )
+                }
+            }
+            if (topFolders.isNotEmpty()) {
+                DrawerGroupLabel("Folders")
+                topFolders.forEach { folder ->
+                    DrawerSubRow(
+                        label = folder.name,
+                        icon = Icons.Outlined.Folder,
+                        onClick = { onOpenFolder(folder.absolutePath) },
+                        modifier = Modifier.testTag("drawer_used_folder_${folder.name}"),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Small group heading inside the Most-used dropdown ("Categories" / "Folders"). */
+@Composable
+private fun DrawerGroupLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 52.dp, top = 8.dp, bottom = 2.dp),
+    )
+}
+
+/** An indented sub-row inside a drawer dropdown — icon + label, one tap to jump. */
+@Composable
+private fun DrawerSubRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(start = 40.dp, top = 10.dp, bottom = 10.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }

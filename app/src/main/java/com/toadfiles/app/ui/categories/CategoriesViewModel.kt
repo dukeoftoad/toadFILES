@@ -192,6 +192,12 @@ class CategoriesViewModel(
     }
 
     fun open(category: FileCategory) {
+        // v2.5.0 most-used categories: every drill-in counts, wherever it starts —
+        // the grid, the drawer's Category dropdown, or a Quick access tile. Fire-
+        // and-forget: a failed recording must never block opening the category.
+        viewModelScope.launch {
+            runCatching { container.settingsRepo.recordCategoryUse(category.name) }
+        }
         val token = entriesSeq.incrementAndGet()
         _state.update {
             it.copy(

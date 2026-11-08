@@ -29,6 +29,12 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     val settings: StateFlow<ToadSettings> = container.settingsRepo.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, ToadSettings())
 
+    /** v2.5.0: live folder-visit counts — the drawer's Most-used section reads these. */
+    val folderUses: StateFlow<Map<String, Int>> = container.settingsRepo.folderUses
+
+    /** v2.5.0: live category-open counts — the drawer's Most-used section reads these. */
+    val categoryUses: StateFlow<Map<String, Int>> = container.settingsRepo.categoryUses
+
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { container.settingsRepo.setThemeMode(mode) }
     fun setAppTheme(theme: AppTheme) = viewModelScope.launch { container.settingsRepo.setAppTheme(theme) }
     fun setMotionStyle(style: MotionStyle) = viewModelScope.launch { container.settingsRepo.setMotionStyle(style) }

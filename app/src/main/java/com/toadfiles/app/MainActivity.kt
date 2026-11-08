@@ -209,9 +209,11 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         // Flush the in-memory "most used" folder counts to DataStore while we're
-        // backgrounded — visits are never persisted one by one.
+        // backgrounded — visits are never persisted one by one. v2.5.0: the
+        // category-open counts flush on the same schedule (same tracker pattern).
         (application as? ToadApp)?.container?.appScope?.launch(Dispatchers.IO) {
             runCatching { container.settingsRepo.persistFolderUses() }
+            runCatching { container.settingsRepo.persistCategoryUses() }
         }
     }
 
