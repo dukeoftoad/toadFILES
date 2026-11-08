@@ -4,11 +4,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.fetchSemanticsNode
-import androidx.compose.ui.test.fetchTextLayoutResult
+import androidx.compose.ui.semantics.GetTextLayoutInfo
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.ui.components.FileNameText
@@ -26,9 +27,10 @@ import org.robolectric.annotation.Config
  * visible — so the file's type survives truncation. The full untruncated name is
  * always exposed as the content description for TalkBack and tests.
  *
- * Layout/text assertions go through the UNMERGED tree: FileNameText merges its two
- * text nodes for a11y, and only the unmerged tree keeps them as individually
- * measurable nodes.
+ * Layout assertions go through the UNMERGED tree: FileNameText merges its two text
+ * nodes for a11y, and only the unmerged tree keeps them as individually measurable
+ * nodes. The layout result is read from the standard GetTextLayoutInfo semantics
+ * property rather than ui-test helpers.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -36,6 +38,9 @@ class FileNameTextTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    private fun SemanticsNodeInteraction.layoutResult(): TextLayoutResult =
+        fetchSemanticsNode().config[GetTextLayoutInfo].single()
 
     @Test
     fun `long name truncates the base but the extension stays whole and inside the row`() {
@@ -51,19 +56,21 @@ class FileNameTextTest {
         compose.onNodeWithContentDescription(name, useUnmergedTree = true).assertExists()
 
         // The base really is visually truncated in the narrow row…
-        val baseLayout = compose.onNodeWithText(base, useUnmergedTree = true).fetchTextLayoutResult()
+        val baseLayout = compose.onNodeWithText(base, useUnmergedTree = true).layoutResult()
         assertTrue("base should be visually truncated", baseLayout.hasVisualOverflow)
 
         // …while the extension renders whole, on one line, inside the row bounds.
-        val extLayout = compose.onNodeWithText(".pdf", useUnmergedTree = true).fetchTextLayoutResult()
+        val extInteraction = compose.onNodeWithText(".pdf", useUnmergedTree = true)
+        val extLayout = extInteraction.layoutResult()
         assertFalse("extension must never clip", extLayout.hasVisualOverflow)
         assertEquals("extension stays on one line", 1, extLayout.lineCount)
-        val extNode = compose.onNodeWithText(".pdf", useUnmergedTree = true).fetchSemanticsNode()
+        val extNode = extInteraction.fetchSemanticsNode()
         val rowRight = compose.onNodeWithContentDescription(name, useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot.right
+        val extRight = extNode.positionInRoot.x + extLayout.size.width.toFloat()
         assertTrue(
             "extension must sit inside the row bounds",
-            extNode.positionInRoot.x + extLayout.size.width <= rowRight + 1f,
+            extRight <= rowRight + 1f,
         )
     }
 
@@ -74,9 +81,9 @@ class FileNameTextTest {
                 FileNameText("cv.pdf", modifier = Modifier.width(300.dp))
             }
         }
-        val baseLayout = compose.onNodeWithText("cv", useUnmergedTree = true).fetchTextLayoutResult()
+        val baseLayout = compose.onNodeWithText("cv", useUnmergedTree = true).layoutResult()
         assertFalse("short base must not truncate", baseLayout.hasVisualOverflow)
-        val extLayout = compose.onNodeWithText(".pdf", useUnmergedTree = true).fetchTextLayoutResult()
+        val extLayout = compose.onNodeWithText(".pdf", useUnmergedTree = true).layoutResult()
         assertFalse(extLayout.hasVisualOverflow)
     }
 
