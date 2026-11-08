@@ -115,8 +115,20 @@ class AppIconSwitcherTest {
         val pm = context.packageManager
         val switcher = PackageManagerAppIconSwitcher(context) { _, _ -> true }
         val target = ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherFaceTeal")
-        val shippedDefault =
-            ComponentName("com.toadfiles.app", "com.toadfiles.app.LauncherToadGreen")
+
+        // Seed every alias with an explicit setting first. Robolectric's component
+        // map is a static-per-sandbox map that tests in the same JVM can leave
+        // leftovers in — the ghost test below documents release-gate flakes from
+        // exactly that — and apply() swallows per-write failures behind runCatching.
+        // An explicit baseline makes the asserts below mean "what apply wrote" and
+        // nothing else, and a silent mid-plan abort surfaces on the first unset alias.
+        allAliases().forEach {
+            pm.setComponentEnabledSetting(
+                it,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
 
         switcher.apply(AppIconDesign.FACE, AppIconColor.TEAL)
 
@@ -124,20 +136,20 @@ class AppIconSwitcherTest {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             pm.getComponentEnabledSetting(target),
         )
-        assertEquals(
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            pm.getComponentEnabledSetting(shippedDefault),
-        )
+        allAliases().filter { it != target }.forEach {
+            assertEquals(
+                "alias ${it.className} must be disabled after apply",
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                pm.getComponentEnabledSetting(it),
+            )
+        }
 
         // Leave the campground cleaner than we found it: reset every alias this test
         // touched back to DEFAULT. Robolectric's component-settings state can leak
         // across tests in the same JVM (it is what fed the ghost test's release-gate
         // flake), so an ENABLED leftover here is exactly what other tests must never
         // inherit.
-        val touched = AppIconDesign.entries.flatMap { d ->
-            AppIconColor.entries.map { c -> ghostlessComponentName(d, c) }
-        }
-        touched.forEach {
+        allAliases().forEach {
             pm.setComponentEnabledSetting(
                 it,
                 PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
@@ -145,6 +157,12 @@ class AppIconSwitcherTest {
             )
         }
     }
+
+    /** All 42 aliases, same mapping the switcher uses. */
+    private fun allAliases(): List<ComponentName> =
+        AppIconDesign.entries.flatMap { d ->
+            AppIconColor.entries.map { c -> ghostlessComponentName(d, c) }
+        }
 
     /** Same mapping the switcher uses, kept local to the cleanup above. */
     private fun ghostlessComponentName(d: AppIconDesign, c: AppIconColor): ComponentName =

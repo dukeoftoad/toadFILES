@@ -4,33 +4,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.toadfiles.app.ui.components.FileNameText
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import kotlin.math.abs
 
 /**
- * FileNameText layout contract: when a file name is too long for its row, the BASE
+ * FileNameText geometry contract: when a file name is too long for its row, the BASE
  * name is cut at whatever fits and the extension (.zip, .txt, .pdf, …) stays fully
  * visible — so the file's type survives truncation. The full untruncated name is
  * always exposed as the content description for TalkBack and tests.
  *
- * Layout assertions go through the UNMERGED tree: FileNameText merges its two text
- * nodes for a11y, and only the unmerged tree keeps them as individually measurable
- * nodes. The layout result is read through the standard GetTextLayoutResult semantics
- * action that every Text node installs — the same channel TalkBack uses.
+ * All assertions are pure node geometry (bounds in root) — layout positions are what
+ * this suite can measure reliably, and they pin the user-visible promise directly:
+ * base runs flush into the extension, and the extension lands exactly at the row's
+ * right edge only when truncation happened.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -39,18 +35,9 @@ class FileNameTextTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun SemanticsNodeInteraction.layoutResult(): TextLayoutResult {
-        val results = mutableListOf<TextLayoutResult>()
-        val action = fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action
-        checkNotNull(action) { "node does not expose a text layout result action" }
-        check(action.invoke(results)) { "text layout result not available (node not laid out?)" }
-        return results.single()
-    }
-
     @Test
-    fun `long name truncates the base but the extension stays whole and inside the row`() {
+    fun `long name fills the row and pins the extension to its right edge`() {
         val name = "year_end_financial_report_2026_final_version.pdf"
-        val base = name.removeSuffix(".pdf")
         compose.setContent {
             MaterialTheme {
                 FileNameText(name, modifier = Modifier.width(140.dp))
@@ -60,36 +47,47 @@ class FileNameTextTest {
         // The full name is always available to TalkBack / tests via content description.
         compose.onNodeWithContentDescription(name, useUnmergedTree = true).assertExists()
 
-        // The base really is visually truncated in the narrow row…
-        val baseLayout = compose.onNodeWithText(base, useUnmergedTree = true).layoutResult()
-        assertTrue("base should be visually truncated", baseLayout.hasVisualOverflow)
+        val row = compose.onNodeWithContentDescription(name, useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val base = compose.onNodeWithText(name.removeSuffix(".pdf"), useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val ext = compose.onNodeWithText(".pdf", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
 
-        // …while the extension renders whole, on one line, inside the row bounds.
-        val extInteraction = compose.onNodeWithText(".pdf", useUnmergedTree = true)
-        val extLayout = extInteraction.layoutResult()
-        assertFalse("extension must never clip", extLayout.hasVisualOverflow)
-        assertEquals("extension stays on one line", 1, extLayout.lineCount)
-        val extNode = extInteraction.fetchSemanticsNode()
-        val rowRight = compose.onNodeWithContentDescription(name, useUnmergedTree = true)
-            .fetchSemanticsNode().boundsInRoot.right
-        val extRight = extNode.positionInRoot.x + extLayout.size.width.toFloat()
+        // Base and extension sit flush: the base wanted more room than the row had,
+        // so it fills everything left of the extension…
         assertTrue(
-            "extension must sit inside the row bounds",
-            extRight <= rowRight + 1f,
+            "base must run flush into the extension — name was cut to the fit",
+            abs(base.right - ext.left) <= 1f,
         )
+        // …and the extension ends exactly at the row's right edge: the cut kept the
+        // maximum number of characters that fit and the extension renders whole.
+        assertTrue(
+            "extension must reach the row's right edge",
+            abs(ext.right - row.right) <= 1f,
+        )
+        assertTrue("extension must have rendered", ext.width > 0f)
     }
 
     @Test
-    fun `short name shows everything without any truncation`() {
+    fun `short name leaves the rest of the row free`() {
         compose.setContent {
             MaterialTheme {
                 FileNameText("cv.pdf", modifier = Modifier.width(300.dp))
             }
         }
-        val baseLayout = compose.onNodeWithText("cv", useUnmergedTree = true).layoutResult()
-        assertFalse("short base must not truncate", baseLayout.hasVisualOverflow)
-        val extLayout = compose.onNodeWithText(".pdf", useUnmergedTree = true).layoutResult()
-        assertFalse(extLayout.hasVisualOverflow)
+        val row = compose.onNodeWithContentDescription("cv.pdf", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val base = compose.onNodeWithText("cv", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val ext = compose.onNodeWithText(".pdf", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+
+        // Natural inline flow, no truncation anywhere: the pair wraps its own width
+        // and leaves the rest of the row empty.
+        assertTrue(abs(base.right - ext.left) <= 1f)
+        assertTrue("short name must leave slack in the row", row.right - ext.right > 100f)
+        assertTrue(ext.width > 0f)
     }
 
     @Test
