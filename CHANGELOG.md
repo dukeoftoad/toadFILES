@@ -4,7 +4,28 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
-## [Unreleased]
+## [2.7.0] — 2026-11-17
+
+The launcher icon switch now asks to restart the app — and explains the one
+case where the icon still looks old afterwards. Ported from toadGALLERY v2.0.2
+(cross-app parity round).
+
+### Added
+- **"Restart to apply icon" dialog**: v1.9 flipped the activity-alias silently,
+  so the recents snapshot and some launchers kept showing the old icon until
+  they happened to refresh. Both icon pickers in Appearance (Design and
+  Background) now offer Restart now / Later; "Restart now" relaunches the app
+  into a fresh task. The alias change itself is immediate in PackageManager and
+  pinned shortcuts keep working.
+- `ui/components/AppRestart.kt` — the hard-restart helper, ported from
+  toadGALLERY's AppRestart.
+
+### Changed
+- The restart dialog explains the launcher shortcut cache: if the home screen
+  still shows the old icon after the restart, that is the launcher's cache
+  (Xiaomi/HyperOS, Huawei, Oppo and friends), not a failed switch — the app
+  drawer always shows the new icon; remove and re-add the shortcut, or reboot,
+  to refresh it.
 
 ## [2.6.0] — 2026-11-08
 
