@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -41,6 +42,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -73,6 +76,7 @@ import com.toadfiles.app.ui.theme.AccentPalettes
 import com.toadfiles.app.ui.theme.AppIconPalettes
 import com.toadfiles.app.ui.theme.ToadThemes
 import com.toadfiles.app.ui.theme.fontFamilyFor
+import com.toadfiles.app.ui.components.restartApp
 
 /**
  * Dedicated Appearance subpage. Since the v1.11 redesign it offers:
@@ -99,6 +103,8 @@ fun AppearanceScreen(
     vm: SettingsViewModel = viewModel(factory = ToadViewModelFactory),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var pendingIconRestart by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.padding(bottom = bottomPadding),
@@ -334,7 +340,10 @@ fun AppearanceScreen(
                                     // background tint, so picking a color re-tints all tiles.
                                     previewColor = settings.appIconColor,
                                     selected = settings.appIconDesign == d,
-                                    onClick = { vm.setAppIconDesign(d) },
+                                    onClick = {
+                                        vm.setAppIconDesign(d)
+                                        pendingIconRestart = true
+                                    },
                                 )
                             }
                         }
@@ -346,12 +355,17 @@ fun AppearanceScreen(
                                 IconColorSwatch(
                                     color = c,
                                     selected = settings.appIconColor == c,
-                                    onClick = { vm.setAppIconColor(c) },
+                                    onClick = {
+                                        vm.setAppIconColor(c)
+                                        pendingIconRestart = true
+                                    },
                                 )
                             }
                         }
                         Text(
-                            "The launcher may take a moment to show the new icon.",
+                            "The choice applies immediately and survives restarts — restart " +
+                                "when asked to refresh it everywhere; some launchers take a " +
+                                "moment on their own.",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 12.dp),
@@ -361,6 +375,33 @@ fun AppearanceScreen(
                 Spacer(Modifier.height(32.dp))
             }
         }
+    }
+
+    if (pendingIconRestart) {
+        AlertDialog(
+            onDismissRequest = { pendingIconRestart = false },
+            title = { Text("Restart to apply icon") },
+            text = {
+                Text(
+                    "The launcher icon is now \"" + settings.appIconDesign.label + " on " +
+                        settings.appIconColor.label + "\". Restart toadFILES so the change " +
+                        "applies everywhere immediately — pinned shortcuts keep working."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingIconRestart = false
+                        restartApp(context)
+                    }
+                ) {
+                    Text("Restart now")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingIconRestart = false }) { Text("Later") }
+            },
+        )
     }
 }
 
