@@ -385,7 +385,12 @@ fun AppearanceScreen(
                 Text(
                     "The launcher icon is now \"" + settings.appIconDesign.label + " on " +
                         settings.appIconColor.label + "\". Restart toadFILES so the change " +
-                        "applies everywhere immediately — pinned shortcuts keep working."
+                        "applies everywhere immediately — pinned shortcuts keep working.\n\n" +
+                        "Still seeing the old icon afterwards? That is the launcher's " +
+                        "shortcut cache, not a failed switch: the new icon always shows in " +
+                        "the app drawer, while some home screens (Xiaomi/HyperOS, Huawei, " +
+                        "Oppo and friends) keep the old one until you remove and re-add " +
+                        "the shortcut or reboot."
                 )
             },
             confirmButton = {
