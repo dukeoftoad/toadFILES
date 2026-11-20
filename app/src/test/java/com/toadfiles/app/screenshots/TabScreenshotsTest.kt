@@ -306,7 +306,7 @@ class TabScreenshotsTest {
         settle()
         compose.onNodeWithTag("settings_appearance_row").performClick()
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Dark forest").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Toadmark").fetchSemanticsNodes().isNotEmpty()
         }
         settle()
         shot("09-appearance.png")

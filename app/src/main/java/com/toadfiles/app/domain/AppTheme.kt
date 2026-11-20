@@ -21,8 +21,8 @@ package com.toadfiles.app.domain
  */
 enum class AppTheme(val label: String, val description: String) {
     DARK_FOREST(
-        "Dark forest",
-        "Moss on near-black with amber highlights — the new toad look",
+        "Toadmark",
+        "Deep ink surfaces with frog-lime and pond accents — the toad family look",
     ),
     MATERIAL_YOU(
         "Material You",
