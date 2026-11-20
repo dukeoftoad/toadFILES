@@ -252,7 +252,7 @@ object ToadThemes {
 
     /** A representative three-dot swatch for the theme picker cards. */
     fun swatches(theme: AppTheme): List<Color> = when (theme) {
-        AppTheme.DARK_FOREST -> listOf(Color(0xFF0D120E), Color(0xFF9FE06B), Color(0xFFFFB855))
+        AppTheme.DARK_FOREST -> listOf(Color(0xFF0B100F), Color(0xFFA3E635), Color(0xFF2DD4BF))
         AppTheme.MATERIAL_YOU -> listOf(Color(0xFF1C1B1F), Color(0xFFB69DF8), Color(0xFFFDACD0))
         AppTheme.MATERIAL3 -> listOf(Color(0xFF141218), Color(0xFFD0BCFF), Color(0xFFEFB8C8))
         AppTheme.SLATE_NEON -> listOf(Color(0xFF0A0C0B), Color(0xFF57F2A0), Color(0xFF82E3FF))
