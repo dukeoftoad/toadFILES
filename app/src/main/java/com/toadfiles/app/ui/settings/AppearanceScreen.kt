@@ -81,8 +81,8 @@ import com.toadfiles.app.ui.components.restartApp
 /**
  * Dedicated Appearance subpage. Since the v1.11 redesign it offers:
  *
- *  - **Theme** — one full visual identity per entry ([AppTheme]): the Dark forest
- *    redesign, Material You (wallpaper colors), Google's Material 3 baseline,
+ *  - **Theme** — one full visual identity per entry ([AppTheme]): the Toadmark
+ *    family look, Material You (wallpaper colors), Google's Material 3 baseline,
  *    Slate + Neon and the Classic palette (which keeps the seven accent colors),
  *    plus the light / dark / follow-system selector;
  *  - **Font** — [AppFont]: the device's system typeface, the bundled Manrope, the
