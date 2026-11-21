@@ -4,6 +4,20 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [Unreleased]
+
+### Fixed
+- The on-device suite's `FileOpsInstrumentedTest` could never run: its four
+  `runBlocking` test bodies returned the cleanup's `Boolean` instead of `void`,
+  which JUnit4 rejects at class-validation time — invisible for a year because
+  nothing ever executed the suite. The first Manual-checks emulator run caught
+  it immediately (that is the workflow working as designed). The four tests now
+  use block bodies and pass on a real API 34 filesystem.
+- The Manual-checks screenshot job uploaded from `build/outputs/roborazzi`;
+  Roborazzi resolves the suite's relative capture paths against the module
+  root, so the PNGs actually land in `app/roborazzi/` — the artifact path now
+  matches.
+
 ## [2.8.0] — 2026-11-21
 
 The Toadmark wave: the theme graduates from a palette to a signature look —
