@@ -11,8 +11,11 @@ versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
   `runBlocking` test bodies returned the cleanup's `Boolean` instead of `void`,
   which JUnit4 rejects at class-validation time — invisible for a year because
   nothing ever executed the suite. The first Manual-checks emulator run caught
-  it immediately (that is the workflow working as designed). The four tests now
-  use block bodies and pass on a real API 34 filesystem.
+  it immediately (that is the workflow working as designed). The tests now use
+  block bodies, and the zip-slip case asserts the on-device invariant (entry
+  refused, nothing written outside the target) instead of the desktop JVM's
+  exact accounting bucket — Android's libcore ZipFile can route the malicious
+  entry to failures rather than skips, and both refusals are safe.
 - The Manual-checks screenshot job uploaded from `build/outputs/roborazzi`;
   Roborazzi resolves the suite's relative capture paths against the module
   root, so the PNGs actually land in `app/roborazzi/` — the artifact path now
