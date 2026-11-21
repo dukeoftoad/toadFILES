@@ -65,7 +65,7 @@ class ToadInkTest {
         assertEquals(anchors, points.size)
         // Top edge: y pinned at 5, x rising 5 → 95 through the midpoints.
         assertEquals(Offset(5f, 5f), points[0])
-        assertEquals(Offset(52.5f, 5f), points[1])
+        assertEquals(Offset(50f, 5f), points[1])
         assertEquals(Offset(95f, 5f), points[2])
         // Right edge: x pinned at 95, y rising 5 → 55.
         assertEquals(Offset(95f, 5f), points[3])
