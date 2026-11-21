@@ -76,6 +76,6 @@ there are two layers instead:
       `./gradlew :app:recordRoborazziFullDebug`), review the fresh PNGs and copy
       them into `docs/screenshots/`. They are documentation, not verified goldens —
       a human eye still approves each one.
-- [ ] Skim the Kover coverage artifact from the last Android CI run (or locally
-      `./gradlew :app:koverHtmlReportDebug`) for a surprise drop in the
+- [ ] Skim the coverage artifact from the last Android CI run (or locally
+      `./gradlew :app:createFullDebugUnitTestCoverageReport`) for a surprise drop in the
       filesystem/trash/archive layers.

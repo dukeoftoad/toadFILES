@@ -90,20 +90,20 @@ jobs:
           ./gradlew :app:testFullDebugUnitTest --stacktrace || \
             ./gradlew :app:testFullDebugUnitTest --rerun-tasks --stacktrace
 
-      - name: Coverage report (Kover)
-        # Audit A12: "what's untested" must be answerable mechanically. Kover's
-        # AGP report task is per build type (koverHtmlReportDebug) and merges
-        # both flavors — the full side is already up-to-date from the test step
-        # above, so the fresh cost is lite's shared-suite pass, and the report
-        # unions full+lite coverage of the shared code.
+      - name: Coverage report (full flavor, AGP unit-test coverage)
+        # Audit A12: "what's untested" must be answerable mechanically. AGP's
+        # built-in Jacoco integration (enableUnitTestCoverage on the debug
+        # build type) produces per-variant HTML reports; the full-flavor report
+        # reuses the unit tests that just ran. Lite stays out — its suite is the
+        # same shared code by design.
         timeout-minutes: 15
-        run: ./gradlew :app:koverHtmlReportDebug --stacktrace
+        run: ./gradlew :app:createFullDebugUnitTestCoverageReport --stacktrace
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: toadfiles-coverage-html
-          path: app/build/reports/kover/**
+          path: app/build/reports/coverage/**
           if-no-files-found: warn
           retention-days: 14
 

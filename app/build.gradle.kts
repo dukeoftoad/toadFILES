@@ -2,7 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.roborazzi)
-    alias(libs.plugins.kover)
 }
 
 android {
@@ -73,6 +72,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // AGP's built-in unit-test coverage (Jacoco): drives the
+            // create<Variant>UnitTestCoverageReport tasks the CI coverage step
+            // runs. Debug-only — release builds never pay the instrumentation.
+            enableUnitTestCoverage = true
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
