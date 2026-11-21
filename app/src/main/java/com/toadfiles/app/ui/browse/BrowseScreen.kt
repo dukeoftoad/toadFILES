@@ -377,7 +377,17 @@ fun BrowseScreen(
             } else if (selectionMode) {
                 TopAppBar(
             windowInsets = WindowInsets(0, 0, 0, 0),
-                    title = { Text("${state.selection.size} selected") },
+                    title = {
+                        // Selection size from the listing's cached FileItems —
+                        // folders stay uncounted (a real total would need a tree
+                        // walk the title bar must never trigger).
+                        val selectedBytes = remember(state.selection, state.items) {
+                            val chosen = state.items.filter { state.selection.contains(it.file) }
+                            if (chosen.size != state.selection.size || chosen.any { it.isDir }) null
+                            else chosen.sumOf { it.size }
+                        }
+                        Text(Format.selectionLabel(state.selection.size, selectedBytes))
+                    },
                     navigationIcon = {
                         IconButton(onClick = { vm.clearSelection() }) {
                             Icon(Icons.Outlined.Close, "Clear selection")

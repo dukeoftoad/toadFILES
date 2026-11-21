@@ -53,9 +53,15 @@ release. Every item exists because the static audit flagged it as a real-world r
       staging directories.
 
 ## 6. Instrumentation on a real device
-CI does NOT run `connectedDebugAndroidTest` — hosted-runner emulators proved slow and
-flaky, so the emulator matrix was removed. Instrumentation is a local, on-device step:
-- [ ] On a physical device (or a locally booted emulator of your choice):
+CI does NOT gate pushes on `connectedDebugAndroidTest` — hosted-runner emulators
+proved slow and flaky, so the emulator matrix stays out of Android CI. Since v2.8.0
+there are two layers instead:
+- [ ] Run the **Manual checks → instrumented-tests** workflow (Actions tab,
+      `workflow_dispatch`): an API 34 emulator runs the full on-device suite
+      (`connectedFullDebugAndroidTest`). Do this before every release, and after
+      any change to the filesystem/trash/archive layers.
+- [ ] On a physical device (or a locally booted emulator of your choice) when an
+      OEM-specific behavior is in question:
       `./gradlew :app:connectedDebugAndroidTest`.
 - [ ] Keep device/OEM-only checks (sections 1–5) manual — emulators cannot cover them.
 
@@ -65,5 +71,11 @@ flaky, so the emulator matrix was removed. Instrumentation is a local, on-device
 - [ ] Tag `vX.Y.Z` — `release.yml` builds and publishes BOTH signed APKs
       (`toadfiles-<tag>.apk` and `toadfiles-lite-<tag>.apk`;
       `TOADFILES_KEYSTORE_FILE/_PASSWORD/_KEY_ALIAS/_KEY_PASSWORD` secrets required).
-- [ ] Confirm the README screenshots still match the shipped UI (Robolectric/Roborazzi
-      capture: `./gradlew :app:testFullDebugUnitTest --tests '*TabScreenshotsTest*'`).
+- [ ] Confirm the README screenshots still match the shipped UI: run the
+      **Manual checks → record-screenshots** workflow (or locally
+      `./gradlew :app:recordRoborazziFullDebug`), review the fresh PNGs and copy
+      them into `docs/screenshots/`. They are documentation, not verified goldens —
+      a human eye still approves each one.
+- [ ] Skim the Kover coverage artifact from the last Android CI run (or locally
+      `./gradlew :app:koverHtmlReportFullDebug`) for a surprise drop in the
+      filesystem/trash/archive layers.

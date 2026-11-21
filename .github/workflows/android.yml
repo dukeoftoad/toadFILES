@@ -90,6 +90,22 @@ jobs:
           ./gradlew :app:testFullDebugUnitTest --stacktrace || \
             ./gradlew :app:testFullDebugUnitTest --rerun-tasks --stacktrace
 
+      - name: Coverage report (full flavor, Kover)
+        # Audit A12: "what's untested" must be answerable mechanically. The
+        # full-flavor report reuses the unit tests that just ran (Kover's JVM
+        # agent already instrumented them); lite deliberately re-runs the same
+        # shared suite, so it stays out of the report.
+        timeout-minutes: 8
+        run: ./gradlew :app:koverHtmlReportFullDebug --stacktrace
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: toadfiles-coverage-html
+          path: app/build/reports/kover/**
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Assemble debug APKs (both editions)
         # With the edition flavors, assembleDebug builds full AND lite debug APKs
         # (docs/LITE_EDITION_PLAN.md §2) — the lite build is this step's real test.

@@ -223,7 +223,15 @@ fun CategoriesScreen(
             if (inDrillIn && inSelection) {
                 TopAppBar(
             windowInsets = WindowInsets(0, 0, 0, 0),
-                    title = { Text("${state.selection.size} selected") },
+                    title = {
+                        // MediaStore rows carry their own size; sum the selected
+                        // ones from the cached entries (no re-query, no IO).
+                        val selectedBytes = remember(state.selection, state.entries) {
+                            val chosen = state.entries.filter { state.selection.contains(it.uri.toString()) }
+                            if (chosen.isEmpty()) null else chosen.sumOf { it.size }
+                        }
+                        Text(Format.selectionLabel(state.selection.size, selectedBytes))
+                    },
                     navigationIcon = {
                         IconButton(onClick = { vm.clearSelection() }) {
                             Icon(Icons.Outlined.Close, "Clear selection")

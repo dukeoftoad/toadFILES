@@ -88,6 +88,7 @@ fun ToadTheme(
             if (performanceMode) MotionStyle.NONE else motionStyle,
         ),
         LocalPerformanceMode provides performanceMode,
+        LocalToadmarkInk provides (appTheme == AppTheme.DARK_FOREST && !performanceMode),
         LocalDensity provides scaledDensity,
     ) {
         MaterialTheme(
@@ -111,3 +112,9 @@ private val ToadShapes = Shapes(
 /** True while the user's "Performance mode" is on: screens read this to skip
  *  recurring work the motion specs can't cover (video thumbnails, decorations). */
 val LocalPerformanceMode = staticCompositionLocalOf { false }
+
+/** True while the Toadmark ink decoration should draw: the Toadmark theme is
+ *  active and Performance mode is off (decoration-stripping contract). Screens
+ *  read this instead of the raw settings so lite — where performance mode is
+ *  baked in — never draws the ink either. */
+val LocalToadmarkInk = staticCompositionLocalOf { false }

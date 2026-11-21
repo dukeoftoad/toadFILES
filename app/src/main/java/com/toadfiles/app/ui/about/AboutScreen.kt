@@ -48,6 +48,9 @@ import com.toadfiles.app.BuildConfig
 import com.toadfiles.app.ToadViewModelFactory
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.IS_LITE
+import com.toadfiles.app.ui.theme.LocalToadmarkInk
+import com.toadfiles.app.ui.theme.ToadFace
+import com.toadfiles.app.ui.theme.toadInkBorder
 import com.toadfiles.app.ui.whatsnew.Changelog
 import com.toadfiles.app.ui.whatsnew.ChangelogRelease
 import com.toadfiles.app.util.Intents
@@ -109,15 +112,39 @@ fun AboutScreen(
             Spacer(Modifier.height(8.dp))
 
             // ---- Identity + version block ----
-            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            // Toadmark branding: the mascot heads the card and, when the Toadmark
+            // theme is active (and Performance mode is off), a hand-drawn ink
+            // border frames it — the family's handwritten signature.
+            val toadmarkInk = LocalToadmarkInk.current
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (toadmarkInk) {
+                            Modifier.toadInkBorder(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                seedSalt = 2,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
                 Column(Modifier.padding(20.dp)) {
-                    Text("toadFILES", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "A lightweight, fast, privacy-first Android file manager.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ToadFace(size = 56.dp)
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            Text("toadFILES", style = MaterialTheme.typography.headlineMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "A lightweight, fast, privacy-first Android file manager.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     VersionRow("Version", BuildConfig.VERSION_NAME)
                     VersionRow("Build", BuildConfig.VERSION_CODE.toString())
