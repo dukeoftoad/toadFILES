@@ -32,9 +32,10 @@ runnable mechanics.
   IO, no re-query), and a selection that mixes in a folder stays quiet rather
   than guessing — a folder's true size needs a tree walk the title bar must
   never trigger. Pinned by `FormatTest`.
-- **Coverage reports in CI (audit A12, first half)**: Kover is wired into the
-  full flavor; every Android CI run produces and uploads an HTML coverage
-  report, so "what's untested" is answerable mechanically instead of by hand.
+- **Coverage reports in CI (audit A12, first half)**: Kover is wired in; every
+  Android CI run produces and uploads a merged HTML coverage report (full +
+  lite flavors), so "what's untested" is answerable mechanically instead of by
+  hand.
 - **On-demand manual checks workflow (audit A10)**: a new
   `Manual checks` workflow runs the never-executed on-device instrumented suite
   (the real filesystem-semantics and zip-slip checks) on an API 34 emulator,

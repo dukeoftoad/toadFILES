@@ -77,5 +77,5 @@ there are two layers instead:
       them into `docs/screenshots/`. They are documentation, not verified goldens —
       a human eye still approves each one.
 - [ ] Skim the Kover coverage artifact from the last Android CI run (or locally
-      `./gradlew :app:koverHtmlReportFullDebug`) for a surprise drop in the
+      `./gradlew :app:koverHtmlReportDebug`) for a surprise drop in the
       filesystem/trash/archive layers.
