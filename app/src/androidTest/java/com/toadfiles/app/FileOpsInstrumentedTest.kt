@@ -110,9 +110,20 @@ class FileOpsInstrumentedTest {
             val result = ZipSupport.extract(evil, target, replace = false)
 
             assertEquals(0, result.succeeded)
-            assertEquals(1, result.skipped) // the unsafe entry is skipped, never written
+            // The refusal bucket is the platform's choice: the desktop JVM counts
+            // the unsafe entry as skipped (isSafeEntryName rejects it in the loop);
+            // Android's libcore ZipFile can refuse the malicious entry during
+            // enumeration/read, landing it in failures instead. The on-device
+            // contract is the invariant — refused one way or another, nothing
+            // published, nothing outside the target.
+            assertTrue(
+                "the unsafe entry must be refused " +
+                    "(skipped=${result.skipped}, failed=${result.failed}: ${result.failures})",
+                result.skipped + result.failed > 0,
+            )
             assertFalse(File(appDir.parentFile, "escaped.txt").exists())
             assertFalse(File(appDir, "escaped.txt").exists())
+            assertFalse(File(target, "escaped.txt").exists())
             appDir.deleteRecursively()
         }
     }
