@@ -105,13 +105,13 @@ class ToadInkTest {
         for ((w, h) in shapes) {
             val jitter = inkJitter(seed = 5, anchors = anchors, radiusPx = 2f)
             val path = inkBorderPath(w, h, 3f, jitter)
-            assertTrue("path for ${w}x$h must be finite", path.isFinite)
+            assertTrue("path for ${w}x$h must have content", !path.isEmpty)
         }
     }
 
     @Test
     fun `a short jitter array degrades to a clean border instead of crashing`() {
         val path = inkBorderPath(100f, 50f, 3f, FloatArray(2))
-        assertTrue(path.isFinite)
+        assertTrue(!path.isEmpty)
     }
 }

@@ -120,7 +120,7 @@ internal fun inkBorderPath(
     for (i in 0 until ANCHORS) {
         val control = wobbled[i]
         val next = mids[(i + 1) % ANCHORS]
-        path.quadraticBezierTo(control.x, control.y, next.x, next.y)
+        path.quadraticTo(control.x, control.y, next.x, next.y)
     }
     path.close()
     return path
