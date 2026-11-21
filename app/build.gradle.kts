@@ -13,8 +13,8 @@ android {
         // v1.8.1: minimum raised from Android 8.0 (API 26) to Android 14 (API 34).
         minSdk = 34
         targetSdk = 36
-        versionCode = 33
-        versionName = "2.7.0"
+        versionCode = 34
+        versionName = "2.8.0"
 
         // Exposed to the About page so the Android-compatibility rows can never drift
         // from the values the build actually uses.
@@ -72,6 +72,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // AGP's built-in unit-test coverage (Jacoco): drives the
+            // create<Variant>UnitTestCoverageReport tasks the CI coverage step
+            // runs. Debug-only — release builds never pay the instrumentation.
+            enableUnitTestCoverage = true
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

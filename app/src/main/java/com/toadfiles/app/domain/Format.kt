@@ -10,6 +10,16 @@ object Format {
      *  Returns just the word so qualified forms compose too ("3 source items"). */
     fun itemWord(n: Int): String = if (n == 1) "item" else "items"
 
+    /**
+     * The multi-select app-bar title: "N selected", plus the honest total size
+     * ("N selected · 24.5 MB") when every selected item is a file whose size is
+     * known. Callers pass a null [bytes] when the selection mixes in a folder —
+     * a folder's true size needs a full tree walk, which the title bar must
+     * never trigger, so it stays quiet instead of guessing.
+     */
+    fun selectionLabel(count: Int, bytes: Long?): String =
+        if (bytes == null || bytes < 0) "$count selected" else "$count selected · ${size(bytes)}"
+
     /** 1024-style units like most desktop file managers. */
     fun size(bytes: Long): String {
         if (bytes < 0) return "?"

@@ -77,8 +77,10 @@ class BrowseScreenTransferFabTest {
     private fun armCopy() {
         compose.onNodeWithContentDescription("notes.txt", useUnmergedTree = true)
             .performTouchInput { longClick() }
+        // The selection bar's title carries the honest total size since v2.8.0
+        // ("1 selected · 3.1 KB"), so match the count prefix, not the whole title.
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("1 selected").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("1 selected", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithContentDescription("More").performClick()
         compose.waitUntil(10_000) {

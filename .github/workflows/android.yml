@@ -90,6 +90,23 @@ jobs:
           ./gradlew :app:testFullDebugUnitTest --stacktrace || \
             ./gradlew :app:testFullDebugUnitTest --rerun-tasks --stacktrace
 
+      - name: Coverage report (full flavor, AGP unit-test coverage)
+        # Audit A12: "what's untested" must be answerable mechanically. AGP's
+        # built-in Jacoco integration (enableUnitTestCoverage on the debug
+        # build type) produces per-variant HTML reports; the full-flavor report
+        # reuses the unit tests that just ran. Lite stays out — its suite is the
+        # same shared code by design.
+        timeout-minutes: 15
+        run: ./gradlew :app:createFullDebugUnitTestCoverageReport --stacktrace
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: toadfiles-coverage-html
+          path: app/build/reports/coverage/**
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Assemble debug APKs (both editions)
         # With the edition flavors, assembleDebug builds full AND lite debug APKs
         # (docs/LITE_EDITION_PLAN.md §2) — the lite build is this step's real test.

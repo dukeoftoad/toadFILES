@@ -73,6 +73,8 @@ import com.toadfiles.app.data.MediaRepository
 import com.toadfiles.app.domain.ArchiveOps
 import com.toadfiles.app.domain.FileCategory
 import com.toadfiles.app.domain.FileItem
+import com.toadfiles.app.ui.theme.LocalToadmarkInk
+import com.toadfiles.app.ui.theme.toadInkBorder
 import com.toadfiles.app.domain.Format
 import com.toadfiles.app.domain.IS_LITE
 import com.toadfiles.app.ui.components.ApkInstallDialog
@@ -157,11 +159,24 @@ fun HomeScreen(
         // spacing, so nothing else changes shape in lite.
         if (!IS_LITE) item {
             val stats = state.storage
+            // Toadmark's hand-drawn ink border on the hero card — one pen stroke
+            // over the gradient, skipped entirely under Performance mode.
+            val toadmarkInk = LocalToadmarkInk.current
             Card(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 2.dp)
-                    .clickable { onOpenStorage() },
+                    .clickable { onOpenStorage() }
+                    .then(
+                        if (toadmarkInk) {
+                            Modifier.toadInkBorder(
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                seedSalt = 1,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,

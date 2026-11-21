@@ -4,6 +4,52 @@ All notable changes to toadFILES are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions are tagged `vX.Y.Z` and produce a signed release APK via CI.
 
+## [2.8.0] — 2026-11-21
+
+The Toadmark wave: the theme graduates from a palette to a signature look —
+hand-drawn ink borders and the mascot on the brand surfaces — plus an honest
+selection-size readout, and the two audit items that made "what's tested"
+unanswerable (coverage reports and the never-running on-device suite) become
+runnable mechanics.
+
+### Added
+- **Toadmark ink borders (theme)**: `ui/theme/ToadInk.kt` draws a hand-drawn,
+  slightly wobbly rectangle stroke — the toad family's sketchbook signature —
+  as a pure draw-phase effect (one cached `Path`, one stroke; cheaper than a
+  shadow). The wobble is seeded and deterministic (`java.util.Random`'s
+  specified LCG), so the border never shimmers between frames and screenshots
+  stay byte-stable. It frames the Home hero storage card and the About identity
+  card whenever the Toadmark theme is active, through a new
+  `LocalToadmarkInk` composition local. Performance mode keeps its
+  decoration-stripping contract: the ink is skipped entirely (and lite — where
+  performance mode is baked in — never draws it either).
+- **The mascot heads the About card**: `ToadFace` now sits beside the app name
+  in the identity block — the toad mark on the brand surface, tinted by the
+  active theme like every other brand vector.
+- **Selection sizes in the multi-select bars**: Browse, Categories and Recent
+  now read "N selected · 24.5 MB" instead of a bare count. The total is honest:
+  file sizes come from the already-loaded listing or MediaStore rows (no extra
+  IO, no re-query), and a selection that mixes in a folder stays quiet rather
+  than guessing — a folder's true size needs a tree walk the title bar must
+  never trigger. Pinned by `FormatTest`.
+- **Coverage reports in CI (audit A12, first half)**: AGP's built-in
+  unit-test coverage (Jacoco on the debug build type) produces and uploads a
+  full-flavor HTML coverage report on every Android CI run, so "what's
+  untested" is answerable mechanically instead of by hand.
+- **On-demand manual checks workflow (audit A10)**: a new
+  `Manual checks` workflow runs the never-executed on-device instrumented suite
+  (the real filesystem-semantics and zip-slip checks) on an API 34 emulator,
+  and records fresh README screenshots from the real Compose UI — both
+  `workflow_dispatch` only, so neither can paint a push or PR red. The release
+  checklist now says when to run them.
+
+### Tests
+- `ToadInkTest` pins the ink border's contracts: identical seeds draw identical
+  borders (no shimmer), jitter stays inside the wobble band, the anchors walk
+  the perimeter in the documented order, wobbled anchors stay inside the
+  surface, and the stroke path builds for every shape from slivers to wide
+  cards — including a short-jitter degradation case.
+
 ## [2.7.0] — 2026-11-17
 
 The launcher icon switch now asks to restart the app — and explains the one
